@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.env
+.idea/
+.vscode/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.editorconfig
+dist/
+build/
+*.egg-info/
+
+# Data / results
+data/raw/
+data/interim/
+data/processed/
+results/
+
+
