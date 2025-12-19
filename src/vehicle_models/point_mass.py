@@ -26,7 +26,7 @@ class PointMassModel(VehicleModel):
 
     def get_default_params(self) -> dict:
         return {
-            "L": 1.8,  # wheelbase (used only for reference; not in a_lat form)
+            "L": 1.8,  # wheelbase
             "mu": 1.2,
             "g": 9.81,
             "a_long_min": -6.0,
@@ -35,7 +35,7 @@ class PointMassModel(VehicleModel):
             "a_lat_max": 8.0,
             "v_min": 0.1,
             "v_max": 40.0,
-            "v_eps": 0.1,  # guard to avoid divide-by-zero in psi_err_dot
+            "v_eps": 0.1,  # guard to avoid / by 0
         }
 
     def get_state_names(self) -> List[str]:
@@ -48,8 +48,12 @@ class PointMassModel(VehicleModel):
         """
         x_dot = f(x, u, kappa)
         """
-        s, d, psi_err, v = states
-        a_long, a_lat = inputs
+        s = states[0]
+        d = states[1]
+        psi_err = states[2]
+        v = states[3]
+        a_long = inputs[0]
+        a_lat = inputs[1]
         kappa = curvature
 
         denom = (1 - kappa * d)
@@ -73,8 +77,9 @@ class PointMassModel(VehicleModel):
           friction circle: (a_long/(mu*g))^2 + (a_lat/(mu*g))^2 - 1 <= 0
           speed bounds as soft/path constraints: v - v_max <=0, v_min - v <=0
         """
-        a_long, a_lat = inputs
-        _, _, _, v = states
+        a_long = inputs[0]
+        a_lat = inputs[1]
+        v = states[3]
 
         p = self.params
         mu_g = p["mu"] * p["g"]
