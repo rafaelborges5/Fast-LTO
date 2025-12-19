@@ -27,12 +27,12 @@ class PointMassModel(VehicleModel):
     def get_default_params(self) -> dict:
         return {
             "L": 1.8,  # wheelbase
-            "mu": 1.2,
+            "mu": 0.9,
             "g": 9.81,
-            "a_long_min": -6.0,
-            "a_long_max": 4.0,
-            "a_lat_min": -8.0,
-            "a_lat_max": 8.0,
+            "a_long_min": -20.0,
+            "a_long_max": 20.0,
+            "a_lat_min": -7.0,
+            "a_lat_max": 7.0,
             "v_min": 0.1,
             "v_max": 40.0,
             "v_eps": 0.1,  # guard to avoid / by 0

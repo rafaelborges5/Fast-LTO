@@ -13,9 +13,11 @@ if __name__ == "__main__":
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from vehicle_models import PointMassModel
+    from utils.track_bounds import load_boundaries
 else:
     # Imported as module
     from vehicle_models import PointMassModel
+    from utils.track_bounds import load_boundaries
 
 
 def load_track_with_widths(path: Path) -> Dict:
@@ -102,7 +104,8 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-3):
         s_dot = x_dot_full[0]
         total_time += ds / (s_dot + eps)
 
-    # Objective: minimize time + small input regularization
+    # Objective: maximize average speed (equiv. minimize negative average v)
+    avg_speed = ca.sum1(X[:, 2]) / N
     obj = total_time + reg_u * ca.sumsqr(U)
     opti.minimize(obj)
 
@@ -139,6 +142,8 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-3):
 def _demo() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     track_path = repo_root / "data" / "discretized" / "ellipse_with_widths.json"
+    cones_csv = repo_root / "data" / "tracks" / "ellipse.csv"
+    solution_out = repo_root / "data" / "solutions" / "ellipse_point_mass.json"
     track = load_track_with_widths(track_path)
 
     model = PointMassModel()
@@ -159,6 +164,33 @@ def _demo() -> None:
     obj_val = float(sol.value(obj))
     print(f"Solved full-lap OCP. Objective (approx lap time): {obj_val:.2f} s")
     print(f"v min/max: {X_sol[:,2].min():.2f} / {X_sol[:,2].max():.2f} m/s")
+
+    # Build XY path from centerline + lateral offsets
+    positions = np.array(track["positions"], dtype=np.float64)
+    headings = np.array(track["headings"], dtype=np.float64)
+    normals = np.column_stack((-np.sin(headings), np.cos(headings)))
+    d = X_sol[:, 0]
+    path_xy = positions + d[:, None] * normals
+
+    solution_out.parent.mkdir(parents=True, exist_ok=True)
+    sol_dict = {
+        "path_xy": path_xy.tolist(),
+        "d": X_sol[:, 0].tolist(),
+        "psi_err": X_sol[:, 1].tolist(),
+        "v": X_sol[:, 2].tolist(),
+        "a_long": U_sol[:, 0].tolist(),
+        "a_lat": U_sol[:, 1].tolist(),
+        "obj_val": obj_val,
+        "arc_lengths": track["arc_lengths"],
+        "w_left": track["w_left"],
+        "w_right": track["w_right"],
+        "kappa": track["curvatures"],
+        "headings": track["headings"],
+        "model_params": model.params,
+    }
+    with solution_out.open("w") as f:
+        json.dump(sol_dict, f, indent=2)
+    print(f"Saved solution to {solution_out}")
 
 
 if __name__ == "__main__":

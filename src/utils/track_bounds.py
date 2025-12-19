@@ -25,15 +25,14 @@ from typing import Dict, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-if __name__ == "__main__":
-    # Running as script - absolute import
+try:
+    from ..splines.discretized_track import DiscretizedTrack  # type: ignore
+except ImportError:
+    # Fallback for script-style imports when package context is missing
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from splines.discretized_track import DiscretizedTrack
-else:
-    # Imported as module
-    from ..splines.discretized_track import DiscretizedTrack
+    from splines.discretized_track import DiscretizedTrack  # type: ignore
 
 
 @dataclass
