@@ -29,10 +29,10 @@ class PointMassModel(VehicleModel):
             "L": 1.8,  # wheelbase
             "mu": 0.9,
             "g": 9.81,
-            "a_long_min": -20.0,
-            "a_long_max": 20.0,
-            "a_lat_min": -7.0,
-            "a_lat_max": 7.0,
+            "a_long_min": -15.0,
+            "a_long_max": 15.0,
+            "a_lat_min": -9.0,
+            "a_lat_max": 9.0,
             "v_min": 0.1,
             "v_max": 40.0,
             "v_eps": 0.1,  # guard to avoid / by 0
@@ -60,10 +60,10 @@ class PointMassModel(VehicleModel):
         # Avoid divide-by-zero in psi_err_dot when v is near zero.
         v_safe = ca.fmax(v, self.params["v_eps"])
 
-        s_dot = v * ca.cos(psi_err) / denom
-        d_dot = v * ca.sin(psi_err)
-        psi_err_dot = a_lat / v_safe - kappa * s_dot
-        v_dot = a_long
+        s_dot = v * ca.cos(psi_err) / denom  # ds/dt
+        d_dot = v * ca.sin(psi_err)  # dd/dt
+        psi_err_dot = a_lat / v_safe - kappa * s_dot  #d(psi_err)/dt
+        v_dot = a_long  # dv/dt
 
         return ca.vertcat(s_dot, d_dot, psi_err_dot, v_dot)
 
