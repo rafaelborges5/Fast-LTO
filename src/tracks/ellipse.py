@@ -37,13 +37,12 @@ BoundaryName = Literal["left", "middle", "right"]
 
 @dataclass
 class EllipseTrackConfig:
-    target_midline_length_m: float = 75.0
-    track_width_m: float = 3.5
-    nominal_spacing_m: float = 4.0
-    aspect_ratio: float = 0.6
-    integration_points: int = 5000
-    # Rotate ellipse so that its long direction roughly aligns with +y.
-    rotation_rad: float = np.pi / 2.0
+    target_midline_length_m: float = 75.0  # desired midline length after scaling (m)
+    track_width_m: float = 3.5  # cone-to-cone width; widen to loosen the optimal line (m)
+    nominal_spacing_m: float = 4.0  # target point spacing along midline for discretisation (m)
+    aspect_ratio: float = 0.6  # a/b ratio (<1 squashes in x, >1 stretches in x)
+    integration_points: int = 5000  # resolution for arc-length integration; higher = smoother, slower
+    rotation_rad: float = np.pi / 2.0  # pre-rotation so the long axis roughly aligns with +y (rad)
 
 
 def _ellipse_xy(
