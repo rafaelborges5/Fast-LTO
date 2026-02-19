@@ -8,14 +8,12 @@ import casadi as ca
 import numpy as np
 
 if __name__ == "__main__":
-    # Running as script - add repo/src to path
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from vehicle_models import PointMassModel
     from utils.track_bounds import load_boundaries
 else:
-    # Imported as module
     from vehicle_models import PointMassModel
     from utils.track_bounds import load_boundaries
 
@@ -27,24 +25,34 @@ def load_track_with_widths(path: Path) -> Dict:
 
 def build_space_dynamics(model: PointMassModel):
     """
-    Return a function for x_{i+1} = x_i + ds * x'_i (space-domain Euler).
+    Return a function for x_{i+1} = x_i + ds * x_i' (dx/ds) (space-domain Euler).
     States: [d, psi_err, v]
     Inputs: [a_long, a_lat]
+
+    Note: model.get_dynamics returns TIME derivatives (dx/dt).
+    For space-domain integration we need SPACE derivatives (dx/ds).
+    Using the chain rule: dx/ds = (dx/dt) / (ds/dt) = x_dot / s_dot
     """
     def step(x_i: ca.MX, u_i: ca.MX, kappa_i: ca.MX, ds: float):
-        # Rebuild full state with s dummy (not used explicitly in reduced state)
         full_state = ca.vertcat(ca.MX(0), x_i[0], x_i[1], x_i[2])
         x_dot = model.get_dynamics(full_state, u_i, kappa_i)
-        # Extract derivatives of [d, psi_err, v] (indices 1,2,3 in full state)
+
+        s_dot = x_dot[0]
+
         d_dot = x_dot[1]
         pe_dot = x_dot[2]
         v_dot = x_dot[3]
-        return x_i + ds * ca.vertcat(d_dot, pe_dot, v_dot), x_dot, full_state
+
+        d_prime = d_dot / s_dot
+        pe_prime = pe_dot / s_dot
+        v_prime = v_dot / s_dot
+
+        return x_i + ds * ca.vertcat(d_prime, pe_prime, v_prime), x_dot, full_state
 
     return step
 
 
-def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-3):
+def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-4):
     """
     Build a space-domain OCP over the full lap.
     """
@@ -104,6 +112,13 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-3):
         s_dot = x_dot_full[0]
         total_time += ds / (s_dot + eps)
 
+    # Enforce box constraints at the final state as well.
+    opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
+    opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
+
+    # Loop closure: last state equals first state (periodic lap).
+    opti.subject_to(X[N - 1, :].T == X[0, :].T)
+
     # Objective: maximize average speed (equiv. minimize negative average v)
     avg_speed = ca.sum1(X[:, 2]) / N
     obj = total_time + reg_u * ca.sumsqr(U)
@@ -141,9 +156,9 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-3):
 
 def _demo() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    track_path = repo_root / "data" / "discretized" / "ellipse_with_widths.json"
-    cones_csv = repo_root / "data" / "tracks" / "ellipse.csv"
-    solution_out = repo_root / "data" / "solutions" / "ellipse_point_mass.json"
+    track_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
+    cones_csv = repo_root / "data" / "tracks" / "fsg_random.csv"
+    solution_out = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
     track = load_track_with_widths(track_path)
 
     model = PointMassModel()
