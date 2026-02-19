@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict
+from typing import Callable, Dict, Tuple
 
 import casadi as ca
 import numpy as np
@@ -11,11 +11,13 @@ if __name__ == "__main__":
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from vehicle_models import PointMassModel
+    from vehicle_models import VehicleModel, PointMassModel
     from utils.track_bounds import load_boundaries
+    from optimization.integrators import SpaceIntegrator, EulerIntegrator, RK4Integrator
 else:
-    from vehicle_models import PointMassModel
+    from vehicle_models import VehicleModel, PointMassModel
     from utils.track_bounds import load_boundaries
+    from optimization.integrators import SpaceIntegrator, EulerIntegrator, RK4Integrator
 
 
 def load_track_with_widths(path: Path) -> Dict:
@@ -23,41 +25,62 @@ def load_track_with_widths(path: Path) -> Dict:
         return json.load(f)
 
 
-def build_space_dynamics(model: PointMassModel):
+def build_space_dynamics(
+    model: VehicleModel,
+) -> Tuple[Callable, Callable]:
     """
-    Return a function for x_{i+1} = x_i + ds * x_i' (dx/ds) (space-domain Euler).
-    States: [d, psi_err, v]
-    Inputs: [a_long, a_lat]
+    Build the space-domain dynamics from any VehicleModel.
 
-    Note: model.get_dynamics returns TIME derivatives (dx/dt).
-    For space-domain integration we need SPACE derivatives (dx/ds).
-    Using the chain rule: dx/ds = (dx/dt) / (ds/dt) = x_dot / s_dot
+    Convention: state[0] = s (progress) is removed; the reduced state is
+    state[1:].  Space derivatives are obtained via  dx/ds = (dx/dt) / (ds/dt).
+
+    Returns
+    -------
+    f_space : callable(x_reduced, u, kappa) -> ca.MX
+        Space-domain RHS:  dx_reduced / ds.
+    eval_at_point : callable(x_reduced, u, kappa) -> (full_state, s_dot)
+        Reconstruct the full state (with s=0) and compute s_dot = ds/dt.
     """
-    def step(x_i: ca.MX, u_i: ca.MX, kappa_i: ca.MX, ds: float):
-        full_state = ca.vertcat(ca.MX(0), x_i[0], x_i[1], x_i[2])
-        x_dot = model.get_dynamics(full_state, u_i, kappa_i)
 
+    def f_space(x_reduced: ca.MX, u: ca.MX, kappa: ca.MX) -> ca.MX:
+        full_state = ca.vertcat(ca.MX(0), x_reduced)
+        x_dot = model.get_dynamics(full_state, u, kappa)
         s_dot = x_dot[0]
+        return x_dot[1:] / s_dot
 
-        d_dot = x_dot[1]
-        pe_dot = x_dot[2]
-        v_dot = x_dot[3]
+    def eval_at_point(
+        x_reduced: ca.MX, u: ca.MX, kappa: ca.MX
+    ) -> Tuple[ca.MX, ca.MX]:
+        full_state = ca.vertcat(ca.MX(0), x_reduced)
+        x_dot = model.get_dynamics(full_state, u, kappa)
+        return full_state, x_dot[0]  # (full_state, s_dot)
 
-        d_prime = d_dot / s_dot
-        pe_prime = pe_dot / s_dot
-        v_prime = v_dot / s_dot
-
-        return x_i + ds * ca.vertcat(d_prime, pe_prime, v_prime), x_dot, full_state
-
-    return step
+    return f_space, eval_at_point
 
 
-def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-4):
+def build_ocp(
+    track: Dict,
+    model: VehicleModel,
+    integrator: SpaceIntegrator | None = None,
+    reg_u: float = 1e-4,
+):
     """
     Build a space-domain OCP over the full lap.
+
+    Parameters
+    ----------
+    track : dict
+        Discretized track data (positions, headings, curvatures, widths, …).
+    model : VehicleModel
+        Any vehicle model following the state convention [s, d, ...].
+    integrator : SpaceIntegrator, optional
+        Spatial integration scheme.  Defaults to ``EulerIntegrator()``.
+    reg_u : float
+        Input regularisation weight in the objective.
     """
-    positions = np.array(track["positions"], dtype=np.float64)
-    headings = np.array(track["headings"], dtype=np.float64)
+    if integrator is None:
+        integrator = EulerIntegrator()
+
     curv = np.array(track["curvatures"], dtype=np.float64)
     arc_lengths = np.array(track["arc_lengths"], dtype=np.float64)
     w_left = np.array(track["w_left"], dtype=np.float64)
@@ -65,15 +88,14 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-4):
     ds = float(track["ds_m"])
     N = len(arc_lengths)
 
-    opti = ca.Opti()
+    nx = model.nx_reduced  # reduced state (no s)
+    nu = model.nu
 
-    nx = 3  # d, psi_err, v
-    nu = 2  # a_long, a_lat
+    opti = ca.Opti()
 
     X = opti.variable(N, nx)
     U = opti.variable(N, nu)
 
-    # Parameters
     kappa_param = opti.parameter(N)
     w_left_param = opti.parameter(N)
     w_right_param = opti.parameter(N)
@@ -83,11 +105,9 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-4):
     opti.set_value(w_left_param, w_left)
     opti.set_value(w_right_param, w_right)
 
-    # Initial condition
     opti.subject_to(X[0, :] == x0_param.T)
 
-    # Dynamics and constraints
-    step = build_space_dynamics(model)
+    f_space, eval_at_point = build_space_dynamics(model)
     total_time = 0
     eps = 1e-3
 
@@ -95,52 +115,41 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-4):
         x_i = X[i, :].T
         u_i = U[i, :].T
         kappa_i = kappa_param[i]
-        x_next, x_dot_full, full_state = step(x_i, u_i, kappa_i, ds)
+
+        x_next = integrator.step(f_space, x_i, u_i, kappa_i, ds)
         opti.subject_to(X[i + 1, :].T == x_next)
 
-        # Model constraints g <= 0
+        full_state, s_dot = eval_at_point(x_i, u_i, kappa_i)
         g_list = model.get_constraints(full_state, u_i)
         for g in g_list:
             opti.subject_to(g <= 0)
 
-        # Track width bounds
         opti.subject_to(-w_right_param[i] <= x_i[0])
         opti.subject_to(x_i[0] <= w_left_param[i])
 
-        # Time increment
-        # Recompute s_dot: x_dot_full[0] is s_dot from full state dynamics
-        s_dot = x_dot_full[0]
         total_time += ds / (s_dot + eps)
 
-    # Enforce box constraints at the final state as well.
     opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
     opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
 
-    # Loop closure: last state equals first state (periodic lap).
     opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
-    # Objective: maximize average speed (equiv. minimize negative average v)
-    avg_speed = ca.sum1(X[:, 2]) / N
+    # minimise lap time + input regularisation
     obj = total_time + reg_u * ca.sumsqr(U)
     opti.minimize(obj)
 
-    # Bounds from model helpers if provided
-    state_bounds = model.state_bounds()
-    if state_bounds is not None:
-        lbx_full, ubx_full = state_bounds  # full-state bounds [s,d,psi_err,v]
-        # Reduced state here is [d, psi_err, v] (indices 1,2,3)
-        lbx = [lbx_full[1], lbx_full[2], lbx_full[3]]
-        ubx = [ubx_full[1], ubx_full[2], ubx_full[3]]
+    reduced_bounds = model.reduced_state_bounds()
+    if reduced_bounds is not None:
+        lbx, ubx = reduced_bounds
         for j in range(nx):
             opti.subject_to(opti.bounded(lbx[j], X[:, j], ubx[j]))
 
     input_bounds = model.input_bounds()
     if input_bounds is not None:
-        lbu, ubu = input_bounds  # inputs [a_long, a_lat]
+        lbu, ubu = input_bounds
         for j in range(nu):
             opti.subject_to(opti.bounded(lbu[j], U[:, j], ubu[j]))
 
-    # IPOPT settings
     opti.solver(
         "ipopt",
         {
@@ -151,51 +160,57 @@ def build_ocp(track: Dict, model: PointMassModel, reg_u: float = 1e-4):
         {},
     )
 
-    return opti, X, U, {"kappa": kappa_param, "w_left": w_left_param, "w_right": w_right_param, "x0": x0_param}, obj
+    return (
+        opti,
+        X,
+        U,
+        {"kappa": kappa_param, "w_left": w_left_param, "w_right": w_right_param, "x0": x0_param},
+        obj,
+    )
 
 
 def _demo() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     track_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
-    cones_csv = repo_root / "data" / "tracks" / "fsg_random.csv"
     solution_out = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
     track = load_track_with_widths(track_path)
 
     model = PointMassModel()
-    opti, X, U, params, obj = build_ocp(track, model)
+    opti, X, U, params, obj = build_ocp(track, model, integrator=EulerIntegrator())
 
-    # Simple initialization
+    reduced_names = model.reduced_state_names()
     N = len(track["arc_lengths"])
-    x0 = np.array([0.0, 0.0, 5.0])  # d, psi_err, v
+    x0 = np.zeros(model.nx_reduced)
+    v_idx = reduced_names.index("v")
+    x0[v_idx] = 5.0  # initial speed guess
+
     opti.set_value(params["x0"], x0)
     opti.set_initial(X, 0)
     opti.set_initial(U, 0)
-    opti.set_initial(X[:, 2], 5.0)
+    opti.set_initial(X[:, v_idx], 5.0)
 
     sol = opti.solve()
 
     X_sol = np.array(sol.value(X))
     U_sol = np.array(sol.value(U))
     obj_val = float(sol.value(obj))
-    print(f"Solved full-lap OCP. Objective (approx lap time): {obj_val:.2f} s")
-    print(f"v min/max: {X_sol[:,2].min():.2f} / {X_sol[:,2].max():.2f} m/s")
 
-    # Build XY path from centerline + lateral offsets
+    print(f"Solved full-lap OCP.  Objective (approx lap time): {obj_val:.2f} s")
+    print(f"v min/max: {X_sol[:, v_idx].min():.2f} / {X_sol[:, v_idx].max():.2f} m/s")
+
     positions = np.array(track["positions"], dtype=np.float64)
     headings = np.array(track["headings"], dtype=np.float64)
     normals = np.column_stack((-np.sin(headings), np.cos(headings)))
     d = X_sol[:, 0]
     path_xy = positions + d[:, None] * normals
 
-    solution_out.parent.mkdir(parents=True, exist_ok=True)
+    input_names = model.get_input_names()
+
     sol_dict = {
         "path_xy": path_xy.tolist(),
-        "d": X_sol[:, 0].tolist(),
-        "psi_err": X_sol[:, 1].tolist(),
-        "v": X_sol[:, 2].tolist(),
-        "a_long": U_sol[:, 0].tolist(),
-        "a_lat": U_sol[:, 1].tolist(),
         "obj_val": obj_val,
+        "state_names": reduced_names,
+        "input_names": input_names,
         "arc_lengths": track["arc_lengths"],
         "w_left": track["w_left"],
         "w_right": track["w_right"],
@@ -203,6 +218,12 @@ def _demo() -> None:
         "headings": track["headings"],
         "model_params": model.params,
     }
+    for j, name in enumerate(reduced_names):
+        sol_dict[name] = X_sol[:, j].tolist()
+    for j, name in enumerate(input_names):
+        sol_dict[name] = U_sol[:, j].tolist()
+
+    solution_out.parent.mkdir(parents=True, exist_ok=True)
     with solution_out.open("w") as f:
         json.dump(sol_dict, f, indent=2)
     print(f"Saved solution to {solution_out}")
@@ -210,4 +231,3 @@ def _demo() -> None:
 
 if __name__ == "__main__":
     _demo()
-
