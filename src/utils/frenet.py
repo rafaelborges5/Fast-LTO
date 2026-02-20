@@ -14,10 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import LineCollection
 
 if __name__ == "__main__":
     import sys
@@ -233,26 +234,305 @@ class TrackProcessor:
             plt.show()
         plt.close(fig)
 
+    def visualize_frenet_singularities(
+        self,
+        w_left: Optional[np.ndarray] = None,
+        w_right: Optional[np.ndarray] = None,
+        left_boundary: Optional[np.ndarray] = None,
+        right_boundary: Optional[np.ndarray] = None,
+        normal_length_m: float = 3.0,
+        every: int = 5,
+        singularity_threshold: float = 0.4,
+        show: bool = True,
+        out_path: Optional[Path] = None,
+    ) -> None:
+        """
+        Visualize Frenet geometry with normal lines and track bounds, highlighting singularities.
+
+        Parameters
+        ----------
+        w_left : np.ndarray | None
+            Left half-widths at each sample point (positive along +normal).
+            If None, uses nominal_half_width if available.
+        w_right : np.ndarray | None
+            Right half-widths at each sample point (positive along -normal).
+            If None, uses nominal_half_width if available.
+        left_boundary : np.ndarray | None
+            (N, 2) array of left boundary points. If provided, plots the boundary.
+        right_boundary : np.ndarray | None
+            (N, 2) array of right boundary points. If provided, plots the boundary.
+        normal_length_m : float
+            Length of normal lines in meters on each side of centerline (default: 3.0).
+        every : int
+            Plot every N-th normal line to avoid clutter (default: 5).
+        singularity_threshold : float
+            Threshold for singularity detection: min(width) / radius_of_curvature.
+            Values above this indicate potential Frenet singularities (default: 0.4).
+        show : bool
+            Whether to display the plot in a window.
+        out_path : Path | None
+            If provided, save the figure to this path.
+        """
+        fig, ax = plt.subplots(figsize=(12, 10))
+
+        centerline_closed = np.vstack([self.positions, self.positions[0]])
+        ax.plot(
+            centerline_closed[:, 0],
+            centerline_closed[:, 1],
+            label="centerline",
+            color="tab:blue",
+            linewidth=2.0,
+        )
+
+        if left_boundary is not None:
+            left_closed = np.vstack([left_boundary, left_boundary[0]])
+            ax.plot(
+                left_closed[:, 0],
+                left_closed[:, 1],
+                label="left boundary",
+                color="tab:gray",
+                linewidth=1.5,
+                linestyle="--",
+            )
+        if right_boundary is not None:
+            right_closed = np.vstack([right_boundary, right_boundary[0]])
+            ax.plot(
+                right_closed[:, 0],
+                right_closed[:, 1],
+                label="right boundary",
+                color="tab:gray",
+                linewidth=1.5,
+                linestyle="--",
+            )
+
+        if w_left is None:
+            w_left = (
+                np.full(self.n, self.nominal_half_width)
+                if self.nominal_half_width is not None
+                else np.full(self.n, normal_length_m)
+            )
+        if w_right is None:
+            w_right = (
+                np.full(self.n, self.nominal_half_width)
+                if self.nominal_half_width is not None
+                else np.full(self.n, normal_length_m)
+            )
+
+        # Detect singularities: where min(width) / radius_of_curvature > threshold
+        # Radius of curvature R = 1 / |kappa| (for kappa != 0)
+        abs_kappa = np.abs(self.curvatures)
+        radius = np.where(abs_kappa > 1e-9, 1.0 / abs_kappa, np.inf)
+        min_width = np.minimum(w_left, w_right)
+        singularity_ratio = np.where(radius < np.inf, min_width / radius, 0.0)
+        is_singular = singularity_ratio > singularity_threshold
+
+        stride_indices = np.arange(0, self.n, every)
+        normal_lines_regular = []
+        normal_lines_singular = []
+
+        for i in stride_indices:
+            p = self.positions[i]
+            n_hat = self.normals[i]
+
+            p_left = p + normal_length_m * n_hat
+            p_right = p - normal_length_m * n_hat
+
+            line = np.array([[p_left[0], p_left[1]], [p_right[0], p_right[1]]])
+
+            if is_singular[i]:
+                normal_lines_singular.append(line)
+            else:
+                normal_lines_regular.append(line)
+
+        if normal_lines_regular:
+            lc_regular = LineCollection(
+                normal_lines_regular, colors="tab:red", linewidths=1.0, alpha=0.6
+            )
+            ax.add_collection(lc_regular)
+
+        if normal_lines_singular:
+            lc_singular = LineCollection(
+                normal_lines_singular,
+                colors="tab:purple",
+                linewidths=2.5,
+                alpha=0.9,
+                label=f"near-singular (ratio > {singularity_threshold:.2f})",
+            )
+            ax.add_collection(lc_singular)
+
+        singular_indices = stride_indices[is_singular[stride_indices]]
+        if len(singular_indices) > 0:
+            ax.scatter(
+                self.positions[singular_indices, 0],
+                self.positions[singular_indices, 1],
+                color="tab:purple",
+                s=50,
+                marker="o",
+                edgecolors="black",
+                linewidths=1.0,
+                zorder=10,
+                label=f"singular points ({len(singular_indices)} shown)",
+            )
+
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_title(
+            f"Frenet geometry check with singularities\n"
+            f"Normal lines: ±{normal_length_m}m | "
+            f"Singularity threshold: {singularity_threshold:.2f}"
+        )
+        ax.legend(loc="upper left", fontsize=9)
+        ax.grid(True, linestyle="--", alpha=0.3)
+
+        num_singular = np.sum(is_singular)
+        if num_singular > 0:
+            max_ratio = np.max(singularity_ratio)
+            print(
+                f"Frenet singularity detection: {num_singular}/{self.n} points "
+                f"({100*num_singular/self.n:.1f}%) flagged as near-singular"
+            )
+            print(f"  Max singularity ratio: {max_ratio:.3f}")
+            print(f"  Threshold: {singularity_threshold:.2f}")
+
+        if out_path is not None:
+            out_path = Path(out_path)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(out_path, dpi=200, bbox_inches="tight")
+        if show:
+            plt.show()
+        plt.close(fig)
+
+
+def debug_frenet_singularities(
+    track: DiscretizedTrack,
+    w_left: Optional[np.ndarray] = None,
+    w_right: Optional[np.ndarray] = None,
+    left_boundary: Optional[np.ndarray] = None,
+    right_boundary: Optional[np.ndarray] = None,
+    normal_length_m: float = 3.0,
+    every: int = 5,
+    singularity_threshold: float = 0.4,
+    show: bool = True,
+    out_path: Optional[Path] = None,
+) -> None:
+    """
+    Convenience function to visualize Frenet singularities for a DiscretizedTrack.
+
+    Parameters
+    ----------
+    track : DiscretizedTrack
+        The discretized track to visualize.
+    w_left : np.ndarray | None
+        Left half-widths at each sample point.
+    w_right : np.ndarray | None
+        Right half-widths at each sample point.
+    left_boundary : np.ndarray | None
+        Left boundary polyline.
+    right_boundary : np.ndarray | None
+        Right boundary polyline.
+    normal_length_m : float
+        Length of normal lines in meters on each side (default: 3.0).
+    every : int
+        Plot every N-th normal line (default: 5).
+    singularity_threshold : float
+        Singularity detection threshold (default: 0.4).
+    show : bool
+        Whether to display the plot.
+    out_path : Path | None
+        Optional path to save the figure.
+    """
+    processor = TrackProcessor(track)
+    processor.visualize_frenet_singularities(
+        w_left=w_left,
+        w_right=w_right,
+        left_boundary=left_boundary,
+        right_boundary=right_boundary,
+        normal_length_m=normal_length_m,
+        every=every,
+        singularity_threshold=singularity_threshold,
+        show=show,
+        out_path=out_path,
+    )
+
 
 def _demo() -> None:
-    """Minimal runnable example for geometry visualization."""
+    import json
+    import sys
+
     repo_root = Path(__file__).resolve().parents[2]
-    track_path = repo_root / "data" / "discretized" / "ellipse.json"
-    track = DiscretizedTrack.load(track_path)
 
-    processor = TrackProcessor(track, nominal_half_width=1.5)
-    print(f"Loaded track: {track}")
+    track_with_widths_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
+    csv_path = repo_root / "data" / "tracks" / "fsg_random.csv"
 
-    # Example projection near start line
-    sample_xy = np.array([0.5, 0.2])
+    track = None
+    w_left = None
+    w_right = None
+    left_boundary = None
+    right_boundary = None
+
+    try:
+        from ..utils.track_bounds import load_boundaries, compute_lateral_bounds
+        from ..tracks.fsg_trackdrive import generate_fsg_track
+        from ..splines.spline_fitter import fit_and_discretize
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from utils.track_bounds import load_boundaries, compute_lateral_bounds
+        from tracks.fsg_trackdrive import generate_fsg_track
+        from splines.spline_fitter import fit_and_discretize
+
+    if track_with_widths_path.exists():
+        print(f"Loading track with widths from {track_with_widths_path}")
+        with track_with_widths_path.open("r") as f:
+            track_data = json.load(f)
+        track = DiscretizedTrack.from_dict(track_data)
+        w_left = np.array(track_data.get("w_left", []), dtype=np.float64)
+        w_right = np.array(track_data.get("w_right", []), dtype=np.float64)
+        print(f"Loaded track: {track}")
+        print(f"  Widths: w_left shape={w_left.shape}, w_right shape={w_right.shape}")
+
+        if csv_path.exists():
+            try:
+                boundaries = load_boundaries(csv_path)
+                left_boundary = boundaries.get("left")
+                right_boundary = boundaries.get("right")
+                print(f"  Loaded boundaries from CSV")
+            except Exception as e:
+                print(f"  Could not load boundaries: {e}")
+    else:
+        print(f"Track with widths not found, generating new FSG track...")
+
+        csv_path = repo_root / "data" / "tracks" / "fsg_random_demo.csv"
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        boundaries = generate_fsg_track(output_csv=csv_path)
+        left_boundary = boundaries["left"]
+        right_boundary = boundaries["right"]
+
+        track = fit_and_discretize(csv_path, ds_m=4.0, continuity="C2")
+        print(f"Generated track: {track}")
+
+        result = compute_lateral_bounds(track, left=left_boundary, right=right_boundary)
+        w_left = result.w_left
+        w_right = result.w_right
+        print(f"Computed widths: misses left/right: {result.misses_left}/{result.misses_right}")
+
+    processor = TrackProcessor(track)
+    sample_xy = track.positions[10] + 0.5 * processor.normals[10]
     proj = processor.project_xy_to_frenet(sample_xy)
     print(
-        f"Projection -> s={proj.s:.2f} m, d={proj.d:.2f} m, "
+        f"\nExample projection -> s={proj.s:.2f} m, d={proj.d:.2f} m, "
         f"kappa={proj.kappa_s:.4f} 1/m, residual={proj.residual:.3f} m"
     )
 
-    # Plot geometry
-    processor.geometry_check_plot(every=5, normal_scale=6.0, tangent_scale=0.5, show=True)
+    print("\nVisualizing Frenet geometry with singularity detection...")
+    processor.visualize_frenet_singularities(
+        w_left=w_left,
+        w_right=w_right,
+        left_boundary=left_boundary,
+        right_boundary=right_boundary,
+        normal_length_m=6.0,
+        every=1,
+        singularity_threshold=0.4,
+        show=True,
+    )
 
 
 if __name__ == "__main__":
