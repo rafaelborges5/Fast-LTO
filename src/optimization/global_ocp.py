@@ -169,25 +169,52 @@ def build_ocp(
     )
 
 
-def _demo() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    track_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
-    solution_out = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
-    track = load_track_with_widths(track_path)
+def solve_ocp_and_save(
+    track: Dict,
+    model: VehicleModel,
+    solution_path: Path,
+    integrator: SpaceIntegrator | None = None,
+    initial_speed: float = 5.0,
+    reg_u: float = 1e-4,
+) -> Dict:
+    """
+    Build and solve OCP, then save solution to JSON.
 
-    model = PointMassModel()
-    opti, X, U, params, obj = build_ocp(track, model, integrator=EulerIntegrator())
+    Parameters
+    ----------
+    track : dict
+        Track data with widths (from load_track_with_widths).
+    model : VehicleModel
+        Vehicle model instance.
+    solution_path : Path
+        Path to save solution JSON.
+    integrator : SpaceIntegrator, optional
+        Spatial integrator. Defaults to EulerIntegrator().
+    initial_speed : float
+        Initial speed guess (m/s). Default: 5.0.
+    reg_u : float
+        Input regularization weight. Default: 1e-4.
+
+    Returns
+    -------
+    dict
+        Solution dictionary (same as saved JSON).
+    """
+    if integrator is None:
+        integrator = EulerIntegrator()
+
+    opti, X, U, params, obj = build_ocp(track, model, integrator=integrator, reg_u=reg_u)
 
     reduced_names = model.reduced_state_names()
     N = len(track["arc_lengths"])
     x0 = np.zeros(model.nx_reduced)
     v_idx = reduced_names.index("v")
-    x0[v_idx] = 5.0  # initial speed guess
+    x0[v_idx] = initial_speed
 
     opti.set_value(params["x0"], x0)
     opti.set_initial(X, 0)
     opti.set_initial(U, 0)
-    opti.set_initial(X[:, v_idx], 5.0)
+    opti.set_initial(X[:, v_idx], initial_speed)
 
     sol = opti.solve()
 
@@ -223,10 +250,29 @@ def _demo() -> None:
     for j, name in enumerate(input_names):
         sol_dict[name] = U_sol[:, j].tolist()
 
-    solution_out.parent.mkdir(parents=True, exist_ok=True)
-    with solution_out.open("w") as f:
+    solution_path.parent.mkdir(parents=True, exist_ok=True)
+    with solution_path.open("w") as f:
         json.dump(sol_dict, f, indent=2)
-    print(f"Saved solution to {solution_out}")
+    print(f"Saved solution to {solution_path}")
+
+    return sol_dict
+
+
+def _demo() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    track_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
+    solution_out = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
+    track = load_track_with_widths(track_path)
+
+    model = PointMassModel()
+    solve_ocp_and_save(
+        track=track,
+        model=model,
+        solution_path=solution_out,
+        integrator=EulerIntegrator(),
+        initial_speed=5.0,
+        reg_u=1e-4,
+    )
 
 
 if __name__ == "__main__":
