@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Callable, Dict, Tuple
 
@@ -164,8 +165,14 @@ def build_ocp(
         opti,
         X,
         U,
-        {"kappa": kappa_param, "w_left": w_left_param, "w_right": w_right_param, "x0": x0_param},
+        {
+            "kappa": kappa_param,
+            "w_left": w_left_param,
+            "w_right": w_right_param,
+            "x0": x0_param,
+        },
         obj,
+        total_time,
     )
 
 
@@ -176,6 +183,7 @@ def solve_ocp_and_save(
     integrator: SpaceIntegrator | None = None,
     initial_speed: float = 5.0,
     reg_u: float = 1e-4,
+    run_config: Dict | None = None,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -203,7 +211,9 @@ def solve_ocp_and_save(
     if integrator is None:
         integrator = EulerIntegrator()
 
-    opti, X, U, params, obj = build_ocp(track, model, integrator=integrator, reg_u=reg_u)
+    opti, X, U, params, obj, total_time_expr = build_ocp(
+        track, model, integrator=integrator, reg_u=reg_u
+    )
 
     reduced_names = model.reduced_state_names()
     N = len(track["arc_lengths"])
@@ -216,13 +226,38 @@ def solve_ocp_and_save(
     opti.set_initial(U, 0)
     opti.set_initial(X[:, v_idx], initial_speed)
 
+    start_time = time.perf_counter()
     sol = opti.solve()
+    solve_time_s = time.perf_counter() - start_time
+
+    stats = opti.stats()
+    iter_count = stats.get("iter_count")
+    return_status = stats.get("return_status")
 
     X_sol = np.array(sol.value(X))
     U_sol = np.array(sol.value(U))
     obj_val = float(sol.value(obj))
+    lap_time_s = float(sol.value(total_time_expr))
+    reg_term = obj_val - lap_time_s
 
-    print(f"Solved full-lap OCP.  Objective (approx lap time): {obj_val:.2f} s")
+    N = len(track["arc_lengths"])
+    ds_m = (
+        float(track.get("ds_m", track["arc_lengths"][1] - track["arc_lengths"][0]))
+        if N > 1
+        else float(track.get("ds_m", 0.0))
+    )
+    time_per_point_ms = solve_time_s / N * 1e3 if N > 0 else None
+    time_per_iter_ms = solve_time_s / iter_count * 1e3 if iter_count not in (None, 0) else None
+
+    print(f"Solved full-lap OCP.  Objective value: {obj_val:.2f}")
+    print(f"  Lap-time term: {lap_time_s:.2f} s")
+    print(f"  Regularisation term: {reg_term:.3f}")
+    print(
+        f"Solve stats: N={N}, ds={ds_m:.3f} m, "
+        f"time={solve_time_s:.3f} s, "
+        f"iters={iter_count if iter_count is not None else 'N/A'}, "
+        f"status={return_status}"
+    )
     print(f"v min/max: {X_sol[:, v_idx].min():.2f} / {X_sol[:, v_idx].max():.2f} m/s")
 
     positions = np.array(track["positions"], dtype=np.float64)
@@ -244,6 +279,19 @@ def solve_ocp_and_save(
         "kappa": track["curvatures"],
         "headings": track["headings"],
         "model_params": model.params,
+        "profiling": {
+            "N": N,
+            "ds_m": ds_m,
+            "solve_time_s": solve_time_s,
+            "iter_count": iter_count,
+            "return_status": return_status,
+            "time_per_point_ms": time_per_point_ms,
+            "time_per_iter_ms": time_per_iter_ms,
+            "lap_time_s": lap_time_s,
+            "reg_term": reg_term,
+            "reg_term_relative": reg_term / obj_val if obj_val != 0.0 else None,
+        },
+        "run_config": run_config,
     }
     for j, name in enumerate(reduced_names):
         sol_dict[name] = X_sol[:, j].tolist()
