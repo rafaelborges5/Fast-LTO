@@ -8,7 +8,7 @@ Run directly to plot the last saved solution (ellipse_point_mass.npz) if present
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import json
 from datetime import datetime
@@ -43,12 +43,18 @@ def plot_path_with_speed(
     cbar = plt.colorbar(sc, ax=ax, label="speed [m/s]")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, linestyle="--", alpha=0.4)
-    ax.legend()
+    # Place legend below the plot to avoid overlap with path or colorbar.
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.08),
+        ncol=3,
+        frameon=True,
+    )
     ax.set_title("Path vs cones (speed colored)")
     if out_path is not None:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=200)
+        fig.savefig(out_path, dpi=200, bbox_inches="tight")
     if show:
         plt.show()
     if fig is None:
@@ -181,6 +187,167 @@ def plot_inputs(
         plt.close("all")
 
 
+def _compute_constraint_activity(
+    d: np.ndarray,
+    w_left: np.ndarray,
+    w_right: np.ndarray,
+    a_long: np.ndarray,
+    a_lat: np.ndarray,
+    v: np.ndarray,
+    params: Dict,
+) -> Dict[str, float]:
+    """
+    Compute simple constraint activity metrics from a solved trajectory.
+
+    Fractions are in [0, 1] and indicate how often each constraint family
+    is (approximately) active along the lap.
+    """
+    n = d.shape[0]
+    if n == 0:
+        return {
+            "track_bounds_active": 0.0,
+            "friction_circle_active": 0.0,
+            "a_long_bounds_active": 0.0,
+            "a_lat_bounds_active": 0.0,
+            "v_bounds_active": 0.0,
+        }
+
+    # Tolerances (heuristic, not critical)
+    tol_d = 0.05  # [m]
+    tol_a = 0.5   # [m/s^2]
+    tol_fc = 0.05
+    tol_v = 0.5   # [m/s]
+
+    # Track bounds: near left or right limits
+    near_left = np.isfinite(w_left) & (np.abs(d - w_left) < tol_d)
+    near_right = np.isfinite(w_right) & (np.abs(d + w_right) < tol_d)
+    track_bounds_active = float(np.count_nonzero(near_left | near_right) / n)
+
+    # Friction circle
+    mu = params.get("mu", 1.2)
+    g_val = params.get("g", 9.81)
+    mu_g = mu * g_val
+    if mu_g > 0:
+        fc = (a_long / mu_g) ** 2 + (a_lat / mu_g) ** 2
+        friction_circle_active = float(np.count_nonzero(fc > 1.0 - tol_fc) / n)
+    else:
+        friction_circle_active = 0.0
+
+    # Acceleration box bounds
+    a_long_min = params.get("a_long_min", -np.inf)
+    a_long_max = params.get("a_long_max", np.inf)
+    a_lat_min = params.get("a_lat_min", -np.inf)
+    a_lat_max = params.get("a_lat_max", np.inf)
+
+    near_a_long_min = np.isfinite(a_long_min) & (np.abs(a_long - a_long_min) < tol_a)
+    near_a_long_max = np.isfinite(a_long_max) & (np.abs(a_long - a_long_max) < tol_a)
+    near_a_lat_min = np.isfinite(a_lat_min) & (np.abs(a_lat - a_lat_min) < tol_a)
+    near_a_lat_max = np.isfinite(a_lat_max) & (np.abs(a_lat - a_lat_max) < tol_a)
+
+    a_long_bounds_active = float(np.count_nonzero(near_a_long_min | near_a_long_max) / n)
+    a_lat_bounds_active = float(np.count_nonzero(near_a_lat_min | near_a_lat_max) / n)
+
+    # Speed bounds
+    v_min = params.get("v_min", -np.inf)
+    v_max = params.get("v_max", np.inf)
+    near_v_min = np.isfinite(v_min) & (np.abs(v - v_min) < tol_v)
+    near_v_max = np.isfinite(v_max) & (np.abs(v - v_max) < tol_v)
+    v_bounds_active = float(np.count_nonzero(near_v_min | near_v_max) / n)
+
+    return {
+        "track_bounds_active": track_bounds_active,
+        "friction_circle_active": friction_circle_active,
+        "a_long_bounds_active": a_long_bounds_active,
+        "a_lat_bounds_active": a_lat_bounds_active,
+        "v_bounds_active": v_bounds_active,
+    }
+
+
+def _plot_profiling_panel(
+    profiling: Optional[Dict],
+    constraint_activity: Optional[Dict[str, float]],
+    ax: plt.Axes,
+) -> None:
+    """Render a small profiling + constraint summary in a single panel."""
+    ax.axis("off")
+
+    if profiling is None:
+        ax.text(
+            0.0,
+            0.5,
+            "No profiling data available.",
+            transform=ax.transAxes,
+            fontsize=10,
+            va="center",
+        )
+        return
+
+    lines = []
+    N = profiling.get("N")
+    ds_m = profiling.get("ds_m")
+    solve_time_s = profiling.get("solve_time_s")
+    iter_count = profiling.get("iter_count")
+    return_status = profiling.get("return_status")
+    time_per_point_ms = profiling.get("time_per_point_ms")
+    time_per_iter_ms = profiling.get("time_per_iter_ms")
+    lap_time_s = profiling.get("lap_time_s")
+    reg_term = profiling.get("reg_term")
+    reg_term_rel = profiling.get("reg_term_relative")
+
+    lines.append("Solver profiling")
+    if N is not None and ds_m is not None:
+        lines.append(f"N = {N}, ds = {ds_m:.3f} m")
+    if solve_time_s is not None:
+        lines.append(f"Time = {solve_time_s:.3f} s")
+    if time_per_point_ms is not None:
+        lines.append(f"Time / point = {time_per_point_ms:.3f} ms")
+    if time_per_iter_ms is not None and iter_count not in (None, 0):
+        lines.append(f"Iterations = {iter_count}, time / iter = {time_per_iter_ms:.3f} ms")
+    elif iter_count is not None:
+        lines.append(f"Iterations = {iter_count}")
+    if return_status is not None:
+        lines.append(f"Status = {return_status}")
+
+    # Objective split
+    if lap_time_s is not None or reg_term is not None:
+        lines.append("")
+        lines.append("Objective split")
+        if lap_time_s is not None:
+            lines.append(f"Lap-time term = {lap_time_s:.3f} s")
+        if reg_term is not None:
+            if reg_term_rel not in (None, 0.0):
+                lines.append(f"Reg term = {reg_term:.4f} ({reg_term_rel:.2%} of obj)")
+            else:
+                lines.append(f"Reg term = {reg_term:.4f}")
+
+    lines.append("")  # spacer
+    lines.append("Constraint activity (fraction of lap):")
+
+    if constraint_activity is not None:
+        def pct(key: str) -> float:
+            val = constraint_activity.get(key)
+            return float(val * 100.0) if val is not None else 0.0
+
+        lines.append(f"Track bounds  ≈ {pct('track_bounds_active'):.1f}%")
+        lines.append(f"Friction circ ≈ {pct('friction_circle_active'):.1f}%")
+        lines.append(f"a_long bounds ≈ {pct('a_long_bounds_active'):.1f}%")
+        lines.append(f"a_lat bounds  ≈ {pct('a_lat_bounds_active'):.1f}%")
+        lines.append(f"Speed bounds  ≈ {pct('v_bounds_active'):.1f}%")
+    else:
+        lines.append("(no constraint activity data)")
+
+    text = "\n".join(lines)
+    ax.text(
+        0.0,
+        1.0,
+        text,
+        transform=ax.transAxes,
+        fontsize=9,
+        va="top",
+        family="monospace",
+    )
+
+
 def plot_all_panels(
     cones_left: np.ndarray,
     cones_right: np.ndarray,
@@ -193,6 +360,8 @@ def plot_all_panels(
     a_long: np.ndarray,
     a_lat: np.ndarray,
     mu_g: float,
+    profiling: Optional[Dict] = None,
+    constraint_activity: Optional[Dict[str, float]] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
@@ -214,7 +383,8 @@ def plot_all_panels(
     plot_gg(a_long, a_lat, mu_g, out_path=None, show=False, fig=fig, ax=axes[4])
     axes[4].set_title("GG diagram")
 
-    fig.delaxes(axes[5])
+    _plot_profiling_panel(profiling, constraint_activity, ax=axes[5])
+    axes[5].set_title("Profiling & activity")
     fig.tight_layout()
 
     if out_path is not None:
@@ -228,8 +398,8 @@ def plot_all_panels(
 
 def _demo() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    solution_path = repo_root / "data" / "solutions" / "ellipse_point_mass.json"
-    cones_csv = repo_root / "data" / "tracks" / "ellipse.csv"
+    solution_path = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
+    cones_csv = repo_root / "data" / "tracks" / "fsg_random.csv"
     timestamp_dir = repo_root / "ocp_plots" / datetime.now().strftime("%Y%m%d-%H%M%S")
     if not solution_path.exists():
         print(f"Solution not found at {solution_path}, run global_ocp first.")
@@ -256,6 +426,17 @@ def _demo() -> None:
     a_long_bounds = (params.get("a_long_min", -np.inf), params.get("a_long_max", np.inf))
     a_lat_bounds = (params.get("a_lat_min", -np.inf), params.get("a_lat_max", np.inf))
 
+    profiling = data.get("profiling")
+    constraint_activity = _compute_constraint_activity(
+        d=d,
+        w_left=w_left,
+        w_right=w_right,
+        a_long=a_long,
+        a_lat=a_lat,
+        v=v,
+        params=params,
+    )
+
     timestamp_dir.mkdir(parents=True, exist_ok=True)
 
     plot_all_panels(
@@ -270,6 +451,8 @@ def _demo() -> None:
         a_long,
         a_lat,
         mu_g,
+        profiling=profiling,
+        constraint_activity=constraint_activity,
         out_path=timestamp_dir / "panels.png",
         show=True,
     )
