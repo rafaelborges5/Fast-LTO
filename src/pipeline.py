@@ -226,15 +226,44 @@ def step_solve_ocp(
 
     config.solutions_dir.mkdir(parents=True, exist_ok=True)
     solution_path = config.solution_path
-    
-    solve_ocp_and_save(
+
+    # Define the OCP run configuration that uniquely characterises a solution.
+    run_config = {
+        "track_id": config.track_id,
+        "model_name": config.model_name,
+        "ds_m": float(config.ds_m),
+        "continuity": str(config.continuity),
+        "integrator_name": config.integrator_name,
+        "reg_u": float(config.reg_u),
+        "initial_speed": float(config.initial_speed),
+    }
+
+    sol_dict = solve_ocp_and_save(
         track=track_data,
         model=model,
         solution_path=solution_path,
         integrator=integrator,
         initial_speed=config.initial_speed,
         reg_u=config.reg_u,
+        run_config=run_config,
     )
+
+    # Optional concise profiling summary (single line)
+    profiling = sol_dict.get("profiling", {})
+    N = profiling.get("N")
+    ds_m = profiling.get("ds_m")
+    solve_time_s = profiling.get("solve_time_s")
+    iter_count = profiling.get("iter_count")
+    return_status = profiling.get("return_status")
+    if solve_time_s is not None and N is not None:
+        time_per_point_ms = profiling.get("time_per_point_ms", solve_time_s / N * 1e3)
+        print(
+            f"[OCP profiling] N={N}, ds={ds_m:.3f} m, "
+            f"time={solve_time_s:.3f} s, "
+            f"time/N={time_per_point_ms:.3f} ms, "
+            f"iters={iter_count if iter_count is not None else 'N/A'}, "
+            f"status={return_status}"
+        )
 
     return solution_path
 
@@ -246,7 +275,7 @@ def step_visualize(
 ) -> Path:
     from datetime import datetime
 
-    from visualization.ocp_plots import plot_all_panels
+    from visualization.ocp_plots import plot_all_panels, _compute_constraint_activity
 
     if solution_path is None:
         solution_path = config.solution_path
@@ -278,6 +307,17 @@ def step_visualize(
     g_val = params.get("g", 9.81)
     mu_g = mu * g_val
 
+    profiling = data.get("profiling")
+    constraint_activity = _compute_constraint_activity(
+        d=d,
+        w_left=w_left,
+        w_right=w_right,
+        a_long=a_long,
+        a_lat=a_lat,
+        v=v,
+        params=params,
+    )
+
     timestamp_dir = config.plots_dir / datetime.now().strftime("%Y%m%d-%H%M%S")
     timestamp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -294,6 +334,8 @@ def step_visualize(
         a_long,
         a_lat,
         mu_g,
+        profiling=profiling,
+        constraint_activity=constraint_activity,
         out_path=plot_path,
         show=config.show_plots,
     )
@@ -365,10 +407,17 @@ def run_pipeline(
 
     if start_from in ("track", "spline", "bounds"):
         if config.compute_bounds:
-            if start_from == "bounds" or track_just_generated or not config.track_with_widths_path.exists():
+            if track is not None:
                 result = step_compute_bounds(
                     config,
                     track=track,
+                    csv_path=csv_path,
+                )
+                _ = result  # currently unused
+            elif start_from == "bounds" or track_just_generated or not config.track_with_widths_path.exists():
+                result = step_compute_bounds(
+                    config,
+                    track=None,
                     csv_path=csv_path,
                 )
                 _ = result  # currently unused
@@ -390,11 +439,41 @@ def run_pipeline(
         return results
 
     if start_from in ("track", "spline", "bounds", "ocp"):
-        if start_from == "ocp" or track_just_generated or not config.solution_path.exists():
+        solution_path = config.solution_path
+
+        # Decide whether we can safely reuse an existing solution or must re-solve.
+        need_solve = False
+
+        if start_from == "ocp" or track_just_generated or not solution_path.exists():
+            need_solve = True
+        else:
+            # Build current run signature.
+            current_sig = {
+                "track_id": config.track_id,
+                "model_name": config.model_name,
+                "ds_m": float(config.ds_m),
+                "continuity": str(config.continuity),
+                "integrator_name": config.integrator_name,
+                "reg_u": float(config.reg_u),
+                "initial_speed": float(config.initial_speed),
+            }
+
+            # Load stored signature from existing solution, if any.
+            try:
+                with solution_path.open("r") as f:
+                    existing_data = json.load(f)
+                stored_sig = existing_data.get("run_config")
+            except Exception:
+                stored_sig = None
+
+            if stored_sig != current_sig:
+                need_solve = True
+
+        if need_solve:
             solution_path = step_solve_ocp(config)
         else:
-            print(f"[Step 4] Using existing solution: {config.solution_path}")
-            solution_path = config.solution_path
+            print(f"[Step 4] Using existing solution: {solution_path}")
+
         results["ocp"] = solution_path
     else:
         if not config.solution_path.exists():
