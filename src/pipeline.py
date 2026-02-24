@@ -34,6 +34,7 @@ from tracks.ellipse import generate_ellipse_track
 from tracks.fsg_trackdrive import generate_fsg_track
 from utils.track_bounds import (
     LateralBoundsResult,
+    apply_savgol_to_widths,
     compute_lateral_bounds,
     load_boundaries,
     save_track_with_widths,
@@ -64,6 +65,10 @@ class PipelineConfig:
     continuity: ContinuityType = "C2"
 
     compute_bounds: bool = True
+
+    use_savgol_bounds: bool = True
+    savgol_window_length: int = 41
+    savgol_polyorder: int = 2
 
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
@@ -174,17 +179,34 @@ def step_compute_bounds(
     right = boundaries["right"]
 
     result = compute_lateral_bounds(track, left=left, right=right)
+    
+    if config.use_savgol_bounds:
+        w_left_s, w_right_s = apply_savgol_to_widths(
+            result.w_left,
+            result.w_right,
+            window_length=config.savgol_window_length,
+            polyorder=config.savgol_polyorder,
+        )
+        result.w_left = w_left_s
+        result.w_right = w_right_s
+
     print(
         f"  Computed widths: misses left/right: "
         f"{result.misses_left}/{result.misses_right}"
     )
 
     config.discretized_dir.mkdir(parents=True, exist_ok=True)
+    bounds_config = {
+        "use_savgol_bounds": bool(config.use_savgol_bounds),
+        "savgol_window_length": int(config.savgol_window_length),
+        "savgol_polyorder": int(config.savgol_polyorder),
+    }
     save_track_with_widths(
         config.track_with_widths_path,
         track=track,
         csv_source=csv_path,
         result=result,
+        bounds_config=bounds_config,
     )
     print(f"  Saved track with widths to: {config.track_with_widths_path}")
 
@@ -236,6 +258,9 @@ def step_solve_ocp(
         "integrator_name": config.integrator_name,
         "reg_u": float(config.reg_u),
         "initial_speed": float(config.initial_speed),
+        "use_savgol_bounds": bool(config.use_savgol_bounds),
+        "savgol_window_length": int(config.savgol_window_length),
+        "savgol_polyorder": int(config.savgol_polyorder),
     }
 
     sol_dict = solve_ocp_and_save(
@@ -414,18 +439,42 @@ def run_pipeline(
                     csv_path=csv_path,
                 )
                 _ = result  # currently unused
-            elif start_from == "bounds" or track_just_generated or not config.track_with_widths_path.exists():
-                result = step_compute_bounds(
-                    config,
-                    track=None,
-                    csv_path=csv_path,
-                )
-                _ = result  # currently unused
             else:
-                print(
-                    f"[Step 3] Using existing track with widths: "
-                    f"{config.track_with_widths_path}"
-                )
+                need_bounds = False
+                if (
+                    start_from == "bounds"
+                    or track_just_generated
+                    or not config.track_with_widths_path.exists()
+                ):
+                    need_bounds = True
+                else:
+                    try:
+                        with config.track_with_widths_path.open("r") as f:
+                            existing_bounds = json.load(f)
+                        stored_cfg = existing_bounds.get("bounds_config")
+                    except Exception:
+                        stored_cfg = None
+
+                    current_cfg = {
+                        "use_savgol_bounds": bool(config.use_savgol_bounds),
+                        "savgol_window_length": int(config.savgol_window_length),
+                        "savgol_polyorder": int(config.savgol_polyorder),
+                    }
+                    if stored_cfg != current_cfg:
+                        need_bounds = True
+
+                if need_bounds:
+                    result = step_compute_bounds(
+                        config,
+                        track=None,
+                        csv_path=csv_path,
+                    )
+                    _ = result  # currently unused
+                else:
+                    print(
+                        f"[Step 3] Using existing track with widths: "
+                        f"{config.track_with_widths_path}"
+                    )
             results["bounds"] = config.track_with_widths_path
     else:
         if not config.track_with_widths_path.exists():
@@ -456,6 +505,9 @@ def run_pipeline(
                 "integrator_name": config.integrator_name,
                 "reg_u": float(config.reg_u),
                 "initial_speed": float(config.initial_speed),
+                "use_savgol_bounds": bool(config.use_savgol_bounds),
+                "savgol_window_length": int(config.savgol_window_length),
+                "savgol_polyorder": int(config.savgol_polyorder),
             }
 
             # Load stored signature from existing solution, if any.

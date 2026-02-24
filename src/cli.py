@@ -114,6 +114,12 @@ Examples:
         help="Initial speed guess (m/s). Default: 5.0",
     )
 
+    parser.add_argument(
+        "--no-savgol-bounds",
+        action="store_true",
+        help="Disable Savitzky–Golay smoothing of lateral bounds.",
+    )
+
     # Visualization
     parser.add_argument(
         "--no-plot",
@@ -144,6 +150,7 @@ Examples:
         repo_root=args.repo_root,
         ds_m=args.ds,
         continuity=args.continuity,
+        use_savgol_bounds=not args.no_savgol_bounds,
         model_name=args.model,
         integrator_name=args.integrator,
         reg_u=args.reg_u,

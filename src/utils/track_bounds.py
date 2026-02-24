@@ -24,6 +24,7 @@ from typing import Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.signal import savgol_filter
 
 try:
     from ..splines.discretized_track import DiscretizedTrack  # type: ignore
@@ -41,6 +42,64 @@ class LateralBoundsResult:
     w_right: np.ndarray
     misses_left: int
     misses_right: int
+
+
+def _savgol_1d_periodic(
+    arr: np.ndarray,
+    window_length: int = 41,
+    polyorder: int = 2,
+) -> np.ndarray:
+    """
+    Apply Savitzky–Golay smoothing to a 1D array representing a periodic signal.
+
+    NaN entries are preserved: they are temporarily inpainted for filtering and
+    then restored afterwards.
+    """
+    arr = np.asarray(arr, dtype=np.float64)
+    n = arr.size
+    if n == 0:
+        return arr.copy()
+
+    if n <= polyorder + 2:
+        return arr.copy()
+
+    # need odd window length
+    wl = min(window_length, n if n % 2 == 1 else n - 1)
+    if wl <= polyorder:
+        wl = polyorder + 2
+        if wl % 2 == 0:
+            wl += 1
+        if wl > n:
+            return arr.copy()
+
+    mask = np.isfinite(arr)
+    if not np.any(mask):
+        return arr.copy()
+
+    filled = arr.copy()
+    if not np.all(mask):
+        idx = np.arange(n)
+        filled[~mask] = np.interp(
+            idx[~mask],
+            idx[mask],
+            arr[mask],
+            period=n,
+        )
+
+    smoothed = savgol_filter(filled, window_length=wl, polyorder=polyorder, mode="wrap")
+    smoothed[~mask] = np.nan
+    return smoothed
+
+
+def apply_savgol_to_widths(
+    w_left: np.ndarray,
+    w_right: np.ndarray,
+    window_length: int = 21,
+    polyorder: int = 3,
+) -> Tuple[np.ndarray, np.ndarray]:
+    w_left_s = _savgol_1d_periodic(w_left, window_length=window_length, polyorder=polyorder)
+    w_right_s = _savgol_1d_periodic(w_right, window_length=window_length, polyorder=polyorder)
+    return w_left_s, w_right_s
 
 
 def load_boundaries(csv_path: Path) -> Dict[str, np.ndarray]:
@@ -162,20 +221,27 @@ def save_bounds_json(path: Path, track: DiscretizedTrack, csv_source: Path, resu
         json.dump(data, f, indent=2)
 
 
-def save_track_with_widths(path: Path, track: DiscretizedTrack, csv_source: Path, result: LateralBoundsResult) -> None:
+def save_track_with_widths(
+    path: Path,
+    track: DiscretizedTrack,
+    csv_source: Path,
+    result: LateralBoundsResult,
+    bounds_config: Dict | None = None,
+) -> None:
     """
     Save a combined object that includes the discretized track plus lateral widths.
     """
     data = track.to_dict()
-    data.update(
-        {
-            "w_left": result.w_left.tolist(),
-            "w_right": result.w_right.tolist(),
-            "source_boundaries_csv": str(csv_source),
-            "misses_left": int(result.misses_left),
-            "misses_right": int(result.misses_right),
-        }
-    )
+    payload: Dict = {
+        "w_left": result.w_left.tolist(),
+        "w_right": result.w_right.tolist(),
+        "source_boundaries_csv": str(csv_source),
+        "misses_left": int(result.misses_left),
+        "misses_right": int(result.misses_right),
+    }
+    if bounds_config is not None:
+        payload["bounds_config"] = bounds_config
+    data.update(payload)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
@@ -234,8 +300,8 @@ def plot_bounds(
 def _demo() -> None:
     """Minimal runnable example for computing and visualizing bounds."""
     repo_root = Path(__file__).resolve().parents[2]
-    track_path = repo_root / "data" / "discretized" / "ellipse.json"
-    csv_path = repo_root / "data" / "tracks" / "ellipse.csv"
+    track_path = repo_root / "data" / "discretized" / "fsg_random.json"
+    csv_path = repo_root / "data" / "tracks" / "fsg_random.csv"
 
     track = DiscretizedTrack.load(track_path)
     boundaries = load_boundaries(csv_path)
@@ -244,7 +310,7 @@ def _demo() -> None:
 
     result = compute_lateral_bounds(track, left=left, right=right)
     print(f"Misses left/right: {result.misses_left} / {result.misses_right}")
-    out_json = repo_root / "data" / "discretized" / "ellipse_with_widths.json"
+    out_json = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
     save_track_with_widths(out_json, track=track, csv_source=csv_path, result=result)
     print(f"Saved bounds + track to {out_json}")
 
