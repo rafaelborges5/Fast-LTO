@@ -83,6 +83,7 @@ def build_ocp(
         integrator = EulerIntegrator()
 
     curv = np.array(track["curvatures"], dtype=np.float64)
+    curv_half = np.array(track["curvatures_half"], dtype=np.float64)
     arc_lengths = np.array(track["arc_lengths"], dtype=np.float64)
     w_left = np.array(track["w_left"], dtype=np.float64)
     w_right = np.array(track["w_right"], dtype=np.float64)
@@ -98,11 +99,13 @@ def build_ocp(
     U = opti.variable(N, nu)
 
     kappa_param = opti.parameter(N)
+    kappa_half_param = opti.parameter(N)
     w_left_param = opti.parameter(N)
     w_right_param = opti.parameter(N)
     x0_param = opti.parameter(nx)
 
     opti.set_value(kappa_param, curv)
+    opti.set_value(kappa_half_param, curv_half)
     opti.set_value(w_left_param, w_left)
     opti.set_value(w_right_param, w_right)
 
@@ -110,17 +113,21 @@ def build_ocp(
 
     f_space, eval_at_point = build_space_dynamics(model)
     total_time = 0
-    eps = 1e-3
 
     for i in range(N - 1):
         x_i = X[i, :].T
         u_i = U[i, :].T
         kappa_i = kappa_param[i]
+        kappa_half_i = kappa_half_param[i]
+        kappa_next_i = kappa_param[i + 1]
 
-        x_next = integrator.step(f_space, x_i, u_i, kappa_i, ds)
+        x_next = integrator.step(
+            f_space, x_i, u_i, kappa_i, ds,
+            kappa_half=kappa_half_i, kappa_next=kappa_next_i,
+        )
         opti.subject_to(X[i + 1, :].T == x_next)
 
-        full_state, s_dot = eval_at_point(x_i, u_i, kappa_i)
+        full_state, _ = eval_at_point(x_i, u_i, kappa_i)
         g_list = model.get_constraints(full_state, u_i)
         for g in g_list:
             opti.subject_to(g <= 0)
@@ -128,15 +135,18 @@ def build_ocp(
         opti.subject_to(-w_right_param[i] <= x_i[0])
         opti.subject_to(x_i[0] <= w_left_param[i])
 
-        total_time += ds / (s_dot + eps)
+        total_time += integrator.time_step(
+            f_space, eval_at_point, x_i, u_i, kappa_i, ds,
+            kappa_half=kappa_half_i, kappa_next=kappa_next_i,
+        )
 
     opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
     opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
 
     opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
-    # minimise lap time + input regularisation
-    obj = total_time + reg_u * ca.sumsqr(U)
+    # minimise lap time + input regularisation (reg_u normalised by N)
+    obj = total_time + (reg_u / N) * ca.sumsqr(U)
     opti.minimize(obj)
 
     reduced_bounds = model.reduced_state_bounds()
@@ -167,6 +177,7 @@ def build_ocp(
         U,
         {
             "kappa": kappa_param,
+            "kappa_half": kappa_half_param,
             "w_left": w_left_param,
             "w_right": w_right_param,
             "x0": x0_param,
