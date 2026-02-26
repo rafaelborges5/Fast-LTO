@@ -9,7 +9,7 @@ Pipeline Steps
 1. Track generation        -> data/tracks/{track_id}.csv
 2. Spline fitting          -> data/discretized/{track_id}.json
 3. Bounds computation      -> data/discretized/{track_id}_with_widths.json
-4. OCP solving             -> data/solutions/{track_id}_{model_name}.json
+4. OCP solving             -> data/solutions/{track_id}_{model_name}_{integrator_name}.json
 5. Visualization           -> ocp_plots/{timestamp}/panels.png
 
 Each step can be run independently, and intermediate results are saved to disk
@@ -72,7 +72,7 @@ class PipelineConfig:
 
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
-    reg_u: float = 1e-4
+    reg_u: float = 5e-2
     initial_speed: float = 1.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
 
     plot_results: bool = True
@@ -105,7 +105,7 @@ class PipelineConfig:
 
     @property
     def solution_path(self) -> Path:
-        return self.solutions_dir / f"{self.track_id}_{self.model_name}.json"
+        return self.solutions_dir / f"{self.track_id}_{self.model_name}_{self.integrator_name}.json"
 
 
 def step_generate_track(config: PipelineConfig) -> Path:
@@ -250,10 +250,23 @@ def step_solve_ocp(
     solution_path = config.solution_path
 
     # Define the OCP run configuration that uniquely characterises a solution.
+    track_ds_m = float(
+        track_data.get(
+            "ds_m",
+            (
+                track_data["arc_lengths"][1] - track_data["arc_lengths"][0]
+                if len(track_data.get("arc_lengths", [])) > 1
+                else config.ds_m
+            ),
+        )
+    )
+    track_num_points = int(track_data.get("num_points", len(track_data.get("arc_lengths", []))))
+
     run_config = {
         "track_id": config.track_id,
         "model_name": config.model_name,
-        "ds_m": float(config.ds_m),
+        "ds_m": float(track_ds_m),
+        "num_points": int(track_num_points),
         "continuity": str(config.continuity),
         "integrator_name": config.integrator_name,
         "reg_u": float(config.reg_u),
@@ -493,6 +506,24 @@ def run_pipeline(
         # Decide whether we can safely reuse an existing solution or must re-solve.
         need_solve = False
 
+        try:
+            track_for_sig = load_track_with_widths(config.track_with_widths_path)
+            track_ds_m = float(
+                track_for_sig.get(
+                    "ds_m",
+                    (
+                        track_for_sig["arc_lengths"][1]
+                        - track_for_sig["arc_lengths"][0]
+                        if len(track_for_sig.get("arc_lengths", [])) > 1
+                        else config.ds_m
+                    ),
+                )
+            )
+            track_num_points = int(track_for_sig.get("num_points", len(track_for_sig.get("arc_lengths", []))))
+        except Exception:
+            track_ds_m = float(config.ds_m)
+            track_num_points = -1
+
         if start_from == "ocp" or track_just_generated or not solution_path.exists():
             need_solve = True
         else:
@@ -500,7 +531,8 @@ def run_pipeline(
             current_sig = {
                 "track_id": config.track_id,
                 "model_name": config.model_name,
-                "ds_m": float(config.ds_m),
+                "ds_m": float(track_ds_m),
+                "num_points": int(track_num_points),
                 "continuity": str(config.continuity),
                 "integrator_name": config.integrator_name,
                 "reg_u": float(config.reg_u),

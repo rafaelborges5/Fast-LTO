@@ -76,7 +76,7 @@ Examples:
     parser.add_argument(
         "--ds",
         type=float,
-        default=0.5,
+        default=None,
         help="Discretization step in meters. Default: 0.5",
     )
     parser.add_argument(
@@ -104,14 +104,14 @@ Examples:
     parser.add_argument(
         "--reg-u",
         type=float,
-        default=1e-4,
-        help="Input regularization weight. Default: 1e-4",
+        default=None,
+        help="Input regularization weight. If omitted, uses PipelineConfig default.",
     )
     parser.add_argument(
         "--initial-speed",
         type=float,
         default=1.0,
-        help="Initial speed guess (m/s). Default: 5.0",
+        help="Initial speed guess (m/s). Default: 1.0",
     )
 
     parser.add_argument(
@@ -143,7 +143,7 @@ Examples:
     args = parser.parse_args()
 
     # Create configuration
-    config = PipelineConfig(
+    config_kwargs = dict(
         track_id=args.track_id,
         track_type=args.track_type,
         generate_track=args.generate_track,
@@ -153,11 +153,14 @@ Examples:
         use_savgol_bounds=not args.no_savgol_bounds,
         model_name=args.model,
         integrator_name=args.integrator,
-        reg_u=args.reg_u,
         initial_speed=args.initial_speed,
         plot_results=not args.no_plot,
         show_plots=not args.no_show_plots,
     )
+    if args.reg_u is not None:
+        config_kwargs["reg_u"] = args.reg_u
+
+    config = PipelineConfig(**config_kwargs)
 
     # Run pipeline
     print(f"Running Fast-LTO pipeline")
