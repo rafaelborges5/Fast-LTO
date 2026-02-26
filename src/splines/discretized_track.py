@@ -56,6 +56,7 @@ class DiscretizedTrack:
     positions: np.ndarray
     headings: np.ndarray
     curvatures: np.ndarray
+    curvatures_half: np.ndarray
     arc_lengths: np.ndarray
     ds_m: float
     total_length_m: float
@@ -69,6 +70,7 @@ class DiscretizedTrack:
         assert self.positions.shape == (n, 2), f"positions shape mismatch: {self.positions.shape}"
         assert self.headings.shape == (n,), f"headings shape mismatch: {self.headings.shape}"
         assert self.curvatures.shape == (n,), f"curvatures shape mismatch: {self.curvatures.shape}"
+        assert self.curvatures_half.shape == (n,), f"curvatures_half shape mismatch: {self.curvatures_half.shape}"
         assert self.arc_lengths.shape == (n,), f"arc_lengths shape mismatch: {self.arc_lengths.shape}"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -77,6 +79,7 @@ class DiscretizedTrack:
             "positions": self.positions.tolist(),
             "headings": self.headings.tolist(),
             "curvatures": self.curvatures.tolist(),
+            "curvatures_half": self.curvatures_half.tolist(),
             "arc_lengths": self.arc_lengths.tolist(),
             "ds_m": self.ds_m,
             "total_length_m": self.total_length_m,
@@ -92,6 +95,7 @@ class DiscretizedTrack:
             positions=np.array(data["positions"], dtype=np.float64),
             headings=np.array(data["headings"], dtype=np.float64),
             curvatures=np.array(data["curvatures"], dtype=np.float64),
+            curvatures_half=np.array(data["curvatures_half"], dtype=np.float64),
             arc_lengths=np.array(data["arc_lengths"], dtype=np.float64),
             ds_m=float(data["ds_m"]),
             total_length_m=float(data["total_length_m"]),
@@ -143,7 +147,8 @@ class DiscretizedTrack:
             f"num_points={self.num_points}, "
             f"ds_m={self.ds_m:.3f}, "
             f"total_length_m={self.total_length_m:.2f}, "
-            f"continuity={self.continuity!r})"
+            f"continuity={self.continuity!r}, "
+            f"has_curvatures_half={self.curvatures_half is not None})"
         )
 
 

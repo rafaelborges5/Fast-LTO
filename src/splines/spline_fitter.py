@@ -229,7 +229,7 @@ def _sample_at_arc_lengths(
     t_samples: np.ndarray,
     s_samples: np.ndarray,
     ds_m: float,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     """
     Sample the spline at uniform arc-length intervals for a closed track.
 
@@ -252,7 +252,11 @@ def _sample_at_arc_lengths(
     headings : np.ndarray
         Shape (N,) tangent angles in radians.
     curvatures : np.ndarray
-        Shape (N,) signed curvatures.
+        Shape (N,) signed curvatures at grid points.
+    curvatures_half : np.ndarray
+        Shape (N,) signed curvatures at interval midpoints s_i + actual_ds/2.
+        The last entry is the midpoint between point N-1 and the wrap-around
+        point 0 (i.e. at s = (N - 0.5) * actual_ds).
     arc_lengths : np.ndarray
         Shape (N,) arc length values from 0 to L (exclusive).
     total_length : float
@@ -284,7 +288,7 @@ def _sample_at_arc_lengths(
     dy_dt = spline_y(t_at_targets, 1)
     headings = np.arctan2(dy_dt, dx_dt)
 
-    # Second derivatives for curvature
+    # Second derivatives for curvature at grid points
     d2x_dt2 = spline_x(t_at_targets, 2)
     d2y_dt2 = spline_y(t_at_targets, 2)
 
@@ -293,7 +297,21 @@ def _sample_at_arc_lengths(
     denominator = (dx_dt**2 + dy_dt**2) ** 1.5
     curvatures = numerator / denominator
 
-    return positions, headings, curvatures, s_targets, total_length, actual_ds
+    # --- Midpoint curvatures for RK4 ---
+    s_mids = s_targets + actual_ds / 2.0
+
+    t_at_mids = np.interp(s_mids, s_samples, t_samples)
+
+    dx_dt_m = spline_x(t_at_mids, 1)
+    dy_dt_m = spline_y(t_at_mids, 1)
+    d2x_dt2_m = spline_x(t_at_mids, 2)
+    d2y_dt2_m = spline_y(t_at_mids, 2)
+
+    num_m = dx_dt_m * d2y_dt2_m - dy_dt_m * d2x_dt2_m
+    den_m = (dx_dt_m**2 + dy_dt_m**2) ** 1.5
+    curvatures_half = num_m / den_m
+
+    return positions, headings, curvatures, curvatures_half, s_targets, total_length, actual_ds
 
 
 def fit_and_discretize(
@@ -350,8 +368,8 @@ def fit_and_discretize(
     t_samples, s_samples = _compute_arc_length_mapping(spline_x, spline_y, t_max)
 
     # 5. Sample at uniform arc-length intervals
-    positions, headings, curvatures, arc_lengths, total_length, actual_ds = _sample_at_arc_lengths(
-        spline_x, spline_y, t_samples, s_samples, ds_m
+    positions, headings, curvatures, curvatures_half, arc_lengths, total_length, actual_ds = (
+        _sample_at_arc_lengths(spline_x, spline_y, t_samples, s_samples, ds_m)
     )
 
     # 6. Create the discretized track
@@ -359,6 +377,7 @@ def fit_and_discretize(
         positions=positions,
         headings=headings,
         curvatures=curvatures,
+        curvatures_half=curvatures_half,
         arc_lengths=arc_lengths,
         ds_m=actual_ds,  # Use actual spacing (L/N), not requested ds_m
         total_length_m=total_length,
@@ -495,11 +514,11 @@ __all__ = ["fit_and_discretize", "ContinuityType"]
 
 if __name__ == "__main__":
     track = fit_and_discretize(
-        csv_path="data/tracks/ellipse.csv",
+        csv_path="data/tracks/fsg_random.csv",
         ds_m=0.5,
-        continuity="C2",
+        continuity="C4",
         viz=True,
-        save_path="data/discretized/ellipse.json",
+        save_path="data/discretized/fsg_random.json",
     )
     print(f"Fitted spline: {track}")
 
