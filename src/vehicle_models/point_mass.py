@@ -85,20 +85,15 @@ class PointMassModel(VehicleModel):
         mu_g = p["mu"] * p["g"]
 
         g_list = [
-            a_long - p["a_long_max"],
-            p["a_long_min"] - a_long,
-            a_lat - p["a_lat_max"],
-            p["a_lat_min"] - a_lat,
             (a_long / mu_g) ** 2 + (a_lat / mu_g) ** 2 - 1.0,
-            v - p["v_max"],
-            p["v_min"] - v,
         ]
         return g_list
 
     def state_bounds(self) -> Tuple[List[float], List[float]]:
         p = self.params
-        lb = [-ca.inf, -ca.inf, -ca.inf, p["v_min"]]
-        ub = [ca.inf, ca.inf, ca.inf, p["v_max"]]
+        # s, d, psi_err, v
+        lb = [-ca.inf, -2.0, -0.8, p["v_min"]]
+        ub = [ca.inf, 2.0, 0.8, p["v_max"]]
         return lb, ub
 
     def input_bounds(self) -> Tuple[List[float], List[float]]:

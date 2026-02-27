@@ -120,6 +120,12 @@ Examples:
         help="Disable Savitzky–Golay smoothing of lateral bounds.",
     )
 
+    parser.add_argument(
+        "--no-normalization",
+        action="store_true",
+        help="Disable state/input normalization inside the OCP (use physical units).",
+    )
+
     # Visualization
     parser.add_argument(
         "--no-plot",
@@ -154,6 +160,7 @@ Examples:
         model_name=args.model,
         integrator_name=args.integrator,
         initial_speed=args.initial_speed,
+        normalize_states_and_inputs=not args.no_normalization,
         plot_results=not args.no_plot,
         show_plots=not args.no_show_plots,
     )

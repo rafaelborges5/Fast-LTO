@@ -59,11 +59,41 @@ def build_space_dynamics(
     return f_space, eval_at_point
 
 
+def build_space_dynamics_normalized(
+    model: VehicleModel,
+) -> Tuple[Callable, Callable]:
+    """
+    Build the space-domain dynamics in the NORMALISED reduced state.
+
+    Returns
+    -------
+    f_space_norm : callable(x_reduced_norm, u_norm, kappa) -> ca.MX
+        Space-domain RHS in normalised coordinates: dx_reduced_norm / ds.
+    eval_at_point_norm : callable(x_reduced_norm, u_norm, kappa)
+        Returns (full_state_phys, s_dot) for the given normalised state.
+    """
+
+    def f_space_norm(x_reduced_norm: ca.MX, u_norm: ca.MX, kappa: ca.MX) -> ca.MX:
+        return model.get_dynamics_normalized(x_reduced_norm, u_norm, kappa)
+
+    def eval_at_point_norm(
+        x_reduced_norm: ca.MX, u_norm: ca.MX, kappa: ca.MX
+    ) -> Tuple[ca.MX, ca.MX]:
+        x_red_phys = model.reduced_state_norm_to_phys(x_reduced_norm)
+        u_phys = model.input_norm_to_phys(u_norm)
+        full_state = ca.vertcat(ca.MX(0), x_red_phys)
+        x_dot = model.get_dynamics(full_state, u_phys, kappa)
+        return full_state, x_dot[0]  # (full_state_phys, s_dot)
+
+    return f_space_norm, eval_at_point_norm
+
+
 def build_ocp(
     track: Dict,
     model: VehicleModel,
     integrator: SpaceIntegrator | None = None,
     reg_u: float = 1e-4,
+    use_normalization: bool = True,
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -111,7 +141,10 @@ def build_ocp(
 
     opti.subject_to(X[0, :] == x0_param.T)
 
-    f_space, eval_at_point = build_space_dynamics(model)
+    if use_normalization:
+        f_space, eval_at_point = build_space_dynamics_normalized(model)
+    else:
+        f_space, eval_at_point = build_space_dynamics(model)
     total_time = 0
 
     for i in range(N - 1):
@@ -122,26 +155,62 @@ def build_ocp(
         kappa_next_i = kappa_param[i + 1]
 
         x_next = integrator.step(
-            f_space, x_i, u_i, kappa_i, ds,
-            kappa_half=kappa_half_i, kappa_next=kappa_next_i,
+            f_space,
+            x_i,
+            u_i,
+            kappa_i,
+            ds,
+            kappa_half=kappa_half_i,
+            kappa_next=kappa_next_i,
         )
         opti.subject_to(X[i + 1, :].T == x_next)
 
-        full_state, _ = eval_at_point(x_i, u_i, kappa_i)
-        g_list = model.get_constraints(full_state, u_i)
+        if use_normalization:
+            g_list = model.get_constraints_normalized(x_i, u_i)
+        else:
+            full_state, _ = eval_at_point(x_i, u_i, kappa_i)
+            g_list = model.get_constraints(full_state, u_i)
         for g in g_list:
             opti.subject_to(g <= 0)
 
-        opti.subject_to(-w_right_param[i] <= x_i[0])
-        opti.subject_to(x_i[0] <= w_left_param[i])
+        if use_normalization:
+            # d_norm = (d_phys - shift) / scale
+            x_scale, x_shift = model.get_reduced_state_scaling()
+            if x_scale is None or x_shift is None:
+                raise RuntimeError("Normalization scales not defined.")
+            
+            d_scale = x_scale[0]
+            d_shift = x_shift[0]
+            
+            ub_d_norm = (w_left_param[i] - d_shift) / d_scale
+            lb_d_norm = (-w_right_param[i] - d_shift) / d_scale
+            
+            opti.subject_to(lb_d_norm <= x_i[0])
+            opti.subject_to(x_i[0] <= ub_d_norm)
+        else:
+            opti.subject_to(-w_right_param[i] <= x_i[0])
+            opti.subject_to(x_i[0] <= w_left_param[i])
 
         total_time += integrator.time_step(
             f_space, eval_at_point, x_i, u_i, kappa_i, ds,
             kappa_half=kappa_half_i, kappa_next=kappa_next_i,
         )
 
-    opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
-    opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
+    if use_normalization:
+        x_scale, x_shift = model.get_reduced_state_scaling()
+        if x_scale is None or x_shift is None:
+            raise RuntimeError("Normalization scales not defined.")
+        d_scale = x_scale[0]
+        d_shift = x_shift[0]
+        
+        ub_d_norm_last = (w_left_param[N - 1] - d_shift) / d_scale
+        lb_d_norm_last = (-w_right_param[N - 1] - d_shift) / d_scale
+        
+        opti.subject_to(lb_d_norm_last <= X[N - 1, 0])
+        opti.subject_to(X[N - 1, 0] <= ub_d_norm_last)
+    else:
+        opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
+        opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
 
     opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
@@ -149,13 +218,19 @@ def build_ocp(
     obj = total_time + (reg_u / N) * ca.sumsqr(U)
     opti.minimize(obj)
 
-    reduced_bounds = model.reduced_state_bounds()
+    if use_normalization:
+        reduced_bounds = model.reduced_state_bounds_normalized()
+    else:
+        reduced_bounds = model.reduced_state_bounds()
     if reduced_bounds is not None:
         lbx, ubx = reduced_bounds
         for j in range(nx):
             opti.subject_to(opti.bounded(lbx[j], X[:, j], ubx[j]))
 
-    input_bounds = model.input_bounds()
+    if use_normalization:
+        input_bounds = model.input_bounds_normalized()
+    else:
+        input_bounds = model.input_bounds()
     if input_bounds is not None:
         lbu, ubu = input_bounds
         for j in range(nu):
@@ -167,6 +242,7 @@ def build_ocp(
             "ipopt.print_level": 0,
             "print_time": 0,
             "ipopt.sb": "yes",
+            "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
         },
         {},
     )
@@ -195,6 +271,7 @@ def solve_ocp_and_save(
     initial_speed: float = 5.0,
     reg_u: float = 1e-4,
     run_config: Dict | None = None,
+    use_normalization: bool = True,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -223,19 +300,31 @@ def solve_ocp_and_save(
         integrator = EulerIntegrator()
 
     opti, X, U, params, obj, total_time_expr = build_ocp(
-        track, model, integrator=integrator, reg_u=reg_u
+        track,
+        model,
+        integrator=integrator,
+        reg_u=reg_u,
+        use_normalization=use_normalization,
     )
 
     reduced_names = model.reduced_state_names()
     N = len(track["arc_lengths"])
-    x0 = np.zeros(model.nx_reduced)
+    x0_phys = np.zeros(model.nx_reduced)
     v_idx = reduced_names.index("v")
-    x0[v_idx] = initial_speed
+    x0_phys[v_idx] = initial_speed
 
-    opti.set_value(params["x0"], x0)
-    opti.set_initial(X, 0)
-    opti.set_initial(U, 0)
-    opti.set_initial(X[:, v_idx], initial_speed)
+    if use_normalization:
+        x0_norm = model.reduced_state_phys_to_norm(x0_phys)
+        opti.set_value(params["x0"], x0_norm)
+        v_norm = model.reduced_state_phys_to_norm(x0_phys)[v_idx]
+        opti.set_initial(X, 0)
+        opti.set_initial(U, 0)
+        opti.set_initial(X[:, v_idx], v_norm)
+    else:
+        opti.set_value(params["x0"], x0_phys)
+        opti.set_initial(X, 0)
+        opti.set_initial(U, 0)
+        opti.set_initial(X[:, v_idx], initial_speed)
 
     start_time = time.perf_counter()
     sol = opti.solve()
@@ -269,12 +358,36 @@ def solve_ocp_and_save(
         f"iters={iter_count if iter_count is not None else 'N/A'}, "
         f"status={return_status}"
     )
-    print(f"v min/max: {X_sol[:, v_idx].min():.2f} / {X_sol[:, v_idx].max():.2f} m/s")
+    if use_normalization:
+        # Map solver variables back to physical reduced states/inputs.
+        x_scale, x_shift = model.get_reduced_state_scaling()
+        u_scale, u_shift = model.get_input_scaling()
+        if x_scale is None or x_shift is None or u_scale is None or u_shift is None:
+            raise RuntimeError(
+                "Normalisation scales/shifts are not defined for solution "
+                "post-processing."
+            )
+        # x_phys = x_norm * scale + shift  (broadcast over samples)
+        x_scale_np = np.asarray(x_scale).astype(float).reshape(1, -1)
+        x_shift_np = np.asarray(x_shift).astype(float).reshape(1, -1)
+        u_scale_np = np.asarray(u_scale).astype(float).reshape(1, -1)
+        u_shift_np = np.asarray(u_shift).astype(float).reshape(1, -1)
+
+        X_phys = X_sol * x_scale_np + x_shift_np
+        U_phys = U_sol * u_scale_np + u_shift_np
+    else:
+        X_phys = X_sol
+        U_phys = U_sol
+
+    print(
+        f"v min/max: {X_phys[:, v_idx].min():.2f} / "
+        f"{X_phys[:, v_idx].max():.2f} m/s"
+    )
 
     positions = np.array(track["positions"], dtype=np.float64)
     headings = np.array(track["headings"], dtype=np.float64)
     normals = np.column_stack((-np.sin(headings), np.cos(headings)))
-    d = X_sol[:, 0]
+    d = X_phys[:, 0]
     path_xy = positions + d[:, None] * normals
 
     input_names = model.get_input_names()
@@ -305,9 +418,9 @@ def solve_ocp_and_save(
         "run_config": run_config,
     }
     for j, name in enumerate(reduced_names):
-        sol_dict[name] = X_sol[:, j].tolist()
+        sol_dict[name] = X_phys[:, j].tolist()
     for j, name in enumerate(input_names):
-        sol_dict[name] = U_sol[:, j].tolist()
+        sol_dict[name] = U_phys[:, j].tolist()
 
     solution_path.parent.mkdir(parents=True, exist_ok=True)
     with solution_path.open("w") as f:

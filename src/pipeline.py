@@ -77,6 +77,7 @@ class PipelineConfig:
 
     plot_results: bool = True
     show_plots: bool = True  # Whether to display plots interactively
+    normalize_states_and_inputs: bool = True
 
     def __post_init__(self) -> None:
         if self.repo_root is None:
@@ -271,6 +272,7 @@ def step_solve_ocp(
         "integrator_name": config.integrator_name,
         "reg_u": float(config.reg_u),
         "initial_speed": float(config.initial_speed),
+        "normalize_states_and_inputs": bool(config.normalize_states_and_inputs),
         "use_savgol_bounds": bool(config.use_savgol_bounds),
         "savgol_window_length": int(config.savgol_window_length),
         "savgol_polyorder": int(config.savgol_polyorder),
@@ -284,6 +286,7 @@ def step_solve_ocp(
         initial_speed=config.initial_speed,
         reg_u=config.reg_u,
         run_config=run_config,
+        use_normalization=config.normalize_states_and_inputs,
     )
 
     # Optional concise profiling summary (single line)
