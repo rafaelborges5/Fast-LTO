@@ -105,7 +105,19 @@ Examples:
         "--reg-u",
         type=float,
         default=None,
-        help="Input regularization weight. If omitted, uses PipelineConfig default.",
+        help=(
+            "Input rate regularization weight on changes in inputs (du). "
+            "If omitted, uses PipelineConfig default."
+        ),
+    )
+    parser.add_argument(
+        "--reg-du-vec",
+        type=str,
+        default=None,
+        help=(
+            "Optional comma-separated list of input rate weights for each input "
+            "(e.g. '600,300' for two inputs). Overrides --reg-u if provided."
+        ),
     )
     parser.add_argument(
         "--initial-speed",
@@ -164,7 +176,12 @@ Examples:
         plot_results=not args.no_plot,
         show_plots=not args.no_show_plots,
     )
-    if args.reg_u is not None:
+    # Scalar or vector regularisation weights
+    if args.reg_du_vec is not None:
+        # Parse comma-separated floats into a list; validated later in OCP build
+        reg_vec = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
+        config_kwargs["reg_u"] = reg_vec
+    elif args.reg_u is not None:
         config_kwargs["reg_u"] = args.reg_u
 
     config = PipelineConfig(**config_kwargs)

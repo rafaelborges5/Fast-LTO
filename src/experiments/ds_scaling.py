@@ -45,7 +45,7 @@ def run_ds_scaling_experiment(
     model_name: str = "point_mass",
     integrator_name: str = "euler",
     continuity: str = "C4",
-    reg_u: float = 1e-4,
+    reg_u: float = 600.0,
     initial_speed: float = 1.0,
     ds_min: float = 0.1,
     ds_max: float = 5.0,
@@ -500,8 +500,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reg-u",
         type=float,
-        default=1e-4,
-        help="Input regularisation weight.",
+        default=600.0,
+        help="Input rate regularisation weight on changes in inputs (du).",
     )
     parser.add_argument(
         "--initial-speed",

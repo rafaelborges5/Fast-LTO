@@ -72,7 +72,8 @@ class PipelineConfig:
 
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
-    reg_u: float = 5e-2
+    # Input rate-regularization weight on changes in inputs (du).
+    reg_u: float = 600.0
     initial_speed: float = 1.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
 
     plot_results: bool = True
@@ -245,7 +246,7 @@ def step_solve_ocp(
 
     print(f"  Model: {config.model_name}")
     print(f"  Integrator: {config.integrator_name}")
-    print(f"  Input regularization: {config.reg_u}")
+    print(f"  Input rate regularization (reg_u): {config.reg_u}")
 
     config.solutions_dir.mkdir(parents=True, exist_ok=True)
     solution_path = config.solution_path
@@ -263,6 +264,12 @@ def step_solve_ocp(
     )
     track_num_points = int(track_data.get("num_points", len(track_data.get("arc_lengths", []))))
 
+    # Note: reg_u may be a scalar or a sequence (for per-input weights).
+    if isinstance(config.reg_u, (list, tuple, np.ndarray)):
+        reg_du_for_sig = [float(v) for v in config.reg_u]
+    else:
+        reg_du_for_sig = float(config.reg_u)
+
     run_config = {
         "track_id": config.track_id,
         "model_name": config.model_name,
@@ -270,7 +277,7 @@ def step_solve_ocp(
         "num_points": int(track_num_points),
         "continuity": str(config.continuity),
         "integrator_name": config.integrator_name,
-        "reg_u": float(config.reg_u),
+        "reg_du": reg_du_for_sig,
         "initial_speed": float(config.initial_speed),
         "normalize_states_and_inputs": bool(config.normalize_states_and_inputs),
         "use_savgol_bounds": bool(config.use_savgol_bounds),
@@ -284,7 +291,7 @@ def step_solve_ocp(
         solution_path=solution_path,
         integrator=integrator,
         initial_speed=config.initial_speed,
-        reg_u=config.reg_u,
+        reg_du=config.reg_u,
         run_config=run_config,
         use_normalization=config.normalize_states_and_inputs,
     )
@@ -531,6 +538,11 @@ def run_pipeline(
             need_solve = True
         else:
             # Build current run signature.
+            if isinstance(config.reg_u, (list, tuple, np.ndarray)):
+                reg_du_sig = [float(v) for v in config.reg_u]
+            else:
+                reg_du_sig = float(config.reg_u)
+
             current_sig = {
                 "track_id": config.track_id,
                 "model_name": config.model_name,
@@ -538,7 +550,7 @@ def run_pipeline(
                 "num_points": int(track_num_points),
                 "continuity": str(config.continuity),
                 "integrator_name": config.integrator_name,
-                "reg_u": float(config.reg_u),
+                "reg_du": reg_du_sig,
                 "initial_speed": float(config.initial_speed),
                 "use_savgol_bounds": bool(config.use_savgol_bounds),
                 "savgol_window_length": int(config.savgol_window_length),

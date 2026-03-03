@@ -92,7 +92,7 @@ def build_ocp(
     track: Dict,
     model: VehicleModel,
     integrator: SpaceIntegrator | None = None,
-    reg_u: float = 1e-4,
+    reg_du: float | np.ndarray | None = None,
     use_normalization: bool = True,
 ):
     """
@@ -106,8 +106,9 @@ def build_ocp(
         Any vehicle model following the state convention [s, d, ...].
     integrator : SpaceIntegrator, optional
         Spatial integration scheme.  Defaults to ``EulerIntegrator()``.
-    reg_u : float
-        Input regularisation weight in the objective.
+    reg_du : float or array-like, optional
+        Input rate-regularisation weight(s) in the objective. If a scalar is
+        given then make isotropic matrix.
     """
     if integrator is None:
         integrator = EulerIntegrator()
@@ -122,6 +123,19 @@ def build_ocp(
 
     nx = model.nx_reduced  # reduced state (no s)
     nu = model.nu
+
+    # Control dot regularization weight
+    if reg_du is None:
+        reg_du_arr = np.ones(nu, dtype=float) * 1e-4
+    else:
+        if np.isscalar(reg_du):
+            reg_du_arr = np.ones(nu, dtype=float) * float(reg_du)
+        else:
+            reg_du_arr = np.asarray(reg_du, dtype=float).reshape(-1)
+            if reg_du_arr.size != nu:
+                raise ValueError(
+                    f"reg_du must have length {nu}, got {reg_du_arr.size}"
+                )
 
     opti = ca.Opti()
 
@@ -214,8 +228,18 @@ def build_ocp(
 
     opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
-    # minimise lap time + input regularisation (reg_u normalised by N)
-    obj = total_time + (reg_u / N) * ca.sumsqr(U)
+    if N > 1:
+        dU = U[1:, :] - U[:-1, :] # calculate delta_u
+        penalty = 0
+        for j in range(nu):
+            w_j = float(reg_du_arr[j])
+            if w_j != 0.0:
+                penalty += w_j * ca.sumsqr(dU[:, j])
+        penalty = penalty / (N - 1) # norm by nlp size to avoid explosion
+    else:
+        penalty = 0
+
+    obj = total_time + penalty
     opti.minimize(obj)
 
     if use_normalization:
@@ -269,7 +293,7 @@ def solve_ocp_and_save(
     solution_path: Path,
     integrator: SpaceIntegrator | None = None,
     initial_speed: float = 5.0,
-    reg_u: float = 1e-4,
+    reg_du: float | np.ndarray | None = None,
     run_config: Dict | None = None,
     use_normalization: bool = True,
 ) -> Dict:
@@ -288,8 +312,9 @@ def solve_ocp_and_save(
         Spatial integrator. Defaults to EulerIntegrator().
     initial_speed : float
         Initial speed guess (m/s). Default: 5.0.
-    reg_u : float
-        Input regularization weight. Default: 1e-4.
+    reg_du : float or array-like, optional
+        Input rate-regularization weight(s). If one scalar is given
+        make isotropic matrix.
 
     Returns
     -------
@@ -303,7 +328,7 @@ def solve_ocp_and_save(
         track,
         model,
         integrator=integrator,
-        reg_u=reg_u,
+        reg_du=reg_du,
         use_normalization=use_normalization,
     )
 
@@ -443,7 +468,7 @@ def _demo() -> None:
         solution_path=solution_out,
         integrator=EulerIntegrator(),
         initial_speed=5.0,
-        reg_u=1e-4,
+        reg_du=1e-4,
     )
 
 
