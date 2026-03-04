@@ -66,7 +66,7 @@ class PipelineConfig:
 
     compute_bounds: bool = True
 
-    use_savgol_bounds: bool = True
+    use_savgol_bounds: bool = False
     savgol_window_length: int = 41
     savgol_polyorder: int = 2
 
@@ -181,7 +181,7 @@ def step_compute_bounds(
     right = boundaries["right"]
 
     result = compute_lateral_bounds(track, left=left, right=right)
-    
+
     if config.use_savgol_bounds:
         w_left_s, w_right_s = apply_savgol_to_widths(
             result.w_left,
@@ -202,6 +202,7 @@ def step_compute_bounds(
         "use_savgol_bounds": bool(config.use_savgol_bounds),
         "savgol_window_length": int(config.savgol_window_length),
         "savgol_polyorder": int(config.savgol_polyorder),
+        "bounds_method": "kdtree_spline",
     }
     save_track_with_widths(
         config.track_with_widths_path,

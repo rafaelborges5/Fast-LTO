@@ -24,7 +24,9 @@ from typing import Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.interpolate import CubicSpline, PchipInterpolator
 from scipy.signal import savgol_filter
+from scipy.spatial import cKDTree
 
 try:
     from ..splines.discretized_track import DiscretizedTrack  # type: ignore
@@ -140,9 +142,11 @@ def _ray_segment_intersection(p: np.ndarray, n_hat: np.ndarray, q0: np.ndarray, 
     return t, u
 
 
-def compute_lateral_bounds(track: DiscretizedTrack, left: np.ndarray, right: np.ndarray) -> LateralBoundsResult:
+def _compute_lateral_bounds_rays(track: DiscretizedTrack, left: np.ndarray, right: np.ndarray) -> LateralBoundsResult:
     """
-    For each center sample, find intersections of its normal with left/right polylines.
+    Legacy implementation: for each center sample, intersect its normal with
+    left/right boundary polylines using a ray–segment scan.
+
     Returns w_left (positive along +n) and w_right (positive along -n).
     """
     n_samples = track.num_points
@@ -202,7 +206,157 @@ def compute_lateral_bounds(track: DiscretizedTrack, left: np.ndarray, right: np.
         else:
             w_right[i] = t_min
 
-    return LateralBoundsResult(w_left=w_left, w_right=w_right, misses_left=misses_left, misses_right=misses_right)
+    return LateralBoundsResult(
+        w_left=w_left,
+        w_right=w_right,
+        misses_left=misses_left,
+        misses_right=misses_right,
+    )
+
+
+def _make_spline(s: np.ndarray, d: np.ndarray):
+    """
+    Internal fun for 1D splines d(s).
+    """
+    # Cubic spline variant (C2 where possible)
+    return CubicSpline(s, d, bc_type="natural")
+    # PCHIP alternative (monotone, shape-preserving)
+    # return PchipInterpolator(s, d)
+
+
+def _project_boundary_points_to_frenet(
+    boundary: np.ndarray,
+    positions: np.ndarray,
+    s: np.ndarray,
+    tangents: np.ndarray,
+    normals: np.ndarray,
+    kappa: np.ndarray,
+    tree: cKDTree,
+    ds_max_factor: float = 5.0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Project boundary points into local Frenet coordinates (s_cone, d_true).
+
+    Uses a KD-tree to find the nearest centerline sample, then computes:
+      - Δs along the tangent
+      - raw lateral deviation along the normal
+      - curvature-corrected lateral deviation d_true
+    """
+    if boundary.size == 0:
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+
+    # Nearest center indices for each boundary point
+    _, idx = tree.query(boundary)
+    idx = np.asarray(idx, dtype=int)
+
+    p_i = positions[idx]
+    v = boundary - p_i
+
+    t_i = tangents[idx]
+    n_i = normals[idx]
+    k_i = kappa[idx]
+
+    delta_s = np.einsum("ij,ij->i", v, t_i)
+    s_cone = s[idx] + delta_s
+
+    d_raw = np.einsum("ij,ij->i", v, n_i)
+
+    # Curvature correction: d_true = d_raw - sign(d_raw) * 0.5 * kappa * Δs^2
+    correction = 0.5 * k_i * (delta_s ** 2)
+    d_true = d_raw - np.sign(d_raw) * correction
+
+    # Filter out cones that are too far along the track from their nearest sample
+    ds_max = ds_max_factor * float(s[1] - s[0]) if s.size > 1 else np.inf
+    mask = np.isfinite(s_cone) & np.isfinite(d_true) & (np.abs(delta_s) <= ds_max)
+
+    return s_cone[mask], d_true[mask]
+
+
+def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, right: np.ndarray) -> LateralBoundsResult:
+    """
+    KD-tree based implementation:
+      1) Map boundary points to nearest centerline samples via KD-tree.
+      2) Project to local Frenet frame with curvature correction.
+      3) Fit 1D splines d_left(s), d_right(s).
+      4) Sample at discretized arc lengths to obtain w_left, w_right.
+    """
+    positions = track.positions
+    s = track.arc_lengths
+    headings = track.headings
+    kappa = track.curvatures
+
+    tangents = np.column_stack((np.cos(headings), np.sin(headings)))
+    normals = np.column_stack((-np.sin(headings), np.cos(headings)))
+
+    tree = cKDTree(positions)
+
+    s_left_raw, d_left_raw = _project_boundary_points_to_frenet(
+        left, positions, s, tangents, normals, kappa, tree
+    )
+    s_right_raw, d_right_raw = _project_boundary_points_to_frenet(
+        right, positions, s, tangents, normals, kappa, tree
+    )
+
+    def _prepare_side(s_samples: np.ndarray, d_samples: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        if s_samples.size == 0:
+            return s_samples, d_samples
+
+        order = np.argsort(s_samples)
+        s_sorted = s_samples[order]
+        d_sorted = d_samples[order]
+
+        unique_s = [s_sorted[0]]
+        unique_d = [d_sorted[0]]
+        tol = 1e-3
+        for sj, dj in zip(s_sorted[1:], d_sorted[1:]):
+            if abs(sj - unique_s[-1]) <= tol:
+                unique_d[-1] = 0.5 * (unique_d[-1] + dj)
+            else:
+                unique_s.append(sj)
+                unique_d.append(dj)
+
+        return np.asarray(unique_s, dtype=np.float64), np.asarray(unique_d, dtype=np.float64)
+
+    s_left, d_left = _prepare_side(s_left_raw, d_left_raw)
+    s_right, d_right = _prepare_side(s_right_raw, d_right_raw)
+
+    n_samples = track.num_points
+    w_left = np.full(n_samples, np.nan, dtype=np.float64)
+    w_right = np.full(n_samples, np.nan, dtype=np.float64)
+
+    min_points = 3
+    misses_left = 0
+    misses_right = 0
+
+    if s_left.size >= min_points:
+        left_spline = _make_spline(s_left, d_left)
+        d_left_at_s = left_spline(s)
+        w_left = np.maximum(d_left_at_s, 0.0)
+        misses_left = int(np.count_nonzero(~np.isfinite(w_left)))
+    else:
+        misses_left = n_samples
+
+    if s_right.size >= min_points:
+        right_spline = _make_spline(s_right, d_right)
+        d_right_at_s = right_spline(s)
+        w_right = np.maximum(-d_right_at_s, 0.0)
+        misses_right = int(np.count_nonzero(~np.isfinite(w_right)))
+    else:
+        misses_right = n_samples
+
+    return LateralBoundsResult(
+        w_left=w_left,
+        w_right=w_right,
+        misses_left=misses_left,
+        misses_right=misses_right,
+    )
+
+
+def compute_lateral_bounds(track: DiscretizedTrack, left: np.ndarray, right: np.ndarray) -> LateralBoundsResult:
+    # New KD-tree + spline implementation (default)
+    return _compute_lateral_bounds_kdtree(track, left, right)
+    # Legacy ray-based implementation:
+    # return _compute_lateral_bounds_rays(track, left, right)
 
 
 def save_bounds_json(path: Path, track: DiscretizedTrack, csv_source: Path, result: LateralBoundsResult) -> None:
@@ -321,5 +475,5 @@ def _demo() -> None:
 
 if __name__ == "__main__":
     _demo()
- 
+
 

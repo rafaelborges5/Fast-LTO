@@ -127,8 +127,8 @@ Examples:
     )
 
     parser.add_argument(
-        "--no-savgol-bounds",
-        action="store_true",
+        "--savgol-bounds",
+        action="store_false",
         help="Disable Savitzky–Golay smoothing of lateral bounds.",
     )
 
@@ -168,7 +168,7 @@ Examples:
         repo_root=args.repo_root,
         ds_m=args.ds,
         continuity=args.continuity,
-        use_savgol_bounds=not args.no_savgol_bounds,
+        use_savgol_bounds=not args.savgol_bounds,
         model_name=args.model,
         integrator_name=args.integrator,
         initial_speed=args.initial_speed,
