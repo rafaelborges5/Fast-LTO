@@ -96,9 +96,10 @@ class VehicleModel(ABC):
         self,
         states: Sequence[ca.MX],
         inputs: Sequence[ca.MX],
+        curvature: ca.MX,
     ) -> List[ca.MX]:
         """
-        Inequality constraints g(x, u) <= 0.
+        Inequality constraints g(x, u, kappa) <= 0.
         """
         raise NotImplementedError
 
@@ -192,6 +193,11 @@ class VehicleModel(ABC):
         """
         return self._u_scale_dm, self._u_shift_dm
 
+
+    @staticmethod
+    def _smoothmax(a: ca.MX, b: ca.MX, eps: float) -> ca.MX:
+        """Smooth C1 approximation of max(a, b)."""
+        return 0.5 * (a + b + ca.sqrt((a - b) ** 2 + eps**2))
 
     @staticmethod
     def physical_to_norm(val_phys: ca.MX, scale: ca.DM, shift: ca.DM) -> ca.MX:
@@ -288,8 +294,11 @@ class VehicleModel(ABC):
 
         s_dot = x_dot_phys_full[0]
         x_dot_phys_red = x_dot_phys_full[1:]
+        s_dot_floor = float(self.params.get("eps_s_dot", 1e-3))
+        s_dot_smooth_eps = float(self.params.get("smoothmax_eps", 1e-3))
+        s_dot_safe = self._smoothmax(s_dot, ca.MX(s_dot_floor), s_dot_smooth_eps)
 
-        x_red_dot_phys_per_s = x_dot_phys_red / s_dot
+        x_red_dot_phys_per_s = x_dot_phys_red / s_dot_safe
 
         return x_red_dot_phys_per_s / x_scale
 
@@ -297,6 +306,7 @@ class VehicleModel(ABC):
         self,
         x_red_norm: ca.MX,
         u_norm: ca.MX,
+        curvature: ca.MX,
     ) -> List[ca.MX]:
         """
         Inequality constraints g(x_norm, u_norm) <= 0 evaluated in
@@ -312,4 +322,4 @@ class VehicleModel(ABC):
         x_red_phys = self.norm_to_physical(x_red_norm, x_scale, x_shift)
         u_phys = self.norm_to_physical(u_norm, u_scale, u_shift)
         full_state = ca.vertcat(ca.MX(0), x_red_phys)
-        return self.get_constraints(full_state, u_phys)
+        return self.get_constraints(full_state, u_phys, curvature)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Callable, Dict, Tuple
@@ -19,6 +20,18 @@ else:
     from vehicle_models import VehicleModel, PointMassModel
     from utils.track_bounds import load_boundaries
     from optimization.integrators import SpaceIntegrator, EulerIntegrator, RK4Integrator
+
+
+def _safe_debug_value(opti: ca.Opti, expr) -> np.ndarray | float | None:
+    """Return opti.debug.value(expr) as plain Python/numpy, or None on failure."""
+    try:
+        val = opti.debug.value(expr)
+    except Exception:
+        return None
+    arr = np.array(val)
+    if arr.size == 1:
+        return float(arr.reshape(-1)[0])
+    return arr
 
 
 def load_track_with_widths(path: Path) -> Dict:
@@ -94,6 +107,7 @@ def build_ocp(
     integrator: SpaceIntegrator | None = None,
     reg_du: float | np.ndarray | None = None,
     use_normalization: bool = True,
+    solver_verbose: bool = False,
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -180,10 +194,10 @@ def build_ocp(
         opti.subject_to(X[i + 1, :].T == x_next)
 
         if use_normalization:
-            g_list = model.get_constraints_normalized(x_i, u_i)
+            g_list = model.get_constraints_normalized(x_i, u_i, kappa_i)
         else:
             full_state, _ = eval_at_point(x_i, u_i, kappa_i)
-            g_list = model.get_constraints(full_state, u_i)
+            g_list = model.get_constraints(full_state, u_i, kappa_i)
         for g in g_list:
             opti.subject_to(g <= 0)
 
@@ -263,8 +277,8 @@ def build_ocp(
     opti.solver(
         "ipopt",
         {
-            "ipopt.print_level": 0,
-            "print_time": 0,
+            "ipopt.print_level": 5 if solver_verbose else 0,
+            "print_time": 1 if solver_verbose else 0,
             "ipopt.sb": "yes",
             "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
         },
@@ -296,6 +310,7 @@ def solve_ocp_and_save(
     reg_du: float | np.ndarray | None = None,
     run_config: Dict | None = None,
     use_normalization: bool = True,
+    solver_verbose: bool = False,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -330,6 +345,7 @@ def solve_ocp_and_save(
         integrator=integrator,
         reg_du=reg_du,
         use_normalization=use_normalization,
+        solver_verbose=solver_verbose,
     )
 
     reduced_names = model.reduced_state_names()
@@ -352,7 +368,76 @@ def solve_ocp_and_save(
         opti.set_initial(X[:, v_idx], initial_speed)
 
     start_time = time.perf_counter()
-    sol = opti.solve()
+    try:
+        sol = opti.solve()
+    except RuntimeError as exc:
+        solve_time_s = time.perf_counter() - start_time
+        stats = opti.stats()
+        return_status = stats.get("return_status")
+        iter_count = stats.get("iter_count")
+
+        debug_solution_path = solution_path.with_name(
+            f"{solution_path.stem}_debug_failure.json"
+        )
+        debug_payload = {
+            "error": str(exc),
+            "return_status": return_status,
+            "iter_count": iter_count,
+            "solve_time_s": solve_time_s,
+            "use_normalization": bool(use_normalization),
+            "state_names": model.reduced_state_names(),
+            "input_names": model.get_input_names(),
+            "track_summary": {
+                "num_points": len(track.get("arc_lengths", [])),
+                "ds_m": float(track.get("ds_m", 0.0)),
+            },
+            "X_debug": None,
+            "U_debug": None,
+            "objective_debug": None,
+            "total_time_debug": None,
+        }
+
+        x_dbg = _safe_debug_value(opti, X)
+        u_dbg = _safe_debug_value(opti, U)
+        obj_dbg = _safe_debug_value(opti, obj)
+        t_dbg = _safe_debug_value(opti, total_time_expr)
+
+        if isinstance(x_dbg, np.ndarray):
+            debug_payload["X_debug"] = x_dbg.tolist()
+        if isinstance(u_dbg, np.ndarray):
+            debug_payload["U_debug"] = u_dbg.tolist()
+        if isinstance(obj_dbg, float):
+            debug_payload["objective_debug"] = obj_dbg
+        if isinstance(t_dbg, float):
+            debug_payload["total_time_debug"] = t_dbg
+
+        debug_solution_path.parent.mkdir(parents=True, exist_ok=True)
+        with debug_solution_path.open("w") as f:
+            json.dump(debug_payload, f, indent=2)
+
+        print("OCP solve failed.", file=sys.stderr, flush=True)
+        print(
+            f"  IPOPT status: {return_status}, "
+            f"iterations: {iter_count if iter_count is not None else 'N/A'}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(f"  Runtime: {solve_time_s:.3f} s", file=sys.stderr, flush=True)
+        print(
+            f"  Debug snapshot saved to: {debug_solution_path}",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            print("  Infeasibilities at latest iterate:", file=sys.stderr, flush=True)
+            opti.debug.show_infeasibilities()
+        except Exception:
+            print(
+                "  Could not print infeasibilities from opti.debug.",
+                file=sys.stderr,
+                flush=True,
+            )
+        raise
     solve_time_s = time.perf_counter() - start_time
 
     stats = opti.stats()

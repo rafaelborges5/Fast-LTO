@@ -75,7 +75,7 @@ class FSGTrackConfig:
 
     # ── Turn complexity (chicanes / S-curves) ────────────────────────
     num_harmonics: int = 3                 # random sinusoidal harmonics added to radii (0 = convex oval)
-    harmonic_amplitude: float = 0.55       # max amplitude of each harmonic as fraction of base_radius
+    harmonic_amplitude: float = 0.45       # max amplitude of each harmonic as fraction of base_radius
 
     # ── FSG regulatory constraints ──────────────────────────────────
     min_turn_radius_m: float = 4.5         # D 1.1.10: minimum turning radius = diameter / 2 = 9 / 2 m

@@ -374,7 +374,7 @@ class TrackProcessor:
                 label=f"singular points ({len(singular_indices)} shown)",
             )
 
-        ax.set_aspect("equal", adjustable="box")
+        ax.set_aspect("equal", adjustable="box")    
         ax.set_title(
             f"Frenet geometry check with singularities\n"
             f"Normal lines: ±{normal_length_m}m | "
@@ -529,7 +529,7 @@ def _demo() -> None:
         left_boundary=left_boundary,
         right_boundary=right_boundary,
         normal_length_m=6.0,
-        every=1,
+        every=3,
         singularity_threshold=0.4,
         show=True,
     )

@@ -67,7 +67,12 @@ class PointMassModel(VehicleModel):
 
         return ca.vertcat(s_dot, d_dot, psi_err_dot, v_dot)
 
-    def get_constraints(self, states: Sequence[ca.MX], inputs: Sequence[ca.MX]) -> List[ca.MX]:
+    def get_constraints(
+        self,
+        states: Sequence[ca.MX],
+        inputs: Sequence[ca.MX],
+        curvature: ca.MX,
+    ) -> List[ca.MX]:
         """
         Return inequalities g(x,u) <= 0:
           a_long - a_long_max <= 0

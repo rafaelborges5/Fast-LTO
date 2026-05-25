@@ -175,7 +175,8 @@ def run_ds_scaling_experiment(
     # ------------------------------------------------------------------
     # Save CSV
     # ------------------------------------------------------------------
-    csv_path = out_dir / f"ds_scaling_{track_id}_{integrator_name}_{continuity}.csv"
+    # Include model_name to avoid accidental overwrite when comparing models.
+    csv_path = out_dir / f"ds_scaling_{track_id}_{model_name}_{integrator_name}_{continuity}.csv"
     if results:
         # Collect all keys across results to keep CSV header stable.
         fieldnames: List[str] = sorted({k for row in results for k in row.keys()})
@@ -190,7 +191,16 @@ def run_ds_scaling_experiment(
 
     plot_paths: Dict[str, Path] = {}
     if make_plots:
-        plot_paths.update(_make_plots(results, out_dir, track_id, integrator_name, continuity))
+        plot_paths.update(
+            _make_plots(
+                results,
+                out_dir,
+                track_id,
+                model_name=model_name,
+                integrator_name=integrator_name,
+                continuity=continuity,
+            )
+        )
 
     out_paths: Dict[str, Path] = {"csv": csv_path}
     out_paths.update(plot_paths)
@@ -201,6 +211,7 @@ def _make_plots(
     results: List[Dict[str, Any]],
     out_dir: Path,
     track_id: str,
+    model_name: str = "point_mass",
     integrator_name: str = "euler",
     continuity: str = "C2",
 ) -> Dict[str, Path]:
@@ -287,9 +298,9 @@ def _make_plots(
     axes[2, 2].set_ylabel("solve_time / lap_time")
     axes[2, 2].grid(True, linestyle="--", alpha=0.4)
 
-    tag = f"{track_id}_{integrator_name}_{continuity}"
+    tag = f"{track_id}_{model_name}_{integrator_name}_{continuity}"
     fig.suptitle(
-        f"ds-scaling (track={track_id}, integrator={integrator_name}, continuity={continuity})",
+        f"ds-scaling (track={track_id}, model={model_name}, integrator={integrator_name}, continuity={continuity})",
         fontsize=14,
     )
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
@@ -344,6 +355,7 @@ def _make_combined_plots(
     config_results: List[Dict[str, Any]],
     out_dir: Path,
     track_id: str,
+    model_name: str = "point_mass",
 ) -> Dict[str, Path]:
     """
     Generate combined summary plots overlaying multiple configurations.
@@ -452,12 +464,12 @@ def _make_combined_plots(
     axes[0, 0].legend()
 
     fig.suptitle(
-        f"ds-scaling multi-config (track={track_id})",
+        f"ds-scaling multi-config (track={track_id}, model={model_name})",
         fontsize=14,
     )
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
 
-    combined_path = out_dir / f"ds_scaling_all_{track_id}_multi.png"
+    combined_path = out_dir / f"ds_scaling_all_{track_id}_{model_name}_multi.png"
     fig.savefig(combined_path, dpi=200)
     plt.close(fig)
 
@@ -536,6 +548,14 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--euler-only",
+        action="store_true",
+        help=(
+            "When combined with --multi-config, run only Euler × (C2/C4) "
+            "instead of all four integrator/continuity combinations."
+        ),
+    )
+    parser.add_argument(
         "--no-plots",
         action="store_true",
         help="Disable plot generation (still writes CSV).",
@@ -547,16 +567,23 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     if args.multi_config:
-        # Run four predefined configurations and generate combined plots.
-        configs = [
-            ("euler", "C2", "Euler C2"),
-            ("euler", "C4", "Euler C4"),
-            ("rk4", "C2", "RK4 C2"),
-            ("rk4", "C4", "RK4 C4"),
-        ]
+        # Run predefined configurations and generate combined plots.
+        if args.euler_only:
+            configs = [
+                ("euler", "C2", "Euler C2"),
+                ("euler", "C4", "Euler C4"),
+            ]
+            print("Running multi-config ds-scaling experiment (Euler × C2/C4).")
+        else:
+            configs = [
+                ("euler", "C2", "Euler C2"),
+                ("euler", "C4", "Euler C4"),
+                ("rk4", "C2", "RK4 C2"),
+                ("rk4", "C4", "RK4 C4"),
+            ]
+            print("Running multi-config ds-scaling experiment (euler/rk4 × C2/C4).")
 
         csv_entries: List[Dict[str, Any]] = []
-        print("Running multi-config ds-scaling experiment (euler/rk4 × C2/C4).")
 
         for integrator_name, continuity, label in configs:
             print()
@@ -593,7 +620,7 @@ def main() -> None:
             # All CSVs are in the same directory by construction.
             if csv_entries:
                 out_dir = csv_entries[0]["csv"].parent
-                _make_combined_plots(config_results, out_dir, track_id=args.track_id)
+                _make_combined_plots(config_results, out_dir, track_id=args.track_id, model_name=args.model)
         else:
             print("Skipping combined plot generation due to --no-plots.")
 

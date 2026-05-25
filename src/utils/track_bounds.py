@@ -245,7 +245,6 @@ def _project_boundary_points_to_frenet(
     if boundary.size == 0:
         return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
 
-    # Nearest center indices for each boundary point
     _, idx = tree.query(boundary)
     idx = np.asarray(idx, dtype=int)
 
@@ -261,11 +260,9 @@ def _project_boundary_points_to_frenet(
 
     d_raw = np.einsum("ij,ij->i", v, n_i)
 
-    # Curvature correction: d_true = d_raw - sign(d_raw) * 0.5 * kappa * Δs^2
-    correction = 0.5 * k_i * (delta_s ** 2)
+    correction = 0.5 * k_i * (delta_s ** 2) # 2nd order taylor correctoin
     d_true = d_raw - np.sign(d_raw) * correction
 
-    # Filter out cones that are too far along the track from their nearest sample
     ds_max = ds_max_factor * float(s[1] - s[0]) if s.size > 1 else np.inf
     mask = np.isfinite(s_cone) & np.isfinite(d_true) & (np.abs(delta_s) <= ds_max)
 

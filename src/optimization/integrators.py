@@ -26,6 +26,11 @@ from abc import ABC, abstractmethod
 import casadi as ca
 
 
+def _smoothmax(a: ca.MX, b: ca.MX, eps: float) -> ca.MX:
+    """Smooth C1 approximation of max(a, b)."""
+    return 0.5 * (a + b + ca.sqrt((a - b) ** 2 + eps**2))
+
+
 class SpaceIntegrator(ABC):
 
     @abstractmethod
@@ -120,7 +125,8 @@ class EulerIntegrator(SpaceIntegrator):
     def time_step(self, f_space, eval_at_point, x, u, kappa, ds,
                   kappa_half=None, kappa_next=None, eps=1e-3):
         _, s_dot = eval_at_point(x, u, kappa)
-        return ds / (s_dot + eps)
+        s_dot_safe = _smoothmax(s_dot, ca.MX(eps), eps)
+        return ds / s_dot_safe
 
 
 class RK4Integrator(SpaceIntegrator):
@@ -152,10 +158,15 @@ class RK4Integrator(SpaceIntegrator):
         _, sd3 = eval_at_point(x3, u, kh)
         _, sd4 = eval_at_point(x4, u, kn)
 
+        sd1_safe = _smoothmax(sd1, ca.MX(eps), eps)
+        sd2_safe = _smoothmax(sd2, ca.MX(eps), eps)
+        sd3_safe = _smoothmax(sd3, ca.MX(eps), eps)
+        sd4_safe = _smoothmax(sd4, ca.MX(eps), eps)
+
         # Simpson-3/8 weighted time integral (RK4-consistent quadrature).
         return (ds / 6) * (
-            1 / (sd1 + eps)
-            + 2 / (sd2 + eps)
-            + 2 / (sd3 + eps)
-            + 1 / (sd4 + eps)
+            1 / sd1_safe
+            + 2 / sd2_safe
+            + 2 / sd3_safe
+            + 1 / sd4_safe
         )

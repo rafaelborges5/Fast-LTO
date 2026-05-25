@@ -39,7 +39,7 @@ from utils.track_bounds import (
     load_boundaries,
     save_track_with_widths,
 )
-from vehicle_models import PointMassModel, VehicleModel
+from vehicle_models import DynamicBicycleModel, PointMassModel, VehicleModel
 
 
 StepName = Literal["track", "spline", "bounds", "ocp", "plot"]
@@ -74,11 +74,12 @@ class PipelineConfig:
     integrator_name: Literal["euler", "rk4"] = "euler"
     # Input rate-regularization weight on changes in inputs (du).
     reg_u: float = 600.0
-    initial_speed: float = 1.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
+    initial_speed: float = 5.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
 
     plot_results: bool = True
     show_plots: bool = True  # Whether to display plots interactively
     normalize_states_and_inputs: bool = True
+    solver_verbose: bool = False
 
     def __post_init__(self) -> None:
         if self.repo_root is None:
@@ -219,6 +220,8 @@ def step_compute_bounds(
 def _make_model(model_name: str) -> VehicleModel:
     if model_name == "point_mass":
         return PointMassModel()
+    if model_name == "dynamic_bicycle":
+        return DynamicBicycleModel()
     raise ValueError(f"Unknown model_name: {model_name!r}")
 
 
@@ -281,6 +284,7 @@ def step_solve_ocp(
         "reg_du": reg_du_for_sig,
         "initial_speed": float(config.initial_speed),
         "normalize_states_and_inputs": bool(config.normalize_states_and_inputs),
+        "solver_verbose": bool(config.solver_verbose),
         "use_savgol_bounds": bool(config.use_savgol_bounds),
         "savgol_window_length": int(config.savgol_window_length),
         "savgol_polyorder": int(config.savgol_polyorder),
@@ -295,6 +299,7 @@ def step_solve_ocp(
         reg_du=config.reg_u,
         run_config=run_config,
         use_normalization=config.normalize_states_and_inputs,
+        solver_verbose=config.solver_verbose,
     )
 
     # Optional concise profiling summary (single line)
@@ -324,8 +329,6 @@ def step_visualize(
 ) -> Path:
     from datetime import datetime
 
-    from visualization.ocp_plots import plot_all_panels, _compute_constraint_activity
-
     if solution_path is None:
         solution_path = config.solution_path
     if csv_path is None:
@@ -349,45 +352,81 @@ def step_visualize(
     d = np.array(data["d"], dtype=np.float64)
     w_left = np.array(data["w_left"], dtype=np.float64)
     w_right = np.array(data["w_right"], dtype=np.float64)
-    a_long = np.array(data["a_long"], dtype=np.float64)
-    a_lat = np.array(data["a_lat"], dtype=np.float64)
     params = data.get("model_params", {})
-    mu = params.get("mu", 1.2)
-    g_val = params.get("g", 9.81)
-    mu_g = mu * g_val
-
     profiling = data.get("profiling")
-    constraint_activity = _compute_constraint_activity(
-        d=d,
-        w_left=w_left,
-        w_right=w_right,
-        a_long=a_long,
-        a_lat=a_lat,
-        v=v,
-        params=params,
-    )
 
     timestamp_dir = config.plots_dir / datetime.now().strftime("%Y%m%d-%H%M%S")
     timestamp_dir.mkdir(parents=True, exist_ok=True)
 
     plot_path = timestamp_dir / "panels.png"
-    plot_all_panels(
-        cones_left,
-        cones_right,
-        path_xy,
-        v,
-        s,
-        d,
-        w_left,
-        w_right,
-        a_long,
-        a_lat,
-        mu_g,
-        profiling=profiling,
-        constraint_activity=constraint_activity,
-        out_path=plot_path,
-        show=config.show_plots,
-    )
+    if config.model_name == "point_mass":
+        from visualization.ocp_plots import plot_all_panels, _compute_constraint_activity
+
+        a_long = np.array(data["a_long"], dtype=np.float64)
+        a_lat = np.array(data["a_lat"], dtype=np.float64)
+
+        mu = params.get("mu", 1.2)
+        g_val = params.get("g", 9.81)
+        mu_g = mu * g_val
+
+        constraint_activity = _compute_constraint_activity(
+            d=d,
+            w_left=w_left,
+            w_right=w_right,
+            a_long=a_long,
+            a_lat=a_lat,
+            v=v,
+            params=params,
+        )
+
+        plot_all_panels(
+            cones_left,
+            cones_right,
+            path_xy,
+            v,
+            s,
+            d,
+            w_left,
+            w_right,
+            a_long,
+            a_lat,
+            mu_g,
+            profiling=profiling,
+            constraint_activity=constraint_activity,
+            out_path=plot_path,
+            show=config.show_plots,
+        )
+    elif config.model_name == "dynamic_bicycle":
+        from visualization.ocp_plots_dynamic_bicycle import plot_all_panels_dynamic_bicycle
+
+        a_long = np.array(data["a_long"], dtype=np.float64)
+        delta = np.array(data["delta"], dtype=np.float64)
+        v_lat = np.array(data["v_lat"], dtype=np.float64)
+        yaw_rate = np.array(data["yaw_rate"], dtype=np.float64)
+
+        plot_all_panels_dynamic_bicycle(
+            cones_left,
+            cones_right,
+            path_xy,
+            v,
+            s,
+            d,
+            w_left,
+            w_right,
+            a_long,
+            delta,
+            v_lat,
+            yaw_rate,
+            params=params,
+            profiling=profiling,
+            out_path=plot_path,
+            show=config.show_plots,
+        )
+    else:
+        raise ValueError(
+            f"No visualization available for model_name={config.model_name!r}. "
+            "Supported: 'point_mass', 'dynamic_bicycle'."
+        )
 
     print(f"  Saved plots to: {timestamp_dir}")
     return timestamp_dir

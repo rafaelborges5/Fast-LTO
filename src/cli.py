@@ -77,7 +77,7 @@ Examples:
         "--ds",
         type=float,
         default=None,
-        help="Discretization step in meters. Default: 0.5",
+        help="Discretization step in meters. If omitted, uses PipelineConfig default.",
     )
     parser.add_argument(
         "--continuity",
@@ -92,7 +92,7 @@ Examples:
         "--model",
         type=str,
         default="point_mass",
-        help="Vehicle model. Default: point_mass",
+        help="Vehicle model. Options: point_mass, dynamic_bicycle. Default: point_mass",
     )
     parser.add_argument(
         "--integrator",
@@ -137,6 +137,11 @@ Examples:
         action="store_true",
         help="Disable state/input normalization inside the OCP (use physical units).",
     )
+    parser.add_argument(
+        "--solver-verbose",
+        action="store_true",
+        help="Print IPOPT iteration output to terminal during OCP solve.",
+    )
 
     # Visualization
     parser.add_argument(
@@ -166,16 +171,19 @@ Examples:
         track_type=args.track_type,
         generate_track=args.generate_track,
         repo_root=args.repo_root,
-        ds_m=args.ds,
         continuity=args.continuity,
         use_savgol_bounds=not args.savgol_bounds,
         model_name=args.model,
         integrator_name=args.integrator,
         initial_speed=args.initial_speed,
         normalize_states_and_inputs=not args.no_normalization,
+        solver_verbose=args.solver_verbose,
         plot_results=not args.no_plot,
         show_plots=not args.no_show_plots,
     )
+    # Only override PipelineConfig defaults when the user explicitly provides a value.
+    if args.ds is not None:
+        config_kwargs["ds_m"] = args.ds
     # Scalar or vector regularisation weights
     if args.reg_du_vec is not None:
         # Parse comma-separated floats into a list; validated later in OCP build

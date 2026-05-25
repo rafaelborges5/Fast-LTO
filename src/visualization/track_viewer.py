@@ -147,5 +147,5 @@ __all__ = ["plot_track_csv"]
 
 
 if __name__ == "__main__":
-    plot_track_csv("data/tracks/ellipse.csv")
+    plot_track_csv("data/tracks/fsg_random.csv")
 
