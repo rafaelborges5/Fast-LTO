@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from scipy.interpolate import CubicSpline
 
 CSV_COLUMNS = [
     "x",
@@ -37,6 +38,52 @@ CSV_COLUMNS = [
     "steering_angle",
     "steering_angle_dot",
 ]
+
+
+def _compute_path_geometry(
+    path_xy: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fit a periodic C2 cubic spline to a closed path and return heading + curvature.
+
+    Parameters
+    ----------
+    path_xy : np.ndarray
+        Shape (N, 2) of [x, y] positions forming a closed loop (no repeated endpoint).
+
+    Returns
+    -------
+    headings : np.ndarray
+        Shape (N,) tangent heading angles in radians.
+    curvatures : np.ndarray
+        Shape (N,) signed curvatures.
+    """
+    x = path_xy[:, 0]
+    y = path_xy[:, 1]
+
+    diffs = np.diff(path_xy, axis=0)
+    segment_lengths = np.linalg.norm(diffs, axis=1)
+    t = np.zeros(len(x))
+    t[1:] = np.cumsum(segment_lengths)
+
+    wrap_distance = np.linalg.norm(path_xy[0] - path_xy[-1])
+    t_periodic = np.append(t, t[-1] + wrap_distance)
+    x_periodic = np.append(x, x[0])
+    y_periodic = np.append(y, y[0])
+
+    spline_x = CubicSpline(t_periodic, x_periodic, bc_type="periodic")
+    spline_y = CubicSpline(t_periodic, y_periodic, bc_type="periodic")
+
+    dx_dt = spline_x(t, 1)
+    dy_dt = spline_y(t, 1)
+    d2x_dt2 = spline_x(t, 2)
+    d2y_dt2 = spline_y(t, 2)
+
+    headings = np.arctan2(dy_dt, dx_dt)
+    numerator = dx_dt * d2y_dt2 - dy_dt * d2x_dt2
+    denominator = (dx_dt**2 + dy_dt**2) ** 1.5
+    curvatures = numerator / denominator
+
+    return headings, curvatures
 
 
 def _finite_diff_periodic(arr: np.ndarray, dt: np.ndarray) -> np.ndarray:
@@ -89,21 +136,36 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
 
     w_left = np.array(data["w_left"], dtype=np.float64)
     w_right = np.array(data["w_right"], dtype=np.float64)
-    boundary_left = w_left
-    boundary_right = -w_right  # sign flip for ROS convention
 
     v = np.array(data["v"], dtype=np.float64)
-    kappa = np.array(data["kappa"], dtype=np.float64)
     headings = np.array(data["headings"], dtype=np.float64)
     psi_err = np.array(data["psi_err"], dtype=np.float64)
     d = np.array(data["d"], dtype=np.float64)
-    arc_lengths = np.array(data["arc_lengths"], dtype=np.float64)
     a_long = np.array(data["a_long"], dtype=np.float64)
+
+    # -- Renormalize: make optimal path the new reference --
+    opt_headings, opt_kappa = _compute_path_geometry(path_xy)
+
+    boundary_left = w_left - d
+    boundary_right = -(w_right + d)
+
+    vehicle_heading = headings + psi_err
+    psi_err = (vehicle_heading - opt_headings + np.pi) % (2 * np.pi) - np.pi
+
+    kappa = opt_kappa
+    headings = opt_headings
+    d = np.zeros(N, dtype=np.float64)
+
+    # -- Arc lengths along the optimal path --
+    path_diffs = np.diff(path_xy, axis=0)
+    segment_lengths = np.linalg.norm(path_diffs, axis=1)
+    arc_lengths = np.zeros(N, dtype=np.float64)
+    arc_lengths[1:] = np.cumsum(segment_lengths)
 
     # -- Arc-length steps (periodic) --
     ds = np.diff(arc_lengths, append=arc_lengths[0])
-    # The last step wraps around: use the typical step size as approximation
-    ds[-1] = arc_lengths[1] - arc_lengths[0]
+    wrap_len = np.linalg.norm(path_xy[0] - path_xy[-1])
+    ds[-1] = wrap_len
 
     # -- Time: cumulative sum of ds / v --
     dt = ds / np.maximum(v, 1e-6)

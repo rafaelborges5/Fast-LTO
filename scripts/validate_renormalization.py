@@ -1,0 +1,273 @@
+"""
+Validate the trajectory renormalization by checking invariants and plotting comparisons.
+
+Usage:
+    python scripts/validate_renormalization.py <solution_json>
+
+Example:
+    python scripts/validate_renormalization.py data/solutions/fsg_random_point_mass_euler.json
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from export.trajectory import _compute_path_geometry, export_reference_trajectory
+
+
+def load_original(solution_path: Path) -> dict:
+    with solution_path.open("r") as f:
+        data = json.load(f)
+
+    path_xy = np.array(data["path_xy"], dtype=np.float64)
+    return {
+        "path_xy": path_xy,
+        "w_left": np.array(data["w_left"], dtype=np.float64),
+        "w_right": np.array(data["w_right"], dtype=np.float64),
+        "kappa": np.array(data["kappa"], dtype=np.float64),
+        "headings": np.array(data["headings"], dtype=np.float64),
+        "psi_err": np.array(data["psi_err"], dtype=np.float64),
+        "d": np.array(data["d"], dtype=np.float64),
+        "arc_lengths": np.array(data["arc_lengths"], dtype=np.float64),
+        "v": np.array(data["v"], dtype=np.float64),
+        "model_name": data["run_config"]["model_name"],
+    }
+
+
+def load_exported_csv(csv_path: Path) -> dict:
+    import csv as csv_mod
+
+    with csv_path.open("r") as f:
+        reader = csv_mod.DictReader(f)
+        rows = list(reader)
+
+    def col(name: str) -> np.ndarray:
+        return np.array([float(r[name]) for r in rows], dtype=np.float64)
+
+    return {
+        "x": col("x"),
+        "y": col("y"),
+        "boundary_left": col("boundary_left"),
+        "boundary_right": col("boundary_right"),
+        "kappa": col("kappa"),
+        "yaw_angle": col("yaw_angle"),
+        "yaw_angle_error": col("yaw_angle_error"),
+        "lat_deviation": col("lat_deviation"),
+        "arc_progress": col("arc_progress"),
+        "time": col("time"),
+    }
+
+
+def check_invariants(orig: dict, exported: dict) -> bool:
+    all_ok = True
+
+    def check(name: str, condition: bool, detail: str = ""):
+        nonlocal all_ok
+        status = "PASS" if condition else "FAIL"
+        if not condition:
+            all_ok = False
+        msg = f"  [{status}] {name}"
+        if detail:
+            msg += f" -- {detail}"
+        print(msg)
+
+    print("\n=== Invariant Checks ===\n")
+
+    # 1. lat_deviation is all zeros
+    check(
+        "lat_deviation == 0",
+        np.allclose(exported["lat_deviation"], 0.0),
+        f"max |lat_dev| = {np.max(np.abs(exported['lat_deviation'])):.2e}",
+    )
+
+    # 2. Total track width preserved
+    total_orig = orig["w_left"] + orig["w_right"]
+    total_new = exported["boundary_left"] + np.abs(exported["boundary_right"])
+    check(
+        "Total track width preserved",
+        np.allclose(total_orig, total_new, atol=1e-10),
+        f"max diff = {np.max(np.abs(total_orig - total_new)):.2e}",
+    )
+
+    # 3. Both boundaries non-negative (small tolerance for floating-point)
+    check(
+        "boundary_left >= 0",
+        np.all(exported["boundary_left"] >= -1e-6),
+        f"min = {np.min(exported['boundary_left']):.6f}",
+    )
+    check(
+        "|boundary_right| >= 0 (always true)",
+        np.all(np.abs(exported["boundary_right"]) >= -1e-6),
+        f"min |br| = {np.min(np.abs(exported['boundary_right'])):.6f}",
+    )
+
+    # 4. Vehicle heading preserved
+    vehicle_heading_orig = orig["headings"] + orig["psi_err"]
+    vehicle_heading_new = exported["yaw_angle"] + exported["yaw_angle_error"]
+    cos_diff = np.abs(np.cos(vehicle_heading_orig) - np.cos(vehicle_heading_new))
+    sin_diff = np.abs(np.sin(vehicle_heading_orig) - np.sin(vehicle_heading_new))
+    check(
+        "Vehicle heading preserved",
+        np.max(cos_diff) < 1e-6 and np.max(sin_diff) < 1e-6,
+        f"max cos_diff = {np.max(cos_diff):.2e}, max sin_diff = {np.max(sin_diff):.2e}",
+    )
+
+    # 5. Curvature magnitude reasonable (exclude seam point at index 0)
+    max_kappa_orig = np.max(np.abs(orig["kappa"]))
+    max_kappa_new = np.max(np.abs(exported["kappa"][1:]))
+    max_kappa_seam = np.abs(exported["kappa"][0])
+    check(
+        "Curvature magnitude reasonable (excl. seam)",
+        max_kappa_new < max_kappa_orig * 3.0,
+        f"centerline max |κ| = {max_kappa_orig:.4f}, optimal max |κ| = {max_kappa_new:.4f}, seam |κ| = {max_kappa_seam:.4f}",
+    )
+
+    # 6. Spline periodicity (heading smooth at wrap)
+    heading_jump = np.abs(exported["yaw_angle"][-1] - exported["yaw_angle"][-2])
+    typical_jump = np.median(np.abs(np.diff(exported["yaw_angle"])))
+    check(
+        "Heading smooth at wrap-around",
+        heading_jump < 10 * typical_jump + 1e-6,
+        f"last jump = {heading_jump:.4f}, median jump = {typical_jump:.4f}",
+    )
+
+    # 7. x, y positions unchanged
+    check(
+        "x positions unchanged",
+        np.allclose(orig["path_xy"][:, 0], exported["x"]),
+    )
+    check(
+        "y positions unchanged",
+        np.allclose(orig["path_xy"][:, 1], exported["y"]),
+    )
+
+    # 8. Arc lengths monotonically increasing
+    check(
+        "Arc lengths monotonically increasing",
+        np.all(np.diff(exported["arc_progress"]) > 0),
+        f"min step = {np.min(np.diff(exported['arc_progress'])):.6f}",
+    )
+
+    # 9. Total length within ~5% of centerline length
+    total_opt = exported["arc_progress"][-1]
+    total_center = orig["arc_lengths"][-1]
+    pct_diff = abs(total_opt - total_center) / total_center * 100
+    check(
+        "Total length within 10% of centerline",
+        pct_diff < 10.0,
+        f"centerline = {total_center:.2f}m, optimal = {total_opt:.2f}m ({pct_diff:.2f}%)",
+    )
+
+    # 10. Time monotonically increasing
+    check(
+        "Time monotonically increasing",
+        np.all(np.diff(exported["time"]) > 0),
+    )
+
+    return all_ok
+
+
+def plot_comparisons(orig: dict, exported: dict, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    s_orig = orig["arc_lengths"]
+    s_new = exported["arc_progress"]
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    # 1. Curvature comparison
+    ax = axes[0, 0]
+    ax.plot(s_orig, orig["kappa"], label="centerline κ", alpha=0.7)
+    ax.plot(s_new, exported["kappa"], label="optimal path κ", alpha=0.7)
+    ax.set_xlabel("arc length [m]")
+    ax.set_ylabel("curvature [1/m]")
+    ax.set_title("Curvature: centerline vs optimal path")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # 2. Heading comparison
+    ax = axes[0, 1]
+    ax.plot(s_orig, orig["headings"], label="centerline heading", alpha=0.7)
+    ax.plot(s_new, exported["yaw_angle"], label="optimal path heading", alpha=0.7)
+    ax.set_xlabel("arc length [m]")
+    ax.set_ylabel("heading [rad]")
+    ax.set_title("Heading: centerline vs optimal path")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # 3. Boundaries (asymmetric)
+    ax = axes[1, 0]
+    ax.plot(s_orig, orig["w_left"], label="original w_left", alpha=0.5, linestyle="--")
+    ax.plot(s_orig, orig["w_right"], label="original w_right", alpha=0.5, linestyle="--")
+    ax.plot(s_new, exported["boundary_left"], label="renorm boundary_left", alpha=0.8)
+    ax.plot(s_new, np.abs(exported["boundary_right"]), label="renorm |boundary_right|", alpha=0.8)
+    ax.set_xlabel("arc length [m]")
+    ax.set_ylabel("width [m]")
+    ax.set_title("Track boundaries (now asymmetric)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # 4. Original lateral deviation
+    ax = axes[1, 1]
+    ax.plot(s_orig, orig["d"], label="original d", color="tab:purple")
+    ax.axhline(0, color="black", linestyle="--", alpha=0.3)
+    ax.set_xlabel("arc length [m]")
+    ax.set_ylabel("lateral deviation [m]")
+    ax.set_title("Original lateral deviation (now zeroed)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    fig.suptitle(f"Renormalization validation — {orig['model_name']}", fontsize=14)
+    fig.tight_layout()
+
+    out_path = out_dir / f"renormalization_{orig['model_name']}.png"
+    fig.savefig(out_path, dpi=150)
+    print(f"\nPlot saved to {out_path}")
+    plt.close(fig)
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage: python scripts/validate_renormalization.py <solution_json> [solution_json2 ...]")
+        sys.exit(1)
+
+    for solution_arg in sys.argv[1:]:
+        solution_path = Path(solution_arg).resolve()
+        if not solution_path.exists():
+            print(f"Solution not found: {solution_path}")
+            continue
+
+        print(f"\n{'='*60}")
+        print(f"Validating: {solution_path.name}")
+        print(f"{'='*60}")
+
+        orig = load_original(solution_path)
+
+        csv_out = REPO_ROOT / "data" / "validation" / f"renorm_{solution_path.stem}.csv"
+        export_reference_trajectory(solution_path, csv_out)
+        exported = load_exported_csv(csv_out)
+
+        ok = check_invariants(orig, exported)
+
+        plot_comparisons(
+            orig, exported,
+            out_dir=REPO_ROOT / "data" / "validation",
+        )
+
+        if ok:
+            print("\nAll checks PASSED.")
+        else:
+            print("\nSome checks FAILED.")
+
+    print()
+
+
+if __name__ == "__main__":
+    main()
