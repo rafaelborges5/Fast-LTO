@@ -10,7 +10,8 @@ Pipeline Steps
 2. Spline fitting          -> data/discretized/{track_id}.json
 3. Bounds computation      -> data/discretized/{track_id}_with_widths.json
 4. OCP solving             -> data/solutions/{track_id}_{model_name}_{integrator_name}.json
-5. Visualization           -> ocp_plots/{timestamp}/panels.png
+5. Trajectory export       -> data/output_trajectories/{track_id}_{model}_{integrator}_{timestamp}.csv
+6. Visualization           -> ocp_plots/{timestamp}/panels.png
 
 Each step can be run independently, and intermediate results are saved to disk
 for reuse in subsequent runs.
@@ -42,7 +43,7 @@ from utils.track_bounds import (
 from vehicle_models import DynamicBicycleModel, PointMassModel, VehicleModel
 
 
-StepName = Literal["track", "spline", "bounds", "ocp", "plot"]
+StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
 
 
 @dataclass
@@ -76,6 +77,8 @@ class PipelineConfig:
     reg_u: float = 600.0
     initial_speed: float = 5.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
 
+    export_trajectory: bool = True
+
     plot_results: bool = True
     show_plots: bool = True  # Whether to display plots interactively
     normalize_states_and_inputs: bool = True
@@ -96,6 +99,7 @@ class PipelineConfig:
 
         self.discretized_dir = self.repo_root / "data" / "discretized"
         self.solutions_dir = self.repo_root / "data" / "solutions"
+        self.output_trajectories_dir = self.repo_root / "data" / "output_trajectories"
         self.plots_dir = self.repo_root / "ocp_plots"
 
     @property
@@ -109,6 +113,12 @@ class PipelineConfig:
     @property
     def solution_path(self) -> Path:
         return self.solutions_dir / f"{self.track_id}_{self.model_name}_{self.integrator_name}.json"
+
+    @property
+    def export_trajectory_path(self) -> Path:
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return self.output_trajectories_dir / f"{self.track_id}_{self.model_name}_{self.integrator_name}_{ts}.csv"
 
 
 def step_generate_track(config: PipelineConfig) -> Path:
@@ -322,6 +332,27 @@ def step_solve_ocp(
     return solution_path
 
 
+def step_export_trajectory(
+    config: PipelineConfig,
+    solution_path: Optional[Path] = None,
+) -> Path:
+    from export.trajectory import export_reference_trajectory
+
+    if solution_path is None:
+        solution_path = config.solution_path
+
+    output_path = config.export_trajectory_path
+
+    print("[Step 5] Exporting reference trajectory CSV")
+    print(f"  Solution: {solution_path}")
+    print(f"  Output:   {output_path}")
+
+    export_reference_trajectory(solution_path, output_path)
+
+    print(f"  Exported {output_path.name}")
+    return output_path
+
+
 def step_visualize(
     config: PipelineConfig,
     solution_path: Optional[Path] = None,
@@ -335,7 +366,7 @@ def step_visualize(
         csv_path = config.track_csv_path
     assert csv_path is not None
 
-    print("[Step 5] Visualization")
+    print("[Step 6] Visualization")
     print(f"  Solution: {solution_path}")
     print(f"  Boundaries CSV: {csv_path}")
 
@@ -625,6 +656,14 @@ def run_pipeline(
     if end_at == "ocp":
         return results
 
+    # Trajectory export.
+    if config.export_trajectory:
+        export_path = step_export_trajectory(config, solution_path=results["ocp"])
+        results["export"] = export_path
+
+    if end_at == "export":
+        return results
+
     # Visualization.
     if config.plot_results:
         plot_dir = step_visualize(config, solution_path=results["ocp"], csv_path=csv_path)
@@ -640,6 +679,7 @@ __all__ = [
     "step_fit_spline",
     "step_compute_bounds",
     "step_solve_ocp",
+    "step_export_trajectory",
     "step_visualize",
     "run_pipeline",
 ]

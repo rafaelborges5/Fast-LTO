@@ -26,6 +26,7 @@ class PointMassModel(VehicleModel):
 
     def get_default_params(self) -> dict:
         return {
+            "m": 170.0,  # vehicle mass (kg)
             "L": 1.8,  # wheelbase
             "mu": 0.9,
             "g": 9.81,

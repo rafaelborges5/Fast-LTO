@@ -60,14 +60,14 @@ Examples:
     parser.add_argument(
         "--start-from",
         type=str,
-        choices=["track", "spline", "bounds", "ocp", "plot"],
+        choices=["track", "spline", "bounds", "ocp", "export", "plot"],
         default="track",
         help="Step to start from. Default: track",
     )
     parser.add_argument(
         "--end-at",
         type=str,
-        choices=["track", "spline", "bounds", "ocp", "plot"],
+        choices=["track", "spline", "bounds", "ocp", "export", "plot"],
         default=None,
         help="Step to end at (inclusive). If not set, runs to completion.",
     )
@@ -143,6 +143,13 @@ Examples:
         help="Print IPOPT iteration output to terminal during OCP solve.",
     )
 
+    # Export
+    parser.add_argument(
+        "--no-export",
+        action="store_true",
+        help="Skip trajectory CSV export step.",
+    )
+
     # Visualization
     parser.add_argument(
         "--no-plot",
@@ -178,6 +185,7 @@ Examples:
         initial_speed=args.initial_speed,
         normalize_states_and_inputs=not args.no_normalization,
         solver_verbose=args.solver_verbose,
+        export_trajectory=not args.no_export,
         plot_results=not args.no_plot,
         show_plots=not args.no_show_plots,
     )
