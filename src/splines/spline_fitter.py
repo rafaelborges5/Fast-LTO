@@ -55,25 +55,25 @@ def _load_middle_line(csv_path: Path) -> np.ndarray:
     Parameters
     ----------
     csv_path : Path
-        Path to the track CSV with columns: boundary, x, y, index
+        Path to the track CSV with columns: side, cone_id, x, y
 
     Returns
     -------
     np.ndarray
-        Shape (N, 2) array of [x, y] points, ordered by index.
+        Shape (N, 2) array of [x, y] points, ordered by cone_id.
     """
     points: list[Tuple[int, float, float]] = []
 
     with csv_path.open("r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row["boundary"].strip().lower() == "middle":
-                idx = int(row["index"])
+            if row["side"].strip().upper() == "M":
+                idx = int(row["cone_id"])
                 x = float(row["x"])
                 y = float(row["y"])
                 points.append((idx, x, y))
 
-    # Sort by index to ensure correct ordering
+    # Sort by cone_id to ensure correct ordering
     points.sort(key=lambda p: p[0])
 
     if len(points) < 4:
@@ -329,7 +329,7 @@ def fit_and_discretize(
     Parameters
     ----------
     csv_path : str | Path
-        Path to the track CSV file with columns: boundary, x, y, index
+        Path to the track CSV file with columns: side, cone_id, x, y
     ds_m : float
         Discretization step in meters. Default 0.1 (10 cm).
     continuity : "C2" | "C4"

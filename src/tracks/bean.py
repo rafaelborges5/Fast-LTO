@@ -220,21 +220,24 @@ def _compute_boundaries(
     }
 
 
+_SIDE_CODES: Dict[BoundaryName, str] = {"left": "L", "middle": "M", "right": "R"}
+
+
 def _write_boundaries_csv(
     boundaries: Dict[BoundaryName, np.ndarray],
     output_csv: Path,
 ) -> None:
-    """Write boundaries to CSV with columns boundary,x,y,index."""
-
+    """Write boundaries to CSV with columns ``side,cone_id,x,y``."""
     import csv
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["boundary", "x", "y", "index"])
+        writer.writerow(["side", "cone_id", "x", "y"])
         for boundary_name, points in boundaries.items():
+            code = _SIDE_CODES[boundary_name]
             for idx, (x, y) in enumerate(points):
-                writer.writerow([boundary_name, f"{x:.6f}", f"{y:.6f}", idx])
+                writer.writerow([code, idx, f"{x:.6f}", f"{y:.6f}"])
 
 
 def generate_bean_track(

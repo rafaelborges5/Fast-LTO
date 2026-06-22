@@ -15,12 +15,12 @@ CSV format
 ----------
 The CSV has the following columns:
 
-    boundary,x,y,index
+    side,cone_id,x,y
 
 Where:
-- `boundary` is one of: "left", "middle", "right"
+- `side` is one of: "L" (left), "M" (middle), "R" (right)
+- `cone_id` is the ordered index along the track (0, 1, 2, ...)
 - `x`, `y` are coordinates in metres
-- `index` is the ordered index along the track (0, 1, 2, ...)
 """
 
 from __future__ import annotations
@@ -222,27 +222,26 @@ def _compute_boundaries(
     }
 
 
+_SIDE_CODES: Dict[BoundaryName, str] = {"left": "L", "middle": "M", "right": "R"}
+
+
 def _write_boundaries_csv(
     boundaries: Dict[BoundaryName, np.ndarray],
     output_csv: Path,
 ) -> None:
-    """
-    Write boundaries to a CSV file with columns:
-
-        boundary,x,y,index
-    """
-
+    """Write boundaries to CSV with columns ``side,cone_id,x,y``."""
     import csv
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
     with output_csv.open("w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["boundary", "x", "y", "index"])
+        writer.writerow(["side", "cone_id", "x", "y"])
 
         for boundary_name, points in boundaries.items():
+            code = _SIDE_CODES[boundary_name]
             for idx, (x, y) in enumerate(points):
-                writer.writerow([boundary_name, f"{x:.6f}", f"{y:.6f}", idx])
+                writer.writerow([code, idx, f"{x:.6f}", f"{y:.6f}"])
 
 
 def generate_ellipse_track(

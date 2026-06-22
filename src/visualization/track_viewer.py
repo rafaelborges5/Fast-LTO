@@ -6,11 +6,11 @@ This module provides a simple way to visualise track CSVs produced by the
 
 Expected CSV format
 -------------------
-Columns: boundary,x,y,index
+Columns: side,cone_id,x,y
 
-- `boundary`: one of "left", "middle", "right"
+- `side`: one of "L" (left), "M" (middle), "R" (right)
+- `cone_id`: integer ordering along the track
 - `x`, `y`: coordinates in metres (floating point)
-- `index`: integer ordering along the track
 """
 
 from __future__ import annotations
@@ -20,6 +20,9 @@ from typing import Dict, Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+_SIDE_TO_BOUNDARY: Dict[str, str] = {"L": "left", "M": "middle", "R": "right"}
 
 
 def _load_track_csv(path: Path) -> Dict[str, np.ndarray]:
@@ -36,9 +39,8 @@ def _load_track_csv(path: Path) -> Dict[str, np.ndarray]:
     with path.open("r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            boundary = row["boundary"].strip().lower()
-            if boundary not in boundaries:
-                # Unknown boundary type, ignore for now.
+            boundary = _SIDE_TO_BOUNDARY.get(row["side"].strip().upper())
+            if boundary is None:
                 continue
             x = float(row["x"])
             y = float(row["y"])

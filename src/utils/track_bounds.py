@@ -104,6 +104,9 @@ def apply_savgol_to_widths(
     return w_left_s, w_right_s
 
 
+_SIDE_TO_BOUNDARY: Dict[str, str] = {"L": "left", "M": "middle", "R": "right"}
+
+
 def load_boundaries(csv_path: Path) -> Dict[str, np.ndarray]:
     """Load left/right/middle polylines from the track CSV."""
     points: Dict[str, list[Tuple[int, float, float]]] = {"left": [], "middle": [], "right": []}
@@ -111,13 +114,13 @@ def load_boundaries(csv_path: Path) -> Dict[str, np.ndarray]:
     with csv_path.open("r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            b = row["boundary"].strip().lower()
-            if b not in points:
+            boundary = _SIDE_TO_BOUNDARY.get(row["side"].strip().upper())
+            if boundary is None:
                 continue
-            idx = int(row["index"])
+            idx = int(row["cone_id"])
             x = float(row["x"])
             y = float(row["y"])
-            points[b].append((idx, x, y))
+            points[boundary].append((idx, x, y))
 
     out: Dict[str, np.ndarray] = {}
     for key, arr in points.items():
