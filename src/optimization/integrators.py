@@ -83,6 +83,7 @@ class SpaceIntegrator(ABC):
         kappa_half: ca.MX | None = None,
         kappa_next: ca.MX | None = None,
         eps: float = 1e-3,
+        smooth_eps: float | None = None,
     ) -> ca.MX:
         """
         Estimate the time increment dt = ∫ ds / s_dot for one spatial interval
@@ -106,7 +107,9 @@ class SpaceIntegrator(ABC):
         kappa_next : ca.MX, optional
             Curvature at the right endpoint s_{i+1}.
         eps : float
-            Small guard added to s_dot to avoid division by zero.
+            Lower floor for s_dot to avoid division by zero.
+        smooth_eps : float, optional
+            Smoothing width for the C1 max approximation. Defaults to ``eps``.
 
         Returns
         -------
@@ -123,9 +126,11 @@ class EulerIntegrator(SpaceIntegrator):
         return x + ds * f_space(x, u, kappa)
 
     def time_step(self, f_space, eval_at_point, x, u, kappa, ds,
-                  kappa_half=None, kappa_next=None, eps=1e-3):
+                  kappa_half=None, kappa_next=None, eps=1e-3,
+                  smooth_eps=None):
         _, s_dot = eval_at_point(x, u, kappa)
-        s_dot_safe = _smoothmax(s_dot, ca.MX(eps), eps)
+        smooth_eps = eps if smooth_eps is None else smooth_eps
+        s_dot_safe = _smoothmax(s_dot, ca.MX(eps), smooth_eps)
         return ds / s_dot_safe
 
 
@@ -142,9 +147,11 @@ class RK4Integrator(SpaceIntegrator):
         return x + (ds / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
 
     def time_step(self, f_space, eval_at_point, x, u, kappa, ds,
-                  kappa_half=None, kappa_next=None, eps=1e-3):
+                  kappa_half=None, kappa_next=None, eps=1e-3,
+                  smooth_eps=None):
         kh = kappa_half if kappa_half is not None else kappa
         kn = kappa_next if kappa_next is not None else kappa
+        smooth_eps = eps if smooth_eps is None else smooth_eps
 
         k1 = f_space(x,               u, kappa)
         x2 = x + ds / 2 * k1
@@ -158,10 +165,10 @@ class RK4Integrator(SpaceIntegrator):
         _, sd3 = eval_at_point(x3, u, kh)
         _, sd4 = eval_at_point(x4, u, kn)
 
-        sd1_safe = _smoothmax(sd1, ca.MX(eps), eps)
-        sd2_safe = _smoothmax(sd2, ca.MX(eps), eps)
-        sd3_safe = _smoothmax(sd3, ca.MX(eps), eps)
-        sd4_safe = _smoothmax(sd4, ca.MX(eps), eps)
+        sd1_safe = _smoothmax(sd1, ca.MX(eps), smooth_eps)
+        sd2_safe = _smoothmax(sd2, ca.MX(eps), smooth_eps)
+        sd3_safe = _smoothmax(sd3, ca.MX(eps), smooth_eps)
+        sd4_safe = _smoothmax(sd4, ca.MX(eps), smooth_eps)
 
         # Simpson-3/8 weighted time integral (RK4-consistent quadrature).
         return (ds / 6) * (

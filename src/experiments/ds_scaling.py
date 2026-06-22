@@ -46,7 +46,7 @@ def run_ds_scaling_experiment(
     integrator_name: str = "euler",
     continuity: str = "C4",
     reg_u: float = 600.0,
-    initial_speed: float = 1.0,
+    initial_speed: float = 5.0,
     ds_min: float = 0.1,
     ds_max: float = 5.0,
     num_ds: int = 20,

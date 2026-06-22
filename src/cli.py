@@ -122,8 +122,8 @@ Examples:
     parser.add_argument(
         "--initial-speed",
         type=float,
-        default=1.0,
-        help="Initial speed guess (m/s). Default: 1.0",
+        default=5.0,
+        help="Initial speed guess (m/s). Default: 5.0",
     )
 
     parser.add_argument(

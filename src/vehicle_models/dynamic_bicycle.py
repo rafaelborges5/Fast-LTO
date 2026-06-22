@@ -33,15 +33,12 @@ class DynamicBicycleModel(VehicleModel):
 
     def get_default_params(self) -> dict:
         return {
-            # Vehicle
-            # (Using AMZ parameter file values where applicable)
             "m": 180.0,
             "Iz": 190.0,
             "lf": 0.78,
             "lr": 0.74,
             "g": 9.81,
-            # Tires (Magic Formula, simplified)
-            # Your parameter file provides a single lateral set (used for both axles here).
+
             "Bf": 10.0,
             "Cf": 1.3,
             "Dmf_f": 1.0,
@@ -57,6 +54,7 @@ class DynamicBicycleModel(VehicleModel):
             "smoothmax_eps": 1e-3,
             "eps_s_dot": 1.0,
             "eps_D_kappa": 0.05,
+            "rk4_max_ds_m": 2.5,
             # Resistance / aero parameters (not yet used in v_dot; keep for v2)
             "C_d": 1.55,
             "C_r": 0.12,

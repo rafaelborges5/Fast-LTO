@@ -39,6 +39,27 @@ def load_track_with_widths(path: Path) -> Dict:
         return json.load(f)
 
 
+def _s_dot_guard_params(model: VehicleModel) -> Tuple[float, float]:
+    return (
+        float(model.params.get("eps_s_dot", 1e-3)),
+        float(model.params.get("smoothmax_eps", 1e-3)),
+    )
+
+
+def _safe_s_dot(model: VehicleModel, s_dot: ca.MX) -> ca.MX:
+    floor, smooth_eps = _s_dot_guard_params(model)
+    return model._smoothmax(s_dot, ca.MX(floor), smooth_eps)
+
+
+def _enforce_rk4_mesh_limit(integrator: SpaceIntegrator, model: VehicleModel, ds: float) -> None:
+    max_ds = model.params.get("rk4_max_ds_m")
+    if isinstance(integrator, RK4Integrator) and max_ds is not None and ds > float(max_ds):
+        raise ValueError(
+            f"RK4 mesh too coarse for {type(model).__name__}: ds={ds:.3f} m, "
+            f"limit={float(max_ds):.3f} m. Refine ds or use Euler."
+        )
+
+
 def build_space_dynamics(
     model: VehicleModel,
 ) -> Tuple[Callable, Callable]:
@@ -60,7 +81,7 @@ def build_space_dynamics(
         full_state = ca.vertcat(ca.MX(0), x_reduced)
         x_dot = model.get_dynamics(full_state, u, kappa)
         s_dot = x_dot[0]
-        return x_dot[1:] / s_dot
+        return x_dot[1:] / _safe_s_dot(model, s_dot)
 
     def eval_at_point(
         x_reduced: ca.MX, u: ca.MX, kappa: ca.MX
@@ -101,6 +122,30 @@ def build_space_dynamics_normalized(
     return f_space_norm, eval_at_point_norm
 
 
+def _constraint_eval_points(
+    integrator: SpaceIntegrator,
+    f_space: Callable,
+    x: ca.MX,
+    u: ca.MX,
+    kappa: ca.MX,
+    ds: float,
+    kappa_half: ca.MX | None = None,
+    kappa_next: ca.MX | None = None,
+):
+    points = [(x, kappa)]
+    if isinstance(integrator, RK4Integrator):
+        kh = kappa_half if kappa_half is not None else kappa
+        kn = kappa_next if kappa_next is not None else kappa
+        k1 = f_space(x, u, kappa)
+        x2 = x + ds / 2 * k1
+        k2 = f_space(x2, u, kh)
+        x3 = x + ds / 2 * k2
+        k3 = f_space(x3, u, kh)
+        x4 = x + ds * k3
+        points.extend(((x2, kh), (x3, kh), (x4, kn)))
+    return points
+
+
 def build_ocp(
     track: Dict,
     model: VehicleModel,
@@ -134,6 +179,7 @@ def build_ocp(
     w_right = np.array(track["w_right"], dtype=np.float64)
     ds = float(track["ds_m"])
     N = len(arc_lengths)
+    _enforce_rk4_mesh_limit(integrator, model, ds)
 
     nx = model.nx_reduced  # reduced state (no s)
     nu = model.nu
@@ -173,6 +219,7 @@ def build_ocp(
         f_space, eval_at_point = build_space_dynamics_normalized(model)
     else:
         f_space, eval_at_point = build_space_dynamics(model)
+    s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
     total_time = 0
 
     for i in range(N - 1):
@@ -193,13 +240,23 @@ def build_ocp(
         )
         opti.subject_to(X[i + 1, :].T == x_next)
 
-        if use_normalization:
-            g_list = model.get_constraints_normalized(x_i, u_i, kappa_i)
-        else:
-            full_state, _ = eval_at_point(x_i, u_i, kappa_i)
-            g_list = model.get_constraints(full_state, u_i, kappa_i)
-        for g in g_list:
-            opti.subject_to(g <= 0)
+        for x_c, kappa_c in _constraint_eval_points(
+            integrator,
+            f_space,
+            x_i,
+            u_i,
+            kappa_i,
+            ds,
+            kappa_half=kappa_half_i,
+            kappa_next=kappa_next_i,
+        ):
+            if use_normalization:
+                g_list = model.get_constraints_normalized(x_c, u_i, kappa_c)
+            else:
+                full_state, _ = eval_at_point(x_c, u_i, kappa_c)
+                g_list = model.get_constraints(full_state, u_i, kappa_c)
+            for g in g_list:
+                opti.subject_to(g <= 0)
 
         if use_normalization:
             # d_norm = (d_phys - shift) / scale
@@ -221,7 +278,10 @@ def build_ocp(
 
         total_time += integrator.time_step(
             f_space, eval_at_point, x_i, u_i, kappa_i, ds,
-            kappa_half=kappa_half_i, kappa_next=kappa_next_i,
+            kappa_half=kappa_half_i,
+            kappa_next=kappa_next_i,
+            eps=s_dot_floor,
+            smooth_eps=s_dot_smooth_eps,
         )
 
     if use_normalization:
