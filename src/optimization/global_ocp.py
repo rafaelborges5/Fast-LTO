@@ -153,6 +153,7 @@ def build_ocp(
     reg_du: float | np.ndarray | None = None,
     use_normalization: bool = True,
     solver_verbose: bool = False,
+    boundary_margin: float = 0.0,
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -175,8 +176,8 @@ def build_ocp(
     curv = np.array(track["curvatures"], dtype=np.float64)
     curv_half = np.array(track["curvatures_half"], dtype=np.float64)
     arc_lengths = np.array(track["arc_lengths"], dtype=np.float64)
-    w_left = np.array(track["w_left"], dtype=np.float64)
-    w_right = np.array(track["w_right"], dtype=np.float64)
+    w_left = np.array(track["w_left"], dtype=np.float64) - boundary_margin
+    w_right = np.array(track["w_right"], dtype=np.float64) - boundary_margin
     ds = float(track["ds_m"])
     N = len(arc_lengths)
     _enforce_rk4_mesh_limit(integrator, model, ds)
@@ -390,6 +391,7 @@ def solve_ocp_and_save(
     run_config: Dict | None = None,
     use_normalization: bool = True,
     solver_verbose: bool = False,
+    boundary_margin: float = 0.0,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -425,6 +427,7 @@ def solve_ocp_and_save(
         reg_du=reg_du,
         use_normalization=use_normalization,
         solver_verbose=solver_verbose,
+        boundary_margin=boundary_margin,
     )
 
     reduced_names = model.reduced_state_names()

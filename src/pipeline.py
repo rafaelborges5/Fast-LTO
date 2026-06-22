@@ -76,6 +76,7 @@ class PipelineConfig:
     # Input rate-regularization weight on changes in inputs (du).
     reg_u: float = 600.0
     initial_speed: float = 5.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
+    boundary_margin: float = 0.0  # Shrink lateral bounds by this amount (m) during optimization
 
     export_trajectory: bool = True
 
@@ -298,6 +299,7 @@ def step_solve_ocp(
         "use_savgol_bounds": bool(config.use_savgol_bounds),
         "savgol_window_length": int(config.savgol_window_length),
         "savgol_polyorder": int(config.savgol_polyorder),
+        "boundary_margin": float(config.boundary_margin),
     }
 
     sol_dict = solve_ocp_and_save(
@@ -310,6 +312,7 @@ def step_solve_ocp(
         run_config=run_config,
         use_normalization=config.normalize_states_and_inputs,
         solver_verbose=config.solver_verbose,
+        boundary_margin=config.boundary_margin,
     )
 
     # Optional concise profiling summary (single line)
@@ -626,6 +629,7 @@ def run_pipeline(
                 "use_savgol_bounds": bool(config.use_savgol_bounds),
                 "savgol_window_length": int(config.savgol_window_length),
                 "savgol_polyorder": int(config.savgol_polyorder),
+                "boundary_margin": float(config.boundary_margin),
             }
 
             # Load stored signature from existing solution, if any.
