@@ -37,6 +37,9 @@ class PointMassModel(VehicleModel):
             "v_min": 0.1,
             "v_max": 40.0,
             "v_eps": 0.1,  # guard to avoid / by 0
+            # Body corners for lateral constraints (opt-in):
+            # "corners": [("FL", 0.9, 0.7), ("FR", 0.9, -0.7),
+            #              ("RL", -0.9, 0.6), ("RR", -0.9, -0.6)],
         }
 
     def get_state_names(self) -> List[str]:

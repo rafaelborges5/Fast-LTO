@@ -222,6 +222,16 @@ def build_ocp(
     s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
     total_time = 0
 
+    use_corner_constraints = len(model.get_corner_offsets()) > 0
+    if use_normalization:
+        x_scale, x_shift = model.get_reduced_state_scaling()
+        if x_scale is None or x_shift is None:
+            raise RuntimeError("Normalization scales not defined.")
+        d_scale = x_scale[0]
+        d_shift = x_shift[0]
+        psi_scale = x_scale[1]
+        psi_shift = x_shift[1]
+
     for i in range(N - 1):
         x_i = X[i, :].T
         u_i = U[i, :].T
@@ -258,18 +268,21 @@ def build_ocp(
             for g in g_list:
                 opti.subject_to(g <= 0)
 
-        if use_normalization:
-            # d_norm = (d_phys - shift) / scale
-            x_scale, x_shift = model.get_reduced_state_scaling()
-            if x_scale is None or x_shift is None:
-                raise RuntimeError("Normalization scales not defined.")
-            
-            d_scale = x_scale[0]
-            d_shift = x_shift[0]
-            
+        if use_corner_constraints:
+            if use_normalization:
+                d_phys_i = x_i[0] * d_scale + d_shift
+                psi_phys_i = x_i[1] * psi_scale + psi_shift
+            else:
+                d_phys_i = x_i[0]
+                psi_phys_i = x_i[1]
+            for g in model.get_corner_constraints(
+                d_phys_i, psi_phys_i, kappa_i,
+                w_left_param[i], w_right_param[i],
+            ):
+                opti.subject_to(g <= 0)
+        elif use_normalization:
             ub_d_norm = (w_left_param[i] - d_shift) / d_scale
             lb_d_norm = (-w_right_param[i] - d_shift) / d_scale
-            
             opti.subject_to(lb_d_norm <= x_i[0])
             opti.subject_to(x_i[0] <= ub_d_norm)
         else:
@@ -284,16 +297,22 @@ def build_ocp(
             smooth_eps=s_dot_smooth_eps,
         )
 
-    if use_normalization:
-        x_scale, x_shift = model.get_reduced_state_scaling()
-        if x_scale is None or x_shift is None:
-            raise RuntimeError("Normalization scales not defined.")
-        d_scale = x_scale[0]
-        d_shift = x_shift[0]
-        
+    if use_corner_constraints:
+        x_last = X[N - 1, :].T
+        if use_normalization:
+            d_phys_last = x_last[0] * d_scale + d_shift
+            psi_phys_last = x_last[1] * psi_scale + psi_shift
+        else:
+            d_phys_last = x_last[0]
+            psi_phys_last = x_last[1]
+        for g in model.get_corner_constraints(
+            d_phys_last, psi_phys_last, kappa_param[N - 1],
+            w_left_param[N - 1], w_right_param[N - 1],
+        ):
+            opti.subject_to(g <= 0)
+    elif use_normalization:
         ub_d_norm_last = (w_left_param[N - 1] - d_shift) / d_scale
         lb_d_norm_last = (-w_right_param[N - 1] - d_shift) / d_scale
-        
         opti.subject_to(lb_d_norm_last <= X[N - 1, 0])
         opti.subject_to(X[N - 1, 0] <= ub_d_norm_last)
     else:

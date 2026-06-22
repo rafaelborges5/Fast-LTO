@@ -11,10 +11,16 @@ state[2:] = ...  model-specific (e.g. psi_err, v, yaw_rate, ...)
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Sequence, Tuple
+from typing import List, NamedTuple, Optional, Sequence, Tuple
 
 import casadi as ca
 import numpy as np
+
+
+class CornerOffset(NamedTuple):
+    name: str
+    dx: float
+    dy: float
 
 
 class VehicleModel(ABC):
@@ -105,6 +111,46 @@ class VehicleModel(ABC):
 
     def get_default_params(self) -> dict:
         return {}
+
+    def get_corner_offsets(self) -> List[CornerOffset]:
+        corners_raw = self.params.get("corners", [])
+        return [
+            c if isinstance(c, CornerOffset) else CornerOffset(*c)
+            for c in corners_raw
+        ]
+
+    def get_corner_constraints(
+        self,
+        d_phys: ca.MX,
+        psi_err_phys: ca.MX,
+        kappa: ca.MX,
+        w_left: ca.MX,
+        w_right: ca.MX,
+    ) -> List[ca.MX]:
+        corners = self.get_corner_offsets()
+        if not corners:
+            return []
+
+        g_list: List[ca.MX] = []
+        sin_psi = ca.sin(psi_err_phys)
+        cos_psi = ca.cos(psi_err_phys)
+        D_kappa = 1 - kappa * d_phys
+
+        for c in corners:
+            long_proj = c.dx * cos_psi - c.dy * sin_psi
+            d_corner = (
+                d_phys
+                + c.dx * sin_psi
+                + c.dy * cos_psi
+                - 0.5 * kappa / D_kappa * long_proj**2
+            )
+
+            if c.dy >= 0:
+                g_list.append(d_corner - w_left)
+            else:
+                g_list.append(-w_right - d_corner)
+
+        return g_list
 
     def state_bounds(self) -> Optional[Tuple[List[float], List[float]]]:
         """

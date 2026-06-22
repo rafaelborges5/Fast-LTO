@@ -71,6 +71,9 @@ class DynamicBicycleModel(VehicleModel):
             "a_long_min": -15.0,
             "a_long_max": 10.0,
             "delta_max": 0.45,
+            # Body corners for lateral constraints (opt-in):
+            # "corners": [("FL", 0.78, 0.7), ("FR", 0.78, -0.7),
+            #              ("RL", -0.74, 0.6), ("RR", -0.74, -0.6)],
         }
 
     def get_state_names(self) -> List[str]:
