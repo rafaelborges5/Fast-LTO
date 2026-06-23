@@ -64,6 +64,8 @@ vehicle:
     Fx_max: 1500.0
     delta_max: 0.4
     load_transfer_mode: current_quasistatic
+    a_long_max: null
+    a_lat_max: null
 
 pipeline:
   ds_m: 0.5
@@ -72,6 +74,7 @@ pipeline:
   mode: trackdrive
   model_name: four_wheel
   integrator_name: euler
-  reg_u: 600.0
+  reg_u: 0.0
+  reg_u_l2: 0.002
   initial_speed: 5.0
   boundary_margin: 0.35

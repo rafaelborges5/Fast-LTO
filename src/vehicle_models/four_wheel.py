@@ -65,6 +65,9 @@ class FourWheelModel(VehicleModel):
             "eps_friction_den": 5.0,
             "smoothmax_eps": 1e-3,
             "rk4_max_ds_m": 2.5,
+            # CG-level acceleration limits (None = disabled)
+            "a_long_max": None,
+            "a_lat_max": None,
             # Bounds
             "d_max": 3.0,
             "psi_err_max": 1.2,
@@ -450,6 +453,32 @@ class FourWheelModel(VehicleModel):
         ]:
             cap_sq = (D_i * Fz_i) ** 2 + eps_den
             g_list.append(Fx_i**2 / cap_sq + Fy_i**2 / cap_sq - 1)
+
+        # Optional CG-level acceleration constraint
+        a_long_max = p.get("a_long_max")
+        a_lat_max = p.get("a_lat_max")
+        if a_long_max is not None or a_lat_max is not None:
+            _, F_drag, F_roll = self._aero_forces(v_long)
+            Fx_total, Fy_total, _ = self._body_forces_and_moment(
+                Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
+                Fy_fl, Fy_fr, Fy_rr, Fy_rl,
+                F_drag, F_roll,
+            )
+            m = float(p["m"])
+            if a_long_max is not None and a_lat_max is not None:
+                g_list.append(
+                    (Fx_total / (m * float(a_long_max))) ** 2
+                    + (Fy_total / (m * float(a_lat_max))) ** 2
+                    - 1
+                )
+            elif a_long_max is not None:
+                g_list.append(
+                    (Fx_total / (m * float(a_long_max))) ** 2 - 1
+                )
+            else:
+                g_list.append(
+                    (Fy_total / (m * float(a_lat_max))) ** 2 - 1
+                )
 
         return g_list
 
