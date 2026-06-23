@@ -87,6 +87,21 @@ Examples:
         help="Spline continuity. Default: C2",
     )
 
+    # Event mode
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["autox", "trackdrive"],
+        default="trackdrive",
+        help="Event mode: 'autox' (open track, standing start) or 'trackdrive' (closed loop, flying lap). Default: trackdrive",
+    )
+    parser.add_argument(
+        "--autox-extension",
+        type=float,
+        default=None,
+        help="Meters of extra track beyond finish line for autox mode. Default: 50.0",
+    )
+
     # OCP options
     parser.add_argument(
         "--model",
@@ -131,8 +146,15 @@ Examples:
     parser.add_argument(
         "--initial-speed",
         type=float,
-        default=5.0,
-        help="Initial speed guess (m/s). Default: 5.0",
+        default=None,
+        help="Initial speed (m/s). Default: 3.0 for autox, 5.0 for trackdrive.",
+    )
+
+    parser.add_argument(
+        "--boundary-margin",
+        type=float,
+        default=None,
+        help="Shrink lateral bounds by this amount (m) on each side. Default: 0.0",
     )
 
     parser.add_argument(
@@ -196,9 +218,9 @@ Examples:
         repo_root=args.repo_root,
         continuity=args.continuity,
         use_savgol_bounds=not args.savgol_bounds,
+        mode=args.mode,
         model_name=args.model,
         integrator_name=args.integrator,
-        initial_speed=args.initial_speed,
         normalize_states_and_inputs=not args.no_normalization,
         solver_verbose=args.solver_verbose,
         export_trajectory=not args.no_export,
@@ -206,6 +228,12 @@ Examples:
         show_plots=not args.no_show_plots,
     )
     # Only override PipelineConfig defaults when the user explicitly provides a value.
+    if args.initial_speed is not None:
+        config_kwargs["initial_speed"] = args.initial_speed
+    if args.autox_extension is not None:
+        config_kwargs["autox_extension_m"] = args.autox_extension
+    if args.boundary_margin is not None:
+        config_kwargs["boundary_margin"] = args.boundary_margin
     if args.ds is not None:
         config_kwargs["ds_m"] = args.ds
     # Scalar or vector regularisation weights
@@ -224,6 +252,7 @@ Examples:
 
     # Run pipeline
     print(f"Running Fast-LTO pipeline")
+    print(f"  Mode: {config.mode}")
     print(f"  Track ID: {config.track_id}")
     print(f"  Start from: {args.start_from}")
     if args.end_at:

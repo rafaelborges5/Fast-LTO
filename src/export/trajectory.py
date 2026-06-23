@@ -42,13 +42,16 @@ CSV_COLUMNS = [
 
 def _compute_path_geometry(
     path_xy: np.ndarray,
+    periodic: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Fit a periodic C2 cubic spline to a closed path and return heading + curvature.
+    """Fit a C2 cubic spline to a path and return heading + curvature.
 
     Parameters
     ----------
     path_xy : np.ndarray
-        Shape (N, 2) of [x, y] positions forming a closed loop (no repeated endpoint).
+        Shape (N, 2) of [x, y] positions.
+    periodic : bool
+        If True, treat as closed loop (periodic spline). If False, open path.
 
     Returns
     -------
@@ -65,13 +68,16 @@ def _compute_path_geometry(
     t = np.zeros(len(x))
     t[1:] = np.cumsum(segment_lengths)
 
-    wrap_distance = np.linalg.norm(path_xy[0] - path_xy[-1])
-    t_periodic = np.append(t, t[-1] + wrap_distance)
-    x_periodic = np.append(x, x[0])
-    y_periodic = np.append(y, y[0])
-
-    spline_x = CubicSpline(t_periodic, x_periodic, bc_type="periodic")
-    spline_y = CubicSpline(t_periodic, y_periodic, bc_type="periodic")
+    if periodic:
+        wrap_distance = np.linalg.norm(path_xy[0] - path_xy[-1])
+        t_periodic = np.append(t, t[-1] + wrap_distance)
+        x_periodic = np.append(x, x[0])
+        y_periodic = np.append(y, y[0])
+        spline_x = CubicSpline(t_periodic, x_periodic, bc_type="periodic")
+        spline_y = CubicSpline(t_periodic, y_periodic, bc_type="periodic")
+    else:
+        spline_x = CubicSpline(t, x, bc_type="not-a-knot")
+        spline_y = CubicSpline(t, y, bc_type="not-a-knot")
 
     dx_dt = spline_x(t, 1)
     dy_dt = spline_y(t, 1)
@@ -100,6 +106,18 @@ def _finite_diff_periodic(arr: np.ndarray, dt: np.ndarray) -> np.ndarray:
     return diff
 
 
+def _finite_diff_open(arr: np.ndarray, dt: np.ndarray) -> np.ndarray:
+    """Forward finite difference for an open (non-periodic) signal.
+
+    Last element copies the previous derivative (backward difference).
+    """
+    diff = np.zeros_like(arr)
+    safe_dt = np.where(dt != 0, dt, 1.0)
+    diff[:-1] = np.where(dt[:-1] != 0, (arr[1:] - arr[:-1]) / safe_dt[:-1], 0.0)
+    diff[-1] = diff[-2] if len(arr) > 1 else 0.0
+    return diff
+
+
 def export_reference_trajectory(solution_path: Path | str, output_path: Path | str) -> Path:
     """Read an OCP solution JSON and write a controller-reference CSV.
 
@@ -124,6 +142,8 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
 
     run_config = data["run_config"]
     model_name = run_config["model_name"]
+    mode = run_config.get("mode", "trackdrive")
+    periodic = mode == "trackdrive"
     params = data.get("model_params", {})
 
     # -- Common arrays --
@@ -143,7 +163,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     d = np.array(data["d"], dtype=np.float64)
 
     # -- Renormalize: make optimal path the new reference --
-    opt_headings, opt_kappa = _compute_path_geometry(path_xy)
+    opt_headings, opt_kappa = _compute_path_geometry(path_xy, periodic=periodic)
 
     boundary_left = w_left - d
     boundary_right = -(w_right + d)
@@ -161,15 +181,23 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     arc_lengths = np.zeros(N, dtype=np.float64)
     arc_lengths[1:] = np.cumsum(segment_lengths)
 
-    # -- Arc-length steps (periodic) --
-    ds = np.diff(arc_lengths, append=arc_lengths[0])
-    wrap_len = np.linalg.norm(path_xy[0] - path_xy[-1])
-    ds[-1] = wrap_len
+    # -- Arc-length steps --
+    if periodic:
+        ds = np.diff(arc_lengths, append=arc_lengths[0])
+        wrap_len = np.linalg.norm(path_xy[0] - path_xy[-1])
+        ds[-1] = wrap_len
+    else:
+        ds = np.zeros(N, dtype=np.float64)
+        ds[:-1] = np.diff(arc_lengths)
+        ds[-1] = ds[-2] if N > 1 else 1.0
 
     # -- Time: cumulative sum of ds / v --
     dt = ds / np.maximum(v, 1e-6)
     time = np.zeros(N, dtype=np.float64)
     time[1:] = np.cumsum(dt[:-1])
+
+    # -- Finite-difference function for derivative signals --
+    fdiff = _finite_diff_periodic if periodic else _finite_diff_open
 
     # -- Model-specific fields --
     if model_name == "four_wheel":
@@ -214,7 +242,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         yaw_angle_dot = yaw_rate
         acceleration_lat = v * yaw_rate
         steering_angle = delta
-        steering_angle_dot = _finite_diff_periodic(delta, dt)
+        steering_angle_dot = fdiff(delta, dt)
 
         m = params["m"]
         g_val = params.get("g", 9.81)
@@ -231,7 +259,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         yaw_angle_dot = v * kappa
         acceleration_lat = a_lat_arr
         steering_angle = np.arctan(L * kappa)
-        steering_angle_dot = _finite_diff_periodic(steering_angle, dt)
+        steering_angle_dot = fdiff(steering_angle, dt)
 
         m = params.get("m", None)
         g_val = params.get("g", 9.81)

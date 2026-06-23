@@ -155,6 +155,7 @@ def build_ocp(
     use_normalization: bool = True,
     solver_verbose: bool = False,
     boundary_margin: float = 0.0,
+    mode: str = "trackdrive",
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -215,7 +216,13 @@ def build_ocp(
     opti.set_value(w_left_param, w_left)
     opti.set_value(w_right_param, w_right)
 
-    opti.subject_to(X[0, :] == x0_param.T)
+    if mode == "autox":
+        opti.subject_to(X[0, :] == x0_param.T)
+    elif mode == "trackdrive":
+        opti.subject_to(X[0, 0] == x0_param[0])
+        opti.subject_to(X[0, 1] == x0_param[1])
+    else:
+        raise ValueError(f"Unknown mode: {mode!r}")
 
     if use_normalization:
         f_space, eval_at_point = build_space_dynamics_normalized(model)
@@ -321,7 +328,8 @@ def build_ocp(
         opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
         opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
 
-    opti.subject_to(X[N - 1, :].T == X[0, :].T)
+    if mode == "trackdrive":
+        opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
     if N > 1:
         dU = U[1:, :] - U[:-1, :] # calculate delta_u
@@ -405,6 +413,7 @@ def solve_ocp_and_save(
     use_normalization: bool = True,
     solver_verbose: bool = False,
     boundary_margin: float = 0.0,
+    mode: str = "trackdrive",
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -442,6 +451,7 @@ def solve_ocp_and_save(
         use_normalization=use_normalization,
         solver_verbose=solver_verbose,
         boundary_margin=boundary_margin,
+        mode=mode,
     )
 
     reduced_names = model.reduced_state_names()
@@ -603,6 +613,7 @@ def solve_ocp_and_save(
     input_names = model.get_input_names()
 
     sol_dict = {
+        "mode": mode,
         "path_xy": path_xy.tolist(),
         "obj_val": obj_val,
         "state_names": reduced_names,
