@@ -90,6 +90,8 @@ class PipelineConfig:
     normalize_states_and_inputs: bool = True
     solver_verbose: bool = False
 
+    vehicle_config: Optional[object] = None  # VehicleConfig, if loaded from YAML
+
     def __post_init__(self) -> None:
         if self.mode not in ("autox", "trackdrive"):
             raise ValueError(f"Unknown mode: {self.mode!r}. Must be 'autox' or 'trackdrive'.")
@@ -239,13 +241,17 @@ def step_compute_bounds(
     return result
 
 
-def _make_model(model_name: str) -> VehicleModel:
+def _make_model(model_name: str, vehicle_config=None) -> VehicleModel:
+    if vehicle_config is not None:
+        params = vehicle_config.build_model_params(model_name)
+    else:
+        params = None
     if model_name == "point_mass":
-        return PointMassModel()
+        return PointMassModel(params=params)
     if model_name == "dynamic_bicycle":
-        return DynamicBicycleModel()
+        return DynamicBicycleModel(params=params)
     if model_name == "four_wheel":
-        return FourWheelModel()
+        return FourWheelModel(params=params)
     raise ValueError(f"Unknown model_name: {model_name!r}")
 
 
@@ -304,7 +310,7 @@ def step_solve_ocp(
         print(f"  Autox: extended track by {config.autox_extension_m:.0f} m "
               f"({track_data['num_points']} points total)")
 
-    model = _make_model(config.model_name)
+    model = _make_model(config.model_name, vehicle_config=config.vehicle_config)
     integrator = _make_integrator(config.integrator_name)
 
     print(f"  Mode: {config.mode}")
@@ -519,12 +525,16 @@ def step_visualize(
         v_lat = np.array(data["v_lat"], dtype=np.float64)
         yaw_rate = np.array(data["yaw_rate"], dtype=np.float64)
 
+        input_names = data.get("input_names", [])
+        input_data = {name: data[name] for name in input_names if name in data}
+
         plot_all_panels_four_wheel(
             cones_left, cones_right, path_xy, v, s, d,
             w_left, w_right,
             Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
             v_lat, yaw_rate,
             params=params, profiling=profiling,
+            input_data=input_data,
             out_path=plot_path, show=config.show_plots,
         )
     else:
@@ -577,14 +587,27 @@ def run_pipeline(
 
     # If track was just generated, force recomputation of downstream steps
     if start_from in ("track", "spline"):
-        if start_from == "spline" or track_just_generated or not config.discretized_track_path.exists():
+        need_refit = (
+            start_from == "spline"
+            or track_just_generated
+            or not config.discretized_track_path.exists()
+        )
+        if not need_refit:
+            try:
+                cached = DiscretizedTrack.load(config.discretized_track_path)
+                if abs(cached.ds_m - config.ds_m) > 1e-6 or cached.continuity != config.continuity:
+                    need_refit = True
+            except Exception:
+                need_refit = True
+
+        if need_refit:
             track = step_fit_spline(config, csv_path=csv_path)
         else:
             print(
                 f"[Step 2] Using existing discretized track: "
                 f"{config.discretized_track_path}"
             )
-            track = DiscretizedTrack.load(config.discretized_track_path)
+            track = cached
         results["spline"] = config.discretized_track_path
     else:
         if not config.discretized_track_path.exists():

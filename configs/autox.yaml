@@ -1,0 +1,77 @@
+vehicle:
+  m: 170.0
+  g: 9.81
+  lf: 0.689
+  lr: 0.842
+  v_min: 0.4
+  v_max: 20.0
+  d_max: 3.0
+  psi_err_max: 1.2
+  v_eps: 0.5
+  smoothmax_eps: 0.001
+  eps_s_dot: 1.0
+  eps_D_kappa: 0.05
+  corners:
+    - [FL, 1.809, 0.750]
+    - [FR, 1.809, -0.750]
+    - [RL, -0.850, 0.630]
+    - [RR, -0.850, -0.630]
+
+  point_mass:
+    a_long_min: -13.73
+    a_long_max: 13.73
+    a_lat_min: -13.73
+    a_lat_max: 13.73
+
+  dynamic_bicycle:
+    Iz: 250.0
+    Bf: 9.0
+    Cf: 1.3
+    Dmf_f: 1.4
+    Br: 9.0
+    Cr: 1.3
+    Dmf_r: 1.4
+    gamma_ellipse: 1.0
+    use_friction_ellipse: true
+    delta_max: 0.4
+    a_long_min: -15.0
+    a_long_max: 15.0
+
+  four_wheel:
+    Iz: 250.0
+    a_l: 0.630
+    a_r: 0.630
+    h: 0.246
+    rho: 1.225
+    C_l: 5.54
+    C_d: 1.58
+    C_r: 0.15
+    A_f: 1.2
+    B_fl: 9.0
+    C_fl: 1.3
+    D_fl: 1.2
+    B_fr: 9.0
+    C_fr: 1.3
+    D_fr: 1.2
+    B_rr: 9.0
+    C_rr: 1.3
+    D_rr: 1.2
+    B_rl: 9.0
+    C_rl: 1.3
+    D_rl: 1.2
+    dFxmax: 1000.0
+    ddeltamax: 1.3
+    Fx_max: 1500.0
+    delta_max: 0.4
+    load_transfer_mode: current_quasistatic
+
+pipeline:
+  ds_m: 0.5
+  continuity: C2
+  mode: autox
+  model_name: four_wheel
+  integrator_name: euler
+  reg_u: 600.0
+  initial_speed: 3.0
+  boundary_margin: 0.35
+  autox_extension_m: 50.0

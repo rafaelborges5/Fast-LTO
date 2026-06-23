@@ -2,9 +2,9 @@
 Command-line interface for Fast-LTO pipeline.
 
 Usage:
-    python -m fast_lto.cli --start-from track --track-id fsg_random
+    python -m fast_lto.cli --config configs/fsg_trackdrive.yaml
+    python -m fast_lto.cli --config configs/fsg_trackdrive.yaml --model four_wheel --ds 1.0
     python -m fast_lto.cli --start-from ocp --track-id ellipse --integrator rk4
-    python -m fast_lto.cli --start-from plot --track-id bean
 """
 
 from __future__ import annotations
@@ -22,7 +22,13 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run full pipeline from scratch
+  # Run from a YAML config
+  python -m fast_lto.cli --config configs/fsg_trackdrive.yaml
+
+  # YAML config with CLI overrides
+  python -m fast_lto.cli --config configs/fsg_trackdrive.yaml --model four_wheel --ds 1.0
+
+  # Run without YAML (legacy mode)
   python -m fast_lto.cli --start-from track --track-id fsg_random
 
   # Re-solve OCP with different settings (reuses existing track)
@@ -30,24 +36,29 @@ Examples:
 
   # Only visualize existing solution
   python -m fast_lto.cli --start-from plot --track-id fsg_random
-
-  # Generate new track and fit spline, but skip OCP
-  python -m fast_lto.cli --start-from track --end-at bounds --track-id my_track
         """,
+    )
+
+    # YAML config
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to YAML configuration file. CLI flags override YAML values.",
     )
 
     # Track selection
     parser.add_argument(
         "--track-id",
         type=str,
-        default="fsg_random",
+        default=None,
         help="Track identifier (used for file naming). Default: fsg_random",
     )
     parser.add_argument(
         "--track-type",
         type=str,
         choices=["fsg", "ellipse", "bean"],
-        default="fsg",
+        default=None,
         help="Type of track to generate. Default: fsg",
     )
     parser.add_argument(
@@ -77,13 +88,13 @@ Examples:
         "--ds",
         type=float,
         default=None,
-        help="Discretization step in meters. If omitted, uses PipelineConfig default.",
+        help="Discretization step in meters.",
     )
     parser.add_argument(
         "--continuity",
         type=str,
         choices=["C2", "C4"],
-        default="C2",
+        default=None,
         help="Spline continuity. Default: C2",
     )
 
@@ -92,8 +103,8 @@ Examples:
         "--mode",
         type=str,
         choices=["autox", "trackdrive"],
-        default="trackdrive",
-        help="Event mode: 'autox' (open track, standing start) or 'trackdrive' (closed loop, flying lap). Default: trackdrive",
+        default=None,
+        help="Event mode: 'autox' or 'trackdrive'. Default: trackdrive",
     )
     parser.add_argument(
         "--autox-extension",
@@ -106,42 +117,36 @@ Examples:
     parser.add_argument(
         "--model",
         type=str,
-        default="point_mass",
-        help="Vehicle model. Options: point_mass, dynamic_bicycle, four_wheel. Default: point_mass",
+        default=None,
+        help="Vehicle model. Options: point_mass, dynamic_bicycle, four_wheel.",
     )
     parser.add_argument(
         "--integrator",
         type=str,
         choices=["euler", "rk4"],
-        default="euler",
+        default=None,
         help="Spatial integrator. Default: euler",
     )
     parser.add_argument(
         "--reg-u",
         type=float,
         default=None,
-        help=(
-            "Input rate regularization weight on changes in inputs (du). "
-            "If omitted, uses PipelineConfig default."
-        ),
+        help="Input rate regularization weight on changes in inputs (du).",
     )
     parser.add_argument(
         "--reg-du-vec",
         type=str,
         default=None,
         help=(
-            "Optional comma-separated list of input rate weights for each input "
-            "(e.g. '600,300' for two inputs). Overrides --reg-u if provided."
+            "Comma-separated list of input rate weights for each input "
+            "(e.g. '600,300' for two inputs). Overrides --reg-u."
         ),
     )
     parser.add_argument(
         "--reg-u-l2",
         type=float,
         default=None,
-        help=(
-            "L2 regularization weight on input magnitudes. "
-            "Use for models with rate inputs (e.g. four_wheel)."
-        ),
+        help="L2 regularization weight on input magnitudes.",
     )
     parser.add_argument(
         "--initial-speed",
@@ -155,13 +160,6 @@ Examples:
         type=float,
         default=None,
         help="Shrink lateral bounds by this amount (m) on each side. Default: 0.0",
-    )
-
-    parser.add_argument(
-        "--boundary-margin",
-        type=float,
-        default=None,
-        help="Shrink lateral bounds by this amount (m) during optimization.",
     )
 
     parser.add_argument(
@@ -210,45 +208,96 @@ Examples:
 
     args = parser.parse_args()
 
-    # Create configuration
-    config_kwargs = dict(
-        track_id=args.track_id,
-        track_type=args.track_type,
-        generate_track=args.generate_track,
-        repo_root=args.repo_root,
-        continuity=args.continuity,
-        use_savgol_bounds=not args.savgol_bounds,
-        mode=args.mode,
-        model_name=args.model,
-        integrator_name=args.integrator,
-        normalize_states_and_inputs=not args.no_normalization,
-        solver_verbose=args.solver_verbose,
-        export_trajectory=not args.no_export,
-        plot_results=not args.no_plot,
-        show_plots=not args.no_show_plots,
-    )
-    # Only override PipelineConfig defaults when the user explicitly provides a value.
-    if args.initial_speed is not None:
-        config_kwargs["initial_speed"] = args.initial_speed
-    if args.autox_extension is not None:
-        config_kwargs["autox_extension_m"] = args.autox_extension
-    if args.boundary_margin is not None:
-        config_kwargs["boundary_margin"] = args.boundary_margin
-    if args.ds is not None:
-        config_kwargs["ds_m"] = args.ds
-    # Scalar or vector regularisation weights
-    if args.reg_du_vec is not None:
-        # Parse comma-separated floats into a list; validated later in OCP build
-        reg_vec = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
-        config_kwargs["reg_u"] = reg_vec
-    elif args.reg_u is not None:
-        config_kwargs["reg_u"] = args.reg_u
-    if args.reg_u_l2 is not None:
-        config_kwargs["reg_u_l2"] = args.reg_u_l2
-    if args.boundary_margin is not None:
-        config_kwargs["boundary_margin"] = args.boundary_margin
+    if args.config is not None:
+        # ── YAML-based config with optional CLI overrides ──
+        from config import RunConfig
 
-    config = PipelineConfig(**config_kwargs)
+        run_config = RunConfig.from_yaml(args.config)
+
+        # Apply CLI overrides on top of YAML values
+        if args.track_id is not None:
+            run_config.track_id = args.track_id
+        if args.track_type is not None:
+            run_config.track_type = args.track_type
+        if args.mode is not None:
+            run_config.mode = args.mode
+        if args.model is not None:
+            run_config.model_name = args.model
+        if args.integrator is not None:
+            run_config.integrator_name = args.integrator
+        if args.ds is not None:
+            run_config.ds_m = args.ds
+        if args.continuity is not None:
+            run_config.continuity = args.continuity
+        if args.initial_speed is not None:
+            run_config.initial_speed = args.initial_speed
+        if args.autox_extension is not None:
+            run_config.autox_extension_m = args.autox_extension
+        if args.boundary_margin is not None:
+            run_config.boundary_margin = args.boundary_margin
+        if args.reg_du_vec is not None:
+            reg_vec = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
+            run_config.reg_u = reg_vec
+        elif args.reg_u is not None:
+            run_config.reg_u = args.reg_u
+        if args.reg_u_l2 is not None:
+            run_config.reg_u_l2 = args.reg_u_l2
+        if args.solver_verbose:
+            run_config.solver_verbose = True
+        if args.no_normalization:
+            run_config.normalize_states_and_inputs = False
+        if args.no_export:
+            run_config.export_trajectory = False
+        if args.no_plot:
+            run_config.plot_results = False
+        if args.no_show_plots:
+            run_config.show_plots = False
+
+        # Validate vehicle params against selected model before running
+        run_config.validate_for_model()
+
+        config = run_config.to_pipeline_config()
+        config.generate_track = args.generate_track
+        if args.repo_root is not None:
+            config.repo_root = args.repo_root
+        # Re-run __post_init__ to derive paths with updated fields
+        config.__post_init__()
+
+    else:
+        # ── Legacy CLI-only mode ──
+        config_kwargs = dict(
+            track_id=args.track_id or "fsg_random",
+            track_type=args.track_type or "fsg",
+            generate_track=args.generate_track,
+            repo_root=args.repo_root,
+            continuity=args.continuity or "C2",
+            use_savgol_bounds=not args.savgol_bounds,
+            mode=args.mode or "trackdrive",
+            model_name=args.model or "point_mass",
+            integrator_name=args.integrator or "euler",
+            normalize_states_and_inputs=not args.no_normalization,
+            solver_verbose=args.solver_verbose,
+            export_trajectory=not args.no_export,
+            plot_results=not args.no_plot,
+            show_plots=not args.no_show_plots,
+        )
+        if args.initial_speed is not None:
+            config_kwargs["initial_speed"] = args.initial_speed
+        if args.autox_extension is not None:
+            config_kwargs["autox_extension_m"] = args.autox_extension
+        if args.boundary_margin is not None:
+            config_kwargs["boundary_margin"] = args.boundary_margin
+        if args.ds is not None:
+            config_kwargs["ds_m"] = args.ds
+        if args.reg_du_vec is not None:
+            reg_vec = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
+            config_kwargs["reg_u"] = reg_vec
+        elif args.reg_u is not None:
+            config_kwargs["reg_u"] = args.reg_u
+        if args.reg_u_l2 is not None:
+            config_kwargs["reg_u_l2"] = args.reg_u_l2
+
+        config = PipelineConfig(**config_kwargs)
 
     # Run pipeline
     print(f"Running Fast-LTO pipeline")
