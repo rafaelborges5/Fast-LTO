@@ -92,7 +92,7 @@ Examples:
         "--model",
         type=str,
         default="point_mass",
-        help="Vehicle model. Options: point_mass, dynamic_bicycle. Default: point_mass",
+        help="Vehicle model. Options: point_mass, dynamic_bicycle, four_wheel. Default: point_mass",
     )
     parser.add_argument(
         "--integrator",
@@ -120,10 +120,26 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--reg-u-l2",
+        type=float,
+        default=None,
+        help=(
+            "L2 regularization weight on input magnitudes. "
+            "Use for models with rate inputs (e.g. four_wheel)."
+        ),
+    )
+    parser.add_argument(
         "--initial-speed",
         type=float,
         default=5.0,
         help="Initial speed guess (m/s). Default: 5.0",
+    )
+
+    parser.add_argument(
+        "--boundary-margin",
+        type=float,
+        default=None,
+        help="Shrink lateral bounds by this amount (m) during optimization.",
     )
 
     parser.add_argument(
@@ -199,6 +215,10 @@ Examples:
         config_kwargs["reg_u"] = reg_vec
     elif args.reg_u is not None:
         config_kwargs["reg_u"] = args.reg_u
+    if args.reg_u_l2 is not None:
+        config_kwargs["reg_u_l2"] = args.reg_u_l2
+    if args.boundary_margin is not None:
+        config_kwargs["boundary_margin"] = args.boundary_margin
 
     config = PipelineConfig(**config_kwargs)
 

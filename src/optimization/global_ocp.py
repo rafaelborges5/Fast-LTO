@@ -151,6 +151,7 @@ def build_ocp(
     model: VehicleModel,
     integrator: SpaceIntegrator | None = None,
     reg_du: float | np.ndarray | None = None,
+    reg_u_l2: float | np.ndarray | None = None,
     use_normalization: bool = True,
     solver_verbose: bool = False,
     boundary_margin: float = 0.0,
@@ -333,6 +334,17 @@ def build_ocp(
     else:
         penalty = 0
 
+    # L2 regularization on input magnitudes (for models with rate inputs)
+    if reg_u_l2 is not None and N > 0:
+        if np.isscalar(reg_u_l2):
+            reg_u_l2_arr = np.ones(nu, dtype=float) * float(reg_u_l2)
+        else:
+            reg_u_l2_arr = np.asarray(reg_u_l2, dtype=float).reshape(-1)
+        for j in range(nu):
+            w_j = float(reg_u_l2_arr[j])
+            if w_j != 0.0:
+                penalty += w_j * ca.sumsqr(U[:, j]) / N
+
     obj = total_time + penalty
     opti.minimize(obj)
 
@@ -388,6 +400,7 @@ def solve_ocp_and_save(
     integrator: SpaceIntegrator | None = None,
     initial_speed: float = 5.0,
     reg_du: float | np.ndarray | None = None,
+    reg_u_l2: float | np.ndarray | None = None,
     run_config: Dict | None = None,
     use_normalization: bool = True,
     solver_verbose: bool = False,
@@ -425,6 +438,7 @@ def solve_ocp_and_save(
         model,
         integrator=integrator,
         reg_du=reg_du,
+        reg_u_l2=reg_u_l2,
         use_normalization=use_normalization,
         solver_verbose=solver_verbose,
         boundary_margin=boundary_margin,
@@ -433,7 +447,11 @@ def solve_ocp_and_save(
     reduced_names = model.reduced_state_names()
     N = len(track["arc_lengths"])
     x0_phys = np.zeros(model.nx_reduced)
-    v_idx = reduced_names.index("v")
+    v_idx = (
+        reduced_names.index("v")
+        if "v" in reduced_names
+        else reduced_names.index("v_long")
+    )
     x0_phys[v_idx] = initial_speed
 
     if use_normalization:

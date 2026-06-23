@@ -137,11 +137,10 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     w_left = np.array(data["w_left"], dtype=np.float64)
     w_right = np.array(data["w_right"], dtype=np.float64)
 
-    v = np.array(data["v"], dtype=np.float64)
+    v = np.array(data.get("v", data.get("v_long")), dtype=np.float64)
     headings = np.array(data["headings"], dtype=np.float64)
     psi_err = np.array(data["psi_err"], dtype=np.float64)
     d = np.array(data["d"], dtype=np.float64)
-    a_long = np.array(data["a_long"], dtype=np.float64)
 
     # -- Renormalize: make optimal path the new reference --
     opt_headings, opt_kappa = _compute_path_geometry(path_xy)
@@ -173,7 +172,40 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     time[1:] = np.cumsum(dt[:-1])
 
     # -- Model-specific fields --
-    if model_name == "dynamic_bicycle":
+    if model_name == "four_wheel":
+        v_lat_arr = np.array(data["v_lat"], dtype=np.float64)
+        yaw_rate_arr = np.array(data["yaw_rate"], dtype=np.float64)
+        delta_arr = np.array(data["delta"], dtype=np.float64)
+
+        velocity_lat = v_lat_arr
+        yaw_angle_dot = yaw_rate_arr
+        acceleration_lat = v * yaw_rate_arr
+        steering_angle = delta_arr
+
+        delta_dot_norm = np.array(data.get("delta_dot_norm", np.zeros(N)), dtype=np.float64)
+        ddeltamax = float(params.get("ddeltamax", 1.0))
+        steering_angle_dot = delta_dot_norm * ddeltamax
+
+        force_long_fl = np.array(data["Fx_fl"], dtype=np.float64)
+        force_long_fr = np.array(data["Fx_fr"], dtype=np.float64)
+        force_long_rl = np.array(data["Fx_rl"], dtype=np.float64)
+        force_long_rr = np.array(data["Fx_rr"], dtype=np.float64)
+
+        m = float(params.get("m", 160.0))
+        g_val = float(params.get("g", 9.81))
+        rho = float(params.get("rho", 1.225))
+        C_d = float(params.get("C_d", 1.58))
+        C_r = float(params.get("C_r", 0.15))
+        A_f = float(params.get("A_f", 1.2))
+        F_drag = 0.5 * rho * C_d * A_f * v**2
+        F_roll_val = m * g_val * C_r
+        cd = np.cos(delta_arr)
+        Fx_total = ((force_long_fl + force_long_fr) * cd
+                    + force_long_rr + force_long_rl - F_roll_val - F_drag)
+        a_long = Fx_total / m + yaw_rate_arr * v_lat_arr
+
+    elif model_name == "dynamic_bicycle":
+        a_long = np.array(data["a_long"], dtype=np.float64)
         v_lat = np.array(data["v_lat"], dtype=np.float64)
         yaw_rate = np.array(data["yaw_rate"], dtype=np.float64)
         delta = np.array(data["delta"], dtype=np.float64)
@@ -184,7 +216,6 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         steering_angle = delta
         steering_angle_dot = _finite_diff_periodic(delta, dt)
 
-        # Force calculation
         m = params["m"]
         g_val = params.get("g", 9.81)
         lf = params["lf"]
@@ -192,6 +223,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         L_total = lf + lr
 
     elif model_name == "point_mass":
+        a_long = np.array(data["a_long"], dtype=np.float64)
         a_lat_arr = np.array(data["a_lat"], dtype=np.float64)
         L = params.get("L", 1.8)
 
@@ -201,7 +233,6 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         steering_angle = np.arctan(L * kappa)
         steering_angle_dot = _finite_diff_periodic(steering_angle, dt)
 
-        # Force calculation: point mass may not have mass
         m = params.get("m", None)
         g_val = params.get("g", 9.81)
         lf = None
@@ -212,20 +243,16 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         raise ValueError(f"Unknown model_name: {model_name!r}")
 
     # -- Force distribution (static normal load, 4WD) --
-    if m is not None:
+    if model_name == "four_wheel":
+        pass  # forces already assigned above
+    elif m is not None:
         if lf is not None and lr is not None:
-            # dynamic bicycle: explicit front/rear axle distances
             pass
         else:
-            # point mass: treat L as total wheelbase with 50/50 split for lf/lr
-            # but use the proper formula: Fz_f = m*g*lr/L, Fz_r = m*g*lf/L
-            # With only L known, assume lf = lr = L/2
             lf = L_total / 2.0
             lr = L_total / 2.0
 
         F_x_total = m * a_long
-        # Fx_front = F_x_total * lr / L_total
-        # Fx_rear  = F_x_total * lf / L_total
         force_long_fl = F_x_total * lr / L_total / 2.0
         force_long_fr = F_x_total * lr / L_total / 2.0
         force_long_rl = F_x_total * lf / L_total / 2.0

@@ -40,7 +40,7 @@ from utils.track_bounds import (
     load_boundaries,
     save_track_with_widths,
 )
-from vehicle_models import DynamicBicycleModel, PointMassModel, VehicleModel
+from vehicle_models import DynamicBicycleModel, FourWheelModel, PointMassModel, VehicleModel
 
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
@@ -75,6 +75,8 @@ class PipelineConfig:
     integrator_name: Literal["euler", "rk4"] = "euler"
     # Input rate-regularization weight on changes in inputs (du).
     reg_u: float = 600.0
+    # L2 regularization on input magnitudes (for models with rate inputs).
+    reg_u_l2: float | None = None
     initial_speed: float = 5.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
     boundary_margin: float = 0.0  # Shrink lateral bounds by this amount (m) during optimization
 
@@ -233,6 +235,8 @@ def _make_model(model_name: str) -> VehicleModel:
         return PointMassModel()
     if model_name == "dynamic_bicycle":
         return DynamicBicycleModel()
+    if model_name == "four_wheel":
+        return FourWheelModel()
     raise ValueError(f"Unknown model_name: {model_name!r}")
 
 
@@ -309,6 +313,7 @@ def step_solve_ocp(
         integrator=integrator,
         initial_speed=config.initial_speed,
         reg_du=config.reg_u,
+        reg_u_l2=config.reg_u_l2,
         run_config=run_config,
         use_normalization=config.normalize_states_and_inputs,
         solver_verbose=config.solver_verbose,
@@ -381,7 +386,7 @@ def step_visualize(
     cones_right = boundaries["right"]
 
     path_xy = np.array(data["path_xy"], dtype=np.float64)
-    v = np.array(data["v"], dtype=np.float64)
+    v = np.array(data.get("v", data.get("v_long")), dtype=np.float64)
     s = np.array(data["arc_lengths"], dtype=np.float64)
     d = np.array(data["d"], dtype=np.float64)
     w_left = np.array(data["w_left"], dtype=np.float64)
@@ -456,10 +461,29 @@ def step_visualize(
             out_path=plot_path,
             show=config.show_plots,
         )
+    elif config.model_name == "four_wheel":
+        from visualization.ocp_plots_four_wheel import plot_all_panels_four_wheel
+
+        Fx_fl = np.array(data["Fx_fl"], dtype=np.float64)
+        Fx_fr = np.array(data["Fx_fr"], dtype=np.float64)
+        Fx_rr = np.array(data["Fx_rr"], dtype=np.float64)
+        Fx_rl = np.array(data["Fx_rl"], dtype=np.float64)
+        delta = np.array(data["delta"], dtype=np.float64)
+        v_lat = np.array(data["v_lat"], dtype=np.float64)
+        yaw_rate = np.array(data["yaw_rate"], dtype=np.float64)
+
+        plot_all_panels_four_wheel(
+            cones_left, cones_right, path_xy, v, s, d,
+            w_left, w_right,
+            Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
+            v_lat, yaw_rate,
+            params=params, profiling=profiling,
+            out_path=plot_path, show=config.show_plots,
+        )
     else:
         raise ValueError(
             f"No visualization available for model_name={config.model_name!r}. "
-            "Supported: 'point_mass', 'dynamic_bicycle'."
+            "Supported: 'point_mass', 'dynamic_bicycle', 'four_wheel'."
         )
 
     print(f"  Saved plots to: {timestamp_dir}")
