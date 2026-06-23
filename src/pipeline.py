@@ -9,7 +9,7 @@ Pipeline Steps
 1. Track generation        -> data/tracks/{track_id}.csv
 2. Spline fitting          -> data/discretized/{track_id}.json
 3. Bounds computation      -> data/discretized/{track_id}_with_widths.json
-4. OCP solving             -> data/solutions/{track_id}_{model_name}_{integrator_name}.json
+4. OCP solving             -> data/solutions/{track_id}_{model_name}_{integrator_name}_{mode}.json
 5. Trajectory export       -> data/output_trajectories/{track_id}_{model}_{integrator}_{timestamp}.csv
 6. Visualization           -> ocp_plots/{timestamp}/panels.png
 
@@ -71,12 +71,15 @@ class PipelineConfig:
     savgol_window_length: int = 41
     savgol_polyorder: int = 2
 
+    mode: Literal["autox", "trackdrive"] = "trackdrive"
+
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
     # Input rate-regularization weight on changes in inputs (du).
     reg_u: float = 600.0
-    initial_speed: float = 5.0  # Initial speed guess (m/s). Must be > 0 for numerical stability.
+    initial_speed: Optional[float] = None  # None → mode default (3.0 autox, 5.0 trackdrive)
     boundary_margin: float = 0.0  # Shrink lateral bounds by this amount (m) during optimization
+    autox_extension_m: float = 50.0  # Extra track beyond finish line for autox mode
 
     export_trajectory: bool = True
 
@@ -86,6 +89,12 @@ class PipelineConfig:
     solver_verbose: bool = False
 
     def __post_init__(self) -> None:
+        if self.mode not in ("autox", "trackdrive"):
+            raise ValueError(f"Unknown mode: {self.mode!r}. Must be 'autox' or 'trackdrive'.")
+
+        if self.initial_speed is None:
+            self.initial_speed = 3.0 if self.mode == "autox" else 5.0
+
         if self.repo_root is None:
             self.repo_root = Path(__file__).resolve().parent.parent
         else:
@@ -113,7 +122,7 @@ class PipelineConfig:
 
     @property
     def solution_path(self) -> Path:
-        return self.solutions_dir / f"{self.track_id}_{self.model_name}_{self.integrator_name}.json"
+        return self.solutions_dir / f"{self.track_id}_{self.model_name}_{self.integrator_name}_{self.mode}.json"
 
     @property
     def export_trajectory_path(self) -> Path:
@@ -244,6 +253,36 @@ def _make_integrator(name: Literal["euler", "rk4"]) -> SpaceIntegrator:
     raise ValueError(f"Unknown integrator_name: {name!r}")
 
 
+def _extend_track_for_autox(track_data: Dict, extension_m: float) -> Dict:
+    """Extend a closed-loop track by wrapping points beyond the finish line."""
+    ds_m = float(track_data["ds_m"])
+    N_orig = len(track_data["arc_lengths"])
+    M_pts = min(max(1, round(extension_m / ds_m)), N_orig - 1)
+
+    positions = np.array(track_data["positions"], dtype=np.float64)
+    headings = np.array(track_data["headings"], dtype=np.float64)
+    curvatures = np.array(track_data["curvatures"], dtype=np.float64)
+    curvatures_half = np.array(track_data["curvatures_half"], dtype=np.float64)
+    arc_lengths = np.array(track_data["arc_lengths"], dtype=np.float64)
+    w_left = np.array(track_data["w_left"], dtype=np.float64)
+    w_right = np.array(track_data["w_right"], dtype=np.float64)
+
+    total_length = arc_lengths[-1] + ds_m
+
+    extended = dict(track_data)
+    extended["positions"] = np.concatenate([positions, positions[:M_pts]], axis=0).tolist()
+    extended["headings"] = np.concatenate([headings, headings[:M_pts]]).tolist()
+    extended["curvatures"] = np.concatenate([curvatures, curvatures[:M_pts]]).tolist()
+    extended["curvatures_half"] = np.concatenate([curvatures_half, curvatures_half[:M_pts]]).tolist()
+    extended["arc_lengths"] = np.concatenate([arc_lengths, arc_lengths[:M_pts] + total_length]).tolist()
+    extended["w_left"] = np.concatenate([w_left, w_left[:M_pts]]).tolist()
+    extended["w_right"] = np.concatenate([w_right, w_right[:M_pts]]).tolist()
+    extended["num_points"] = N_orig + M_pts
+    extended["total_length_m"] = float(arc_lengths[-1] + ds_m * M_pts + ds_m)
+
+    return extended
+
+
 def step_solve_ocp(
     config: PipelineConfig,
     track_with_widths_path: Optional[Path] = None,
@@ -256,9 +295,15 @@ def step_solve_ocp(
 
     track_data: Dict = load_track_with_widths(track_with_widths_path)
 
+    if config.mode == "autox":
+        track_data = _extend_track_for_autox(track_data, config.autox_extension_m)
+        print(f"  Autox: extended track by {config.autox_extension_m:.0f} m "
+              f"({track_data['num_points']} points total)")
+
     model = _make_model(config.model_name)
     integrator = _make_integrator(config.integrator_name)
 
+    print(f"  Mode: {config.mode}")
     print(f"  Model: {config.model_name}")
     print(f"  Integrator: {config.integrator_name}")
     print(f"  Input rate regularization (reg_u): {config.reg_u}")
@@ -287,6 +332,7 @@ def step_solve_ocp(
 
     run_config = {
         "track_id": config.track_id,
+        "mode": config.mode,
         "model_name": config.model_name,
         "ds_m": float(track_ds_m),
         "num_points": int(track_num_points),
@@ -313,6 +359,7 @@ def step_solve_ocp(
         use_normalization=config.normalize_states_and_inputs,
         solver_verbose=config.solver_verbose,
         boundary_margin=config.boundary_margin,
+        mode=config.mode,
     )
 
     # Optional concise profiling summary (single line)
@@ -619,6 +666,7 @@ def run_pipeline(
 
             current_sig = {
                 "track_id": config.track_id,
+                "mode": config.mode,
                 "model_name": config.model_name,
                 "ds_m": float(track_ds_m),
                 "num_points": int(track_num_points),
