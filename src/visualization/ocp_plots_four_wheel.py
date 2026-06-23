@@ -7,10 +7,10 @@ Main panels (3x2):
   5. GG diagram      6. Profiling
 
 Diagnostics page (4x2):
-  1. Steering angle        2. Per-wheel slip angles
-  3. TV yaw moment (Fx)    4. Total yaw moment
-  5. Friction utilization  6. Vertical loads
-  7. Normalized rates      8. (empty / reserved)
+  1. Steering angle & rate  2. Per-wheel slip angles
+  3. Yaw moments (TV+total) 4. Wheel force rates
+  5. Friction utilization   6. Vertical loads
+  7. Lateral forces         8. Lateral velocity & yaw rate
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ def _compute_four_wheel_forces(
     delta: np.ndarray,
     params: Dict,
 ):
-    l_f = float(params.get("l_f", 0.872))
-    l_r = float(params.get("l_r", 0.658))
+    l_f = float(params.get("lf", 0.689))
+    l_r = float(params.get("lr", 0.842))
     a_l = float(params.get("a_l", 0.62))
     a_r = float(params.get("a_r", 0.62))
     m = float(params.get("m", 160.0))
@@ -212,8 +212,8 @@ def _compute_yaw_moments(
     Fy_fl, Fy_fr, Fy_rr, Fy_rl,
     delta, params,
 ):
-    l_f = float(params.get("l_f", 0.872))
-    l_r = float(params.get("l_r", 0.658))
+    l_f = float(params.get("lf", 0.689))
+    l_r = float(params.get("lr", 0.842))
     a_l = float(params.get("a_l", 0.62))
     a_r = float(params.get("a_r", 0.62))
 
@@ -369,6 +369,7 @@ def plot_all_panels_four_wheel(
     v_lat, yaw_rate,
     params: Dict,
     profiling: Optional[Dict] = None,
+    input_data: Optional[Dict] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
@@ -447,6 +448,7 @@ def plot_all_panels_four_wheel(
             s=s, v=v, v_lat=v_lat, yaw_rate=yaw_rate,
             Fx_fl=Fx_fl, Fx_fr=Fx_fr, Fx_rr=Fx_rr, Fx_rl=Fx_rl,
             delta=delta, forces=forces, params=params,
+            input_data=input_data,
             out_path=out_path.parent / "diagnostics.png",
             show=show,
         )
@@ -461,6 +463,7 @@ def plot_diagnostics_four_wheel(
     s, v, v_lat, yaw_rate,
     Fx_fl, Fx_fr, Fx_rr, Fx_rl,
     delta, forces, params,
+    input_data: Optional[Dict] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
@@ -471,15 +474,35 @@ def plot_diagnostics_four_wheel(
         delta=delta, params=params,
     )
 
+    dFxmax = float(params.get("dFxmax", 1000.0))
+    ddeltamax = float(params.get("ddeltamax", 1.3))
+
+    # Physical rates from normalised inputs
+    if input_data is not None:
+        Fx_fl_dot = np.array(input_data.get("Fx_fl_dot_norm", np.zeros_like(s))) * dFxmax
+        Fx_fr_dot = np.array(input_data.get("Fx_fr_dot_norm", np.zeros_like(s))) * dFxmax
+        Fx_rr_dot = np.array(input_data.get("Fx_rr_dot_norm", np.zeros_like(s))) * dFxmax
+        Fx_rl_dot = np.array(input_data.get("Fx_rl_dot_norm", np.zeros_like(s))) * dFxmax
+        delta_dot = np.array(input_data.get("delta_dot_norm", np.zeros_like(s))) * ddeltamax
+    else:
+        Fx_fl_dot = Fx_fr_dot = Fx_rr_dot = Fx_rl_dot = np.zeros_like(s)
+        delta_dot = np.zeros_like(s)
+
     fig, axes = plt.subplots(4, 2, figsize=(14, 16))
     axes = axes.flatten()
 
-    # 1. Steering angle
-    axes[0].plot(s, np.degrees(delta), color="tab:purple")
-    axes[0].set_ylabel("delta [deg]")
-    axes[0].set_xlabel("s [m]")
-    axes[0].grid(True, ls="--", alpha=0.4)
-    axes[0].set_title("Steering angle")
+    # 1. Steering angle (rad) + steering rate (rad/s) on secondary axis
+    ax1 = axes[0]
+    ax1.plot(s, delta, color="tab:purple", label="delta")
+    ax1.set_ylabel("delta [rad]", color="tab:purple")
+    ax1.tick_params(axis="y", labelcolor="tab:purple")
+    ax1.set_xlabel("s [m]")
+    ax1.grid(True, ls="--", alpha=0.4)
+    ax1r = ax1.twinx()
+    ax1r.plot(s, delta_dot, color="tab:gray", label="delta_dot", linewidth=0.8, alpha=0.7)
+    ax1r.set_ylabel("delta_dot [rad/s]", color="tab:gray")
+    ax1r.tick_params(axis="y", labelcolor="tab:gray")
+    ax1.set_title("Steering angle & rate")
 
     # 2. Per-wheel slip angles
     for name, key in [("FL", "alpha_fl"), ("FR", "alpha_fr"),
@@ -492,19 +515,26 @@ def plot_diagnostics_four_wheel(
     axes[1].grid(True, ls="--", alpha=0.4)
     axes[1].set_title("Slip angles")
 
-    # 3. Force-induced (TV) yaw moment
-    axes[2].plot(s, Mz_Fx, color="tab:cyan")
-    axes[2].set_ylabel("Mz_Fx [Nm]")
+    # 3. Yaw moments (TV + total merged)
+    axes[2].plot(s, Mz_Fx, color="tab:cyan", label="Mz (Fx only)", linewidth=0.8)
+    axes[2].plot(s, Mz_total, color="tab:brown", label="Mz total", linewidth=0.8)
+    axes[2].set_ylabel("Mz [Nm]")
     axes[2].set_xlabel("s [m]")
+    axes[2].legend(fontsize=8)
     axes[2].grid(True, ls="--", alpha=0.4)
-    axes[2].set_title("Torque vectoring yaw moment (Fx only)")
+    axes[2].set_title("Yaw moments")
 
-    # 4. Total yaw moment
-    axes[3].plot(s, Mz_total, color="tab:brown")
-    axes[3].set_ylabel("Mz [Nm]")
+    # 4. Force rates of change
+    for name, arr in [("FL", Fx_fl_dot), ("FR", Fx_fr_dot),
+                      ("RR", Fx_rr_dot), ("RL", Fx_rl_dot)]:
+        axes[3].plot(s, arr, color=WHEEL_COLORS[name], label=name, linewidth=0.8)
+    axes[3].axhline(dFxmax, color="gray", ls="--", lw=0.7, alpha=0.5)
+    axes[3].axhline(-dFxmax, color="gray", ls="--", lw=0.7, alpha=0.5)
+    axes[3].set_ylabel("dFx/dt [N/s]")
     axes[3].set_xlabel("s [m]")
+    axes[3].legend(fontsize=8)
     axes[3].grid(True, ls="--", alpha=0.4)
-    axes[3].set_title("Total yaw moment")
+    axes[3].set_title("Wheel force rates")
 
     # 5. Friction utilization
     for name, key in [("FL", "util_fl"), ("FR", "util_fr"),
