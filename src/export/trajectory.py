@@ -253,7 +253,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     elif model_name == "point_mass":
         a_long = np.array(data["a_long"], dtype=np.float64)
         a_lat_arr = np.array(data["a_lat"], dtype=np.float64)
-        L = params.get("L", 1.8)
+        L = params.get("lf", 0.9) + params.get("lr", 0.9)
 
         velocity_lat = np.zeros(N, dtype=np.float64)
         yaw_angle_dot = v * kappa

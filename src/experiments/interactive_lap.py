@@ -38,7 +38,7 @@ def _compute_derived(sol, params):
     v_lat = np.array(sol["v_lat"])
     yaw_rate = np.array(sol["yaw_rate"])
 
-    l_f = params["l_f"]; l_r = params["l_r"]
+    l_f = params["lf"]; l_r = params["lr"]
     a_l = params["a_l"]; a_r = params["a_r"]
     m = params["m"]; g_val = params["g"]
     L = l_f + l_r; W = a_l + a_r

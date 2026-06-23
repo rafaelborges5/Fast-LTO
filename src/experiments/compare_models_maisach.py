@@ -71,7 +71,7 @@ def make_point_mass():
     D_g = 1.2 * 9.81
     return PointMassModel(params={
         "m": 160.0, "g": 9.81,
-        "L": 0.872 + 0.658,
+        "lf": 0.872, "lr": 0.658,
         "mu": 1.2,
         "v_min": 0.4, "v_max": 20.0,
         "a_long_min": -D_g, "a_long_max": D_g,

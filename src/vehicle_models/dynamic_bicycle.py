@@ -33,21 +33,21 @@ class DynamicBicycleModel(VehicleModel):
 
     def get_default_params(self) -> dict:
         return {
-            "m": 180.0,
-            "Iz": 190.0,
-            "lf": 0.78,
-            "lr": 0.74,
+            "m": 170.0,
+            "Iz": 250.0,
+            "lf": 0.689,
+            "lr": 0.842,
             "g": 9.81,
 
-            "Bf": 10.0,
+            "Bf": 9.0,
             "Cf": 1.3,
-            "Dmf_f": 1.0,
-            "Br": 10.0,
+            "Dmf_f": 1.4,
+            "Br": 9.0,
             "Cr": 1.3,
-            "Dmf_r": 1.0,
+            "Dmf_r": 1.4,
             # Friction / safety envelope
-            "mu": 0.9,
-            "gamma_ellipse": 1.2,  # start loose; tighten later
+            "mu": 1.4,
+            "gamma_ellipse": 1.0,
             "use_friction_ellipse": True,
             # Guards
             "v_eps": 0.5,
@@ -69,11 +69,14 @@ class DynamicBicycleModel(VehicleModel):
             "v_lat_max": 4.0,
             "yaw_rate_max": 3.0,
             "a_long_min": -15.0,
-            "a_long_max": 10.0,
-            "delta_max": 0.45,
-            # Body corners for lateral constraints (opt-in):
-            # "corners": [("FL", 0.78, 0.7), ("FR", 0.78, -0.7),
-            #              ("RL", -0.74, 0.6), ("RR", -0.74, -0.6)],
+            "a_long_max": 15.0,
+            "delta_max": 0.4,
+            "corners": [
+                ("FL", 1.809, 0.750),
+                ("FR", 1.809, -0.750),
+                ("RL", -0.842, 0.630),
+                ("RR", -0.842, -0.630),
+            ],
         }
 
     def get_state_names(self) -> List[str]:

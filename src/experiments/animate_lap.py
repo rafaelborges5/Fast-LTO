@@ -75,7 +75,7 @@ def _compute_viz_data(sol, params):
     Fx_rr = np.array(sol["Fx_rr"]); Fx_rl = np.array(sol["Fx_rl"])
     delta = np.array(sol["delta"])
 
-    l_f = params["l_f"]; l_r = params["l_r"]
+    l_f = params["lf"]; l_r = params["lr"]
     a_l = params["a_l"]; a_r = params["a_r"]
     m = params["m"]; g_val = params["g"]
     L = l_f + l_r; W = a_l + a_r
@@ -160,7 +160,7 @@ def animate_lap(solution_path, output_path, stride=3, fps=20, track_csv=None):
     if frames[-1] != N - 1:
         frames.append(N - 1)
 
-    l_f = params["l_f"]; l_r = params["l_r"]
+    l_f = params["lf"]; l_r = params["lr"]
     a_l = params["a_l"]; a_r = params["a_r"]
 
     car_body = _make_car_polygon(front=0.95, rear=l_r, half_w=0.75)

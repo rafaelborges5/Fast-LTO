@@ -32,13 +32,13 @@ class FourWheelModel(VehicleModel):
 
     def get_default_params(self) -> dict:
         return {
-            "m": 160.0,
+            "m": 170.0,
             "Iz": 250.0,
             "g": 9.81,
-            "l_f": 0.872,
-            "l_r": 0.658,
-            "a_l": 0.62,
-            "a_r": 0.62,
+            "lf": 0.689,
+            "lr": 0.842,
+            "a_l": 0.630,
+            "a_r": 0.630,
             "h": 0.246,
             # Aero
             "rho": 1.225,
@@ -47,13 +47,13 @@ class FourWheelModel(VehicleModel):
             "C_r": 0.15,
             "A_f": 1.2,
             # Per-wheel Pacejka tire params
-            "B_fl": 9.0, "C_fl": 1.3, "D_fl": 1.2,
-            "B_fr": 9.0, "C_fr": 1.3, "D_fr": 1.2,
-            "B_rr": 9.0, "C_rr": 1.3, "D_rr": 1.2,
-            "B_rl": 9.0, "C_rl": 1.3, "D_rl": 1.2,
+            "B_fl": 9.0, "C_fl": 1.3, "D_fl": 1.4,
+            "B_fr": 9.0, "C_fr": 1.3, "D_fr": 1.4,
+            "B_rr": 9.0, "C_rr": 1.3, "D_rr": 1.4,
+            "B_rl": 9.0, "C_rl": 1.3, "D_rl": 1.4,
             # Actuator rate limits (physical)
             "dFxmax": 1000.0,
-            "ddeltamax": 1.0,
+            "ddeltamax": 1.3,
             # State bounds
             "Fx_max": 1500.0,
             "delta_max": 0.4,
@@ -76,10 +76,10 @@ class FourWheelModel(VehicleModel):
             "load_transfer_mode": "current_quasistatic",
             # Body corners for lateral constraints (total vehicle envelope)
             "corners": [
-                ("FL", 0.95, 0.75),
-                ("FR", 0.95, -0.75),
-                ("RL", -0.658, 0.75),
-                ("RR", -0.658, -0.75),
+                ("FL", 1.809, 0.750),
+                ("FR", 1.809, -0.750),
+                ("RL", -0.842, 0.630),
+                ("RR", -0.842, -0.630),
             ],
         }
 
@@ -114,8 +114,8 @@ class FourWheelModel(VehicleModel):
 
     def _slip_angles(self, v_long, v_lat, yaw_rate, delta):
         p = self.params
-        l_f = float(p["l_f"])
-        l_r = float(p["l_r"])
+        l_f = float(p["lf"])
+        l_r = float(p["lr"])
         a_l = float(p["a_l"])
         a_r = float(p["a_r"])
         eps = float(p["slip_vx_eps"])
@@ -161,7 +161,7 @@ class FourWheelModel(VehicleModel):
     def _static_loads(self):
         p = self.params
         m, g = float(p["m"]), float(p["g"])
-        l_f, l_r = float(p["l_f"]), float(p["l_r"])
+        l_f, l_r = float(p["lf"]), float(p["lr"])
         a_l, a_r = float(p["a_l"]), float(p["a_r"])
         L = l_f + l_r
         W = a_l + a_r
@@ -195,8 +195,8 @@ class FourWheelModel(VehicleModel):
         # ---- current_quasistatic: solve A * Fz = b ----
         p = self.params
         h = float(p["h"])
-        l_f = float(p["l_f"])
-        l_r = float(p["l_r"])
+        l_f = float(p["lf"])
+        l_r = float(p["lr"])
         a_l = float(p["a_l"])
         a_r = float(p["a_r"])
         L = l_f + l_r
@@ -269,8 +269,8 @@ class FourWheelModel(VehicleModel):
         F_drag, F_roll,
     ):
         p = self.params
-        l_f = float(p["l_f"])
-        l_r = float(p["l_r"])
+        l_f = float(p["lf"])
+        l_r = float(p["lr"])
         a_l = float(p["a_l"])
         a_r = float(p["a_r"])
 

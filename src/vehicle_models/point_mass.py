@@ -26,9 +26,10 @@ class PointMassModel(VehicleModel):
 
     def get_default_params(self) -> dict:
         return {
-            "m": 170.0,  # vehicle mass (kg)
-            "L": 1.8,  # wheelbase
-            "mu": 0.9,
+            "m": 170.0,
+            "lf": 0.689,
+            "lr": 0.842,
+            "mu": 1.4,
             "g": 9.81,
             "a_long_min": -15.0,
             "a_long_max": 15.0,
@@ -36,10 +37,18 @@ class PointMassModel(VehicleModel):
             "a_lat_max": 9.0,
             "v_min": 0.1,
             "v_max": 40.0,
-            "v_eps": 0.1,  # guard to avoid / by 0
-            # Body corners for lateral constraints (opt-in):
-            # "corners": [("FL", 0.9, 0.7), ("FR", 0.9, -0.7),
-            #              ("RL", -0.9, 0.6), ("RR", -0.9, -0.6)],
+            "d_max": 2.0,
+            "psi_err_max": 0.8,
+            "v_eps": 0.1,
+            "smoothmax_eps": 1e-3,
+            "eps_s_dot": 1e-3,
+            "eps_D_kappa": 0.05,
+            "corners": [
+                ("FL", 1.809, 0.750),
+                ("FR", 1.809, -0.750),
+                ("RL", -0.842, 0.630),
+                ("RR", -0.842, -0.630),
+            ],
         }
 
     def get_state_names(self) -> List[str]:
@@ -101,8 +110,8 @@ class PointMassModel(VehicleModel):
     def state_bounds(self) -> Tuple[List[float], List[float]]:
         p = self.params
         # s, d, psi_err, v
-        lb = [-ca.inf, -2.0, -0.8, p["v_min"]]
-        ub = [ca.inf, 2.0, 0.8, p["v_max"]]
+        lb = [-ca.inf, -float(p["d_max"]), -float(p["psi_err_max"]), p["v_min"]]
+        ub = [ca.inf, float(p["d_max"]), float(p["psi_err_max"]), p["v_max"]]
         return lb, ub
 
     def input_bounds(self) -> Tuple[List[float], List[float]]:
