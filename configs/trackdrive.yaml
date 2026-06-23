@@ -68,6 +68,7 @@ vehicle:
 pipeline:
   ds_m: 0.5
   continuity: C2
+  smooth_centerline: 5
   mode: trackdrive
   model_name: four_wheel
   integrator_name: euler

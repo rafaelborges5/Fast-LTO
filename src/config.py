@@ -172,8 +172,8 @@ class VehicleConfig:
 # ---------------------------------------------------------------------------
 
 _PIPELINE_FIELDS = {
-    "track_id", "track_type", "ds_m", "continuity", "mode",
-    "model_name", "integrator_name",
+    "track_id", "track_type", "ds_m", "continuity", "smooth_centerline",
+    "mode", "model_name", "integrator_name",
     "reg_u", "reg_u_l2", "initial_speed",
     "boundary_margin", "autox_extension_m",
     "use_savgol_bounds", "savgol_window_length", "savgol_polyorder",
@@ -193,6 +193,7 @@ class RunConfig:
     track_type: str = "fsg"
     ds_m: float = 0.5
     continuity: str = "C2"
+    smooth_centerline: int = 0
     mode: str = "trackdrive"
     model_name: str = "point_mass"
     integrator_name: str = "euler"

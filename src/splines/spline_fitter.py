@@ -33,6 +33,7 @@ from typing import Literal, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import CubicSpline, make_interp_spline
+from scipy.signal import savgol_filter
 
 if __name__ == "__main__":
     # Running as script - use absolute import
@@ -46,6 +47,63 @@ else:
 
 
 ContinuityType = Literal["C2", "C4"]
+
+_SEG_RATIO_THRESHOLD = 0.5
+_CURVATURE_RATE_THRESHOLD = 0.5  # 1/m²
+
+
+def _check_centerline_quality(points: np.ndarray) -> dict:
+    """Run quality checks on raw middle line points.
+
+    Returns a dict with diagnostic metrics and an overall ``needs_smoothing``
+    flag.
+    """
+    segs = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    median_seg = float(np.median(segs))
+    min_seg = float(segs.min())
+    seg_ratio = min_seg / median_seg if median_seg > 0 else 1.0
+
+    # 3-point Menger curvature at each interior point
+    kappas = np.zeros(len(points) - 2)
+    for i in range(1, len(points) - 1):
+        p0, p1, p2 = points[i - 1], points[i], points[i + 1]
+        ab = np.linalg.norm(p1 - p0)
+        bc = np.linalg.norm(p2 - p1)
+        ca = np.linalg.norm(p2 - p0)
+        cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0])
+        denom = ab * bc * ca
+        kappas[i - 1] = 2.0 * cross / denom if denom > 1e-12 else 0.0
+
+    ds_local = 0.5 * (segs[:-1] + segs[1:])
+    dk = np.abs(np.diff(kappas))
+    dkds = dk / ds_local[:-1] if len(ds_local) > 1 else np.zeros(0)
+    max_curv_rate = float(dkds.max()) if len(dkds) > 0 else 0.0
+
+    needs_smoothing = (
+        seg_ratio < _SEG_RATIO_THRESHOLD and max_curv_rate > _CURVATURE_RATE_THRESHOLD
+    )
+
+    return {
+        "seg_ratio": seg_ratio,
+        "min_seg": min_seg,
+        "median_seg": median_seg,
+        "max_curv_rate": max_curv_rate,
+        "needs_smoothing": needs_smoothing,
+    }
+
+
+def _smooth_middle_line(points: np.ndarray, window: int, polyorder: int = 2) -> np.ndarray:
+    """Apply circular Savitzky-Golay smoothing to middle line points."""
+    if window < 3 or window % 2 == 0:
+        raise ValueError(f"smooth_centerline must be an odd integer >= 3, got {window}")
+    n = len(points)
+    if window >= n:
+        raise ValueError(f"smooth_centerline ({window}) must be < number of points ({n})")
+    pad = window
+    padded = np.vstack([points[-pad:], points, points[:pad]])
+    smoothed_x = savgol_filter(padded[:, 0], window, polyorder)
+    smoothed_y = savgol_filter(padded[:, 1], window, polyorder)
+    return np.column_stack([smoothed_x[pad : pad + n], smoothed_y[pad : pad + n]])
 
 
 def _load_middle_line(csv_path: Path) -> np.ndarray:
@@ -326,6 +384,7 @@ def fit_and_discretize(
     continuity: ContinuityType = "C2",
     viz: bool = False,
     save_path: str | Path | None = None,
+    smooth_centerline: int = 0,
 ) -> DiscretizedTrack:
     """
     Fit a periodic spline to the track centerline and discretize it.
@@ -345,6 +404,12 @@ def fit_and_discretize(
         If True, display a visualization of the fitted spline and samples.
     save_path : str | Path | None
         If provided, save the discretized track to this JSON path.
+    smooth_centerline : int
+        Savitzky-Golay window length for smoothing the raw middle line
+        points before spline fitting.  Must be an odd integer >= 3.
+        0 (default) disables smoothing.  Smoothing is only applied when
+        quality checks detect irregular point spacing or curvature spikes
+        in the raw data.
 
     Returns
     -------
@@ -355,6 +420,25 @@ def fit_and_discretize(
 
     # 1. Load middle line points
     points = _load_middle_line(csv_path)
+
+    # 1b. Quality check — smooth only as a fallback
+    quality = _check_centerline_quality(points)
+    if quality["needs_smoothing"]:
+        if smooth_centerline > 0:
+            print(
+                f"  Centerline noise detected "
+                f"(seg_ratio={quality['seg_ratio']:.2f}, "
+                f"max_dκ/ds={quality['max_curv_rate']:.2f} 1/m²), "
+                f"applying Savgol smoothing (window={smooth_centerline})"
+            )
+            points = _smooth_middle_line(points, smooth_centerline)
+        else:
+            print(
+                f"  WARNING: centerline noise detected "
+                f"(seg_ratio={quality['seg_ratio']:.2f}, "
+                f"max_dκ/ds={quality['max_curv_rate']:.2f} 1/m²). "
+                f"Consider setting smooth_centerline >= 3 in the config."
+            )
 
     # 2. Compute initial chord-length parameterization
     t = _compute_chord_params(points)

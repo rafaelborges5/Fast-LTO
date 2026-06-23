@@ -64,6 +64,7 @@ class PipelineConfig:
 
     ds_m: float = 0.5
     continuity: ContinuityType = "C2"
+    smooth_centerline: int = 0
 
     compute_bounds: bool = True
 
@@ -178,6 +179,7 @@ def step_fit_spline(
         continuity=config.continuity,
         viz=False,
         save_path=config.discretized_track_path,
+        smooth_centerline=config.smooth_centerline,
     )
 
     print(f"  Discretized track: {track}")
