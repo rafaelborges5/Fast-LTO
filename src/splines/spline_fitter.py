@@ -79,7 +79,13 @@ def _load_middle_line(csv_path: Path) -> np.ndarray:
     if len(points) < 4:
         raise ValueError(f"Need at least 4 middle line points, got {len(points)}")
 
-    return np.array([[p[1], p[2]] for p in points], dtype=np.float64)
+    arr = np.array([[p[1], p[2]] for p in points], dtype=np.float64)
+
+    # Strip closing duplicate if the track already repeats the first point
+    if np.linalg.norm(arr[0] - arr[-1]) < 1e-6:
+        arr = arr[:-1]
+
+    return arr
 
 
 def _compute_chord_params(points: np.ndarray) -> np.ndarray:
