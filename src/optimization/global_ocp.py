@@ -332,17 +332,15 @@ def build_ocp(
         opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
     if N > 1:
-        dU = U[1:, :] - U[:-1, :] # calculate delta_u
+        dU = U[1:, :] - U[:-1, :]
         penalty = 0
         for j in range(nu):
             w_j = float(reg_du_arr[j])
             if w_j != 0.0:
                 penalty += w_j * ca.sumsqr(dU[:, j])
-        penalty = penalty / (N - 1) # norm by nlp size to avoid explosion
     else:
         penalty = 0
 
-    # L2 regularization on input magnitudes (for models with rate inputs)
     if reg_u_l2 is not None and N > 0:
         if np.isscalar(reg_u_l2):
             reg_u_l2_arr = np.ones(nu, dtype=float) * float(reg_u_l2)
@@ -351,7 +349,7 @@ def build_ocp(
         for j in range(nu):
             w_j = float(reg_u_l2_arr[j])
             if w_j != 0.0:
-                penalty += w_j * ca.sumsqr(U[:, j]) / N
+                penalty += w_j * ca.sumsqr(U[:, j])
 
     obj = total_time + penalty
     opti.minimize(obj)
@@ -381,6 +379,9 @@ def build_ocp(
             "print_time": 1 if solver_verbose else 0,
             "ipopt.sb": "yes",
             "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
+            # Safety cap so a pathological solve fails fast instead of hanging
+            # (a healthy fine-ds four-wheel lap converges in well under 300 s).
+            "ipopt.max_cpu_time": 600.0,
         },
         {},
     )
