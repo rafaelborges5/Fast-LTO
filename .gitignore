@@ -21,6 +21,9 @@ build/
 data/raw/
 data/interim/
 data/processed/
+data/discretized/
+data/solutions/
+data/experiments/
 results/
 todo-list.md
 
