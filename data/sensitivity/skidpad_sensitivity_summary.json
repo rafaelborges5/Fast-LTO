@@ -1,0 +1,88 @@
+{
+  "config": "configs/skidpad.yaml",
+  "delta": 0.15,
+  "score_base_s": 4.740072009101534,
+  "knobs": [
+    {
+      "knob": "m",
+      "label": "mass m",
+      "base_value": 170.0,
+      "score_lo": 4.615329978661124,
+      "score_hi": 4.834693092402854,
+      "swing_s": 0.21936311374173023,
+      "elasticity": 0.1542614495592229
+    },
+    {
+      "knob": "Iz",
+      "label": "yaw inertia Iz",
+      "base_value": 250.0,
+      "score_lo": 4.737568582217398,
+      "score_hi": 4.742002966935889,
+      "swing_s": 0.004434384718490669,
+      "elasticity": 0.0031183666337952203
+    },
+    {
+      "knob": "reg_u_l2",
+      "label": "reg_u_l2",
+      "base_value": 0.015,
+      "score_lo": 4.733660775527216,
+      "score_hi": 4.747747794848977,
+      "swing_s": 0.01408701932176104,
+      "elasticity": 0.009906332853672681
+    },
+    {
+      "knob": "D_rear",
+      "label": "rear grip D_rear",
+      "base_value": 1.2,
+      "score_lo": 5.094813913837953,
+      "score_hi": 4.456787934473439,
+      "swing_s": -0.6380259793645138,
+      "elasticity": -0.4486753071397957
+    },
+    {
+      "knob": "boundary_margin",
+      "label": "margin",
+      "base_value": 0.2,
+      "score_lo": 4.732085539416261,
+      "score_hi": 4.7480569541913695,
+      "swing_s": 0.015971414775108883,
+      "elasticity": 0.011231485333585482
+    },
+    {
+      "knob": "C_l",
+      "label": "downforce C_l",
+      "base_value": 5.54,
+      "score_lo": 4.8439512656554555,
+      "score_hi": 4.633963737301138,
+      "swing_s": -0.20998752835431755,
+      "elasticity": -0.14766831105175554
+    },
+    {
+      "knob": "D_front",
+      "label": "front grip D_front",
+      "base_value": 1.2,
+      "score_lo": 4.90179078112475,
+      "score_hi": 4.629125252379634,
+      "swing_s": -0.27266552874511607,
+      "elasticity": -0.19174499755950541
+    },
+    {
+      "knob": "C_d",
+      "label": "drag C_d",
+      "base_value": 1.58,
+      "score_lo": 4.732673846625645,
+      "score_hi": 4.747695161405053,
+      "swing_s": 0.015021314779407824,
+      "elasticity": 0.010563352026836309
+    },
+    {
+      "knob": "h",
+      "label": "CG height h",
+      "base_value": 0.246,
+      "score_lo": 4.736617700377183,
+      "score_hi": 4.743668823804108,
+      "swing_s": 0.007051123426925265,
+      "elasticity": 0.004958520611350927
+    }
+  ]
+}
