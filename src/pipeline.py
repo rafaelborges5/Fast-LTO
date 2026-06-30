@@ -319,6 +319,7 @@ def step_solve_ocp(
     print(f"  Model: {config.model_name}")
     print(f"  Integrator: {config.integrator_name}")
     print(f"  Input rate regularization (reg_u): {config.reg_u}")
+    print(f"  Input L2 regularization (reg_u_l2): {config.reg_u_l2}")
 
     config.solutions_dir.mkdir(parents=True, exist_ok=True)
     solution_path = config.solution_path
