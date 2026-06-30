@@ -21,6 +21,10 @@ build/
 data/raw/
 data/interim/
 data/processed/
+data/discretized/
+data/solutions/
+data/output_trajectories/
+ocp_plots/
 results/
 todo-list.md
 
