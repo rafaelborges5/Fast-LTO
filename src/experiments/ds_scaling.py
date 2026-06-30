@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import LogLocator, ScalarFormatter
 
 if __name__ == "__main__":
     # Allow running as a standalone script from the repo root.
@@ -64,6 +65,15 @@ def _scaled_reg_u_l2(
     if reg_scale_mode == "linear_ds":
         return float(reg_u_l2_ref) * (float(ds) / float(reg_ds_ref))
     raise ValueError(f"Unknown reg_scale_mode: {reg_scale_mode!r}")
+
+
+def _format_ds_log_axis(ax: plt.Axes) -> None:
+    """Apply readable tick formatting to a log-scale ds [m] x-axis."""
+    ax.xaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+    ax.xaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(2, 10) * 0.1))
+    ax.xaxis.set_major_formatter(ScalarFormatter())
+    ax.xaxis.set_minor_formatter(plt.NullFormatter())
+    ax.tick_params(axis="x", which="major", labelrotation=45, labelsize=8)
 
 
 def _ds_key(ds: float) -> str:
@@ -381,7 +391,7 @@ def _make_plots(
     # ------------------------------------------------------------------
     # Single 3x3 figure: top 2 rows vs ds (log-scale x), bottom row vs N.
     # ------------------------------------------------------------------
-    fig, axes = plt.subplots(3, 3, figsize=(15, 10))
+    fig, axes = plt.subplots(3, 3, figsize=(16, 11))
 
     # Row 0: vs ds
     axes[0, 0].plot(ds_arr, t_per_iter_arr, "o-")
@@ -416,6 +426,7 @@ def _make_plots(
     for row in range(2):
         for col in range(3):
             axes[row, col].set_xscale("log")
+            _format_ds_log_axis(axes[row, col])
 
     # Row 2: vs N
     axes[2, 0].plot(N_arr, solve_time_arr, "o-")
@@ -438,7 +449,7 @@ def _make_plots(
         f"ds-scaling (track={track_id}, model={model_name}, integrator={integrator_name}, continuity={continuity})",
         fontsize=14,
     )
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=[0, 0.05, 1, 0.95])
 
     all_path = out_dir / f"ds_scaling_all_{tag}.png"
     fig.savefig(all_path, dpi=200)
@@ -486,23 +497,31 @@ def _make_lap_asymptote_plot(
     asymptote = float(lap_arr[0])
     err = np.abs(lap_arr - asymptote)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5.5))
 
-    axes[0].plot(ds_arr, lap_arr, "o-", color="C0")
+    # Left: lap time vs ds, with % deviation from asymptote on a twin y-axis
+    # instead of per-point text labels (illegible once there are >10 points).
+    axes[0].plot(ds_arr, lap_arr, "o-", color="C0", label="lap time", zorder=3)
     axes[0].axhline(asymptote, color="k", ls="--", alpha=0.7,
                     label=f"asymptote = {asymptote:.3f} s (ds={ds_arr[0]:.2f} m)")
+    axes[0].set_xscale("log")
     axes[0].set_xlabel("ds [m]")
-    axes[0].set_ylabel("racing lap time [s]")
+    axes[0].set_ylabel("racing lap time [s]", color="C0")
+    axes[0].tick_params(axis="y", labelcolor="C0")
     axes[0].set_title("Lap-time convergence")
     axes[0].grid(True, linestyle="--", alpha=0.4)
-    axes[0].legend()
-    # Annotate each point with % deviation from the asymptote.
-    for ds_i, lap_i in zip(ds_arr, lap_arr):
-        if asymptote != 0.0:
-            pct = (lap_i - asymptote) / asymptote * 100.0
-            axes[0].annotate(f"{pct:+.1f}%", (ds_i, lap_i),
-                             textcoords="offset points", xytext=(0, 6),
-                             fontsize=8, ha="center")
+    _format_ds_log_axis(axes[0])
+
+    pct = np.where(asymptote != 0.0, (lap_arr - asymptote) / asymptote * 100.0, np.nan)
+    ax0_twin = axes[0].twinx()
+    ax0_twin.plot(ds_arr, pct, "s--", color="C3", alpha=0.6, ms=3, label="% deviation")
+    ax0_twin.set_ylabel("deviation from asymptote [%]", color="C3")
+    ax0_twin.tick_params(axis="y", labelcolor="C3")
+    ax0_twin.axhline(0.0, color="C3", ls=":", alpha=0.3)
+
+    lines0, labels0 = axes[0].get_legend_handles_labels()
+    lines0b, labels0b = ax0_twin.get_legend_handles_labels()
+    axes[0].legend(lines0 + lines0b, labels0 + labels0b, fontsize=8, loc="best")
 
     # Error plot (skip the reference point itself where err == 0).
     mask = err > 0
@@ -512,6 +531,7 @@ def _make_lap_asymptote_plot(
     axes[1].set_ylabel("|lap time - asymptote| [s]")
     axes[1].set_title("Discretisation error (vs finest ds)")
     axes[1].grid(True, which="both", linestyle="--", alpha=0.4)
+    _format_ds_log_axis(axes[1])
 
     tag = f"{track_id}_{model_name}_{integrator_name}_{continuity}"
     fig.suptitle(
@@ -519,7 +539,7 @@ def _make_lap_asymptote_plot(
         f"integrator={integrator_name}, continuity={continuity})",
         fontsize=13,
     )
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=[0, 0.05, 1, 0.95])
 
     lap_path = out_dir / f"ds_scaling_lap_asymptote_{tag}.png"
     fig.savefig(lap_path, dpi=200)
@@ -586,7 +606,7 @@ def _make_combined_plots(
     colors = ["C0", "C1", "C2", "C3"]
     markers = ["o", "s", "^", "D"]
 
-    fig, axes = plt.subplots(3, 3, figsize=(15, 10))
+    fig, axes = plt.subplots(3, 3, figsize=(16, 11))
 
     any_valid = False
 
@@ -664,6 +684,7 @@ def _make_combined_plots(
         for col in range(3):
             axes[row, col].set_xscale("log")
             axes[row, col].grid(True, linestyle="--", alpha=0.4)
+            _format_ds_log_axis(axes[row, col])
 
     axes[2, 0].set_xlabel("N")
     axes[2, 0].set_ylabel("solve time [s]")
@@ -682,7 +703,7 @@ def _make_combined_plots(
         f"ds-scaling multi-config (track={track_id}, model={model_name})",
         fontsize=14,
     )
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=[0, 0.05, 1, 0.95])
 
     combined_path = out_dir / f"ds_scaling_all_{track_id}_{model_name}_multi.png"
     fig.savefig(combined_path, dpi=200)
