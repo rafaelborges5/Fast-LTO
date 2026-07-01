@@ -228,10 +228,11 @@ def build_ocp(
 
     if time_weights is not None:
         time_weights = np.asarray(time_weights, dtype=float).reshape(-1)
-        if time_weights.size != N:
+        if time_weights.size not in (N - 1, N):
             raise ValueError(
-                f"time_weights must have length {N}, got {time_weights.size}"
+                f"time_weights must have length {N - 1} or {N}, got {time_weights.size}"
             )
+        time_weights = time_weights[: N - 1]
 
     if use_normalization:
         f_space, eval_at_point = build_space_dynamics_normalized(model)

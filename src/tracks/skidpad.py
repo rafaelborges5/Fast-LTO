@@ -196,7 +196,7 @@ def _build_segments(geo: Dict, n_laps: int, timed_lap_index: int) -> List[_Segme
     return segs
 
 
-def _linear_blend(s: np.ndarray, s_node: float, kappa_node: np.ndarray,
+def _linear_blend(s: np.ndarray, kappa_node: np.ndarray,
                   joints: List[Tuple[float, float, float]], half: float) -> np.ndarray:
     """Apply linear ramps to a piecewise-constant signal across joints.
 
@@ -217,7 +217,7 @@ def build_skidpad_track(
     map_csv: str | Path,
     ref_csv: str | Path,
     ds_m: float = 0.5,
-    entry_exit_halfwidth: float = 1.5,
+    entry_exit_halfwidth: float | None = None,
     n_laps_per_side: int = 2,
     timed_lap_index: int = 2,
     kappa_blend_m: float = 1.5,
@@ -238,7 +238,8 @@ def build_skidpad_track(
     R_c = geo["R_c"]
     w_out = geo["R_out"] - R_c
     w_in  = R_c - geo["R_in"]
-    entry_exit_halfwidth = w_out
+    if entry_exit_halfwidth is None:
+        entry_exit_halfwidth = w_out
 
     positions = np.zeros((N, 2))
     headings = np.zeros(N)
@@ -292,12 +293,12 @@ def build_skidpad_track(
         wl_joints.append((s_j, wl_left, wl_right))
         wr_joints.append((s_j, wr_left, wr_right))
 
-    curvatures = _linear_blend(s_nodes, ds_actual, kappa_raw, kappa_joints, half)
+    curvatures = _linear_blend(s_nodes, kappa_raw, kappa_joints, half)
     curvatures_half = _linear_blend(
-        s_nodes + ds_actual / 2.0, ds_actual, kappa_raw, kappa_joints, half
+        s_nodes + ds_actual / 2.0, kappa_raw, kappa_joints, half
     )
-    w_left = _linear_blend(s_nodes, ds_actual, wl_raw, wl_joints, half)
-    w_right = _linear_blend(s_nodes, ds_actual, wr_raw, wr_joints, half)
+    w_left = _linear_blend(s_nodes, wl_raw, wl_joints, half)
+    w_right = _linear_blend(s_nodes, wr_raw, wr_joints, half)
 
     return {
         "positions": positions.tolist(),
