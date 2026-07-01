@@ -156,6 +156,8 @@ def build_ocp(
     solver_verbose: bool = False,
     boundary_margin: float = 0.0,
     mode: str = "trackdrive",
+    time_weights: np.ndarray | None = None,
+    terminal_speed: float | None = None,
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -216,7 +218,7 @@ def build_ocp(
     opti.set_value(w_left_param, w_left)
     opti.set_value(w_right_param, w_right)
 
-    if mode == "autox":
+    if mode in ("autox", "skidpad"):
         opti.subject_to(X[0, :] == x0_param.T)
     elif mode == "trackdrive":
         opti.subject_to(X[0, 0] == x0_param[0])
@@ -224,12 +226,22 @@ def build_ocp(
     else:
         raise ValueError(f"Unknown mode: {mode!r}")
 
+    if time_weights is not None:
+        time_weights = np.asarray(time_weights, dtype=float).reshape(-1)
+        if time_weights.size not in (N - 1, N):
+            raise ValueError(
+                f"time_weights must have length {N - 1} or {N}, got {time_weights.size}"
+            )
+        time_weights = time_weights[: N - 1]
+
     if use_normalization:
         f_space, eval_at_point = build_space_dynamics_normalized(model)
     else:
         f_space, eval_at_point = build_space_dynamics(model)
     s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
     total_time = 0
+    timed_time = 0
+    pure_timed_time = 0
 
     use_corner_constraints = len(model.get_corner_offsets()) > 0
     if use_normalization:
@@ -298,13 +310,19 @@ def build_ocp(
             opti.subject_to(-w_right_param[i] <= x_i[0])
             opti.subject_to(x_i[0] <= w_left_param[i])
 
-        total_time += integrator.time_step(
+        dt_i = integrator.time_step(
             f_space, eval_at_point, x_i, u_i, kappa_i, ds,
             kappa_half=kappa_half_i,
             kappa_next=kappa_next_i,
             eps=s_dot_floor,
             smooth_eps=s_dot_smooth_eps,
         )
+        total_time += dt_i
+        if time_weights is not None:
+            w_i = float(time_weights[i])
+            timed_time += w_i * dt_i
+            if w_i >= 1.0 - 1e-9:
+                pure_timed_time += dt_i
 
     if use_corner_constraints:
         x_last = X[N - 1, :].T
@@ -331,6 +349,22 @@ def build_ocp(
     if mode == "trackdrive":
         opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
+    # Optional terminal speed (e.g. skidpad: come to ~rest after the finish line).
+    if terminal_speed is not None:
+        reduced_names = model.reduced_state_names()
+        v_idx = (
+            reduced_names.index("v")
+            if "v" in reduced_names
+            else reduced_names.index("v_long")
+        )
+        if use_normalization:
+            x_scale, x_shift = model.get_reduced_state_scaling()
+            v_scale = float(np.array(x_scale).reshape(-1)[v_idx])
+            v_shift = float(np.array(x_shift).reshape(-1)[v_idx])
+            opti.subject_to(X[N - 1, v_idx] == (terminal_speed - v_shift) / v_scale)
+        else:
+            opti.subject_to(X[N - 1, v_idx] == terminal_speed)
+
     if N > 1:
         dU = U[1:, :] - U[:-1, :]
         penalty = 0
@@ -351,7 +385,8 @@ def build_ocp(
             if w_j != 0.0:
                 penalty += w_j * ca.sumsqr(U[:, j])
 
-    obj = total_time + penalty
+    objective_time = timed_time if time_weights is not None else total_time
+    obj = objective_time + penalty
     opti.minimize(obj)
 
     if use_normalization:
@@ -399,6 +434,8 @@ def build_ocp(
         },
         obj,
         total_time,
+        objective_time,
+        pure_timed_time,
     )
 
 
@@ -415,6 +452,8 @@ def solve_ocp_and_save(
     solver_verbose: bool = False,
     boundary_margin: float = 0.0,
     mode: str = "trackdrive",
+    time_weights: np.ndarray | None = None,
+    terminal_speed: float | None = None,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -443,7 +482,7 @@ def solve_ocp_and_save(
     if integrator is None:
         integrator = EulerIntegrator()
 
-    opti, X, U, params, obj, total_time_expr = build_ocp(
+    opti, X, U, params, obj, total_time_expr, timed_time_expr, pure_timed_expr = build_ocp(
         track,
         model,
         integrator=integrator,
@@ -453,6 +492,8 @@ def solve_ocp_and_save(
         solver_verbose=solver_verbose,
         boundary_margin=boundary_margin,
         mode=mode,
+        time_weights=time_weights,
+        terminal_speed=terminal_speed,
     )
 
     reduced_names = model.reduced_state_names()
@@ -559,7 +600,9 @@ def solve_ocp_and_save(
     U_sol = np.array(sol.value(U))
     obj_val = float(sol.value(obj))
     lap_time_s = float(sol.value(total_time_expr))
-    reg_term = obj_val - lap_time_s
+    timed_time_s = float(sol.value(timed_time_expr))
+    pure_timed_s = float(sol.value(pure_timed_expr)) if time_weights is not None else 0.0
+    reg_term = obj_val - timed_time_s
 
     N = len(track["arc_lengths"])
     ds_m = (
@@ -571,8 +614,16 @@ def solve_ocp_and_save(
     time_per_iter_ms = solve_time_s / iter_count * 1e3 if iter_count not in (None, 0) else None
 
     print(f"Solved full-lap OCP.  Objective value: {obj_val:.2f}")
-    print(f"  Lap-time term: {lap_time_s:.2f} s")
-    print(f"  Regularisation term: {reg_term:.3f}")
+    print(f"  Full-maneuver time: {lap_time_s:.2f} s")
+    if time_weights is not None:
+        n_timed = int(np.sum(np.asarray(time_weights) >= 1.0 - 1e-9))
+        score = pure_timed_s / 2.0 if n_timed > 0 else float("nan")
+        print(f"  Timed laps total: {pure_timed_s:.3f} s  (score avg: {score:.3f} s)")
+        print(f"  Weighted objective time: {timed_time_s:.2f} s")
+    print(
+        f"  Regularisation term: {reg_term:.4f} "
+        f"({100.0 * reg_term / obj_val:.2f}% of objective)"
+    )
     print(
         f"Solve stats: N={N}, ds={ds_m:.3f} m, "
         f"time={solve_time_s:.3f} s, "
@@ -624,6 +675,9 @@ def solve_ocp_and_save(
         "w_right": track["w_right"],
         "kappa": track["curvatures"],
         "headings": track["headings"],
+        "timed_mask": track.get("timed_mask"),
+        "decel_mask": track.get("decel_mask"),
+        "skidpad": track.get("skidpad"),
         "model_params": model.params,
         "profiling": {
             "N": N,
@@ -634,6 +688,9 @@ def solve_ocp_and_save(
             "time_per_point_ms": time_per_point_ms,
             "time_per_iter_ms": time_per_iter_ms,
             "lap_time_s": lap_time_s,
+            "timed_time_s": timed_time_s,
+            "pure_timed_time_s": pure_timed_s,
+            "skidpad_score_s": (pure_timed_s / 2.0) if time_weights is not None else None,
             "reg_term": reg_term,
             "reg_term_relative": reg_term / obj_val if obj_val != 0.0 else None,
         },

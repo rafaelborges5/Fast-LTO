@@ -54,13 +54,13 @@ class PipelineConfig:
     Parameters are grouped roughly by pipeline step; most have sensible defaults.
     """
 
-    track_id: str = "fsg_random"  # used for file naming
-    track_type: Literal["fsg", "ellipse", "bean"] = "fsg"
+    track_id: str = "fsg_random"
+    track_type: Literal["fsg", "ellipse", "bean", "skidpad"] = "fsg"
 
     repo_root: Optional[Path] = None
-    track_csv_path: Optional[Path] = None  # auto-derived if None
+    track_csv_path: Optional[Path] = None
 
-    generate_track: bool = False  # if False and CSV exists, reuse existing
+    generate_track: bool = False
 
     ds_m: float = 0.5
     continuity: ContinuityType = "C2"
@@ -72,33 +72,40 @@ class PipelineConfig:
     savgol_window_length: int = 41
     savgol_polyorder: int = 2
 
-    mode: Literal["autox", "trackdrive"] = "trackdrive"
+    mode: Literal["autox", "trackdrive", "skidpad"] = "trackdrive"
 
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
-    # Input rate-regularization weight on changes in inputs (du).
     reg_u: float = 600.0
-    # L2 regularization on input magnitudes (for models with rate inputs).
     reg_u_l2: float | None = None
-    initial_speed: Optional[float] = None  # None → mode default (3.0 autox, 5.0 trackdrive)
-    boundary_margin: float = 0.0  # Shrink lateral bounds by this amount (m) during optimization
-    autox_extension_m: float = 50.0  # Extra track beyond finish line for autox mode
+    initial_speed: Optional[float] = None
+    boundary_margin: float = 0.0
+    autox_extension_m: float = 50.0
+
+    skidpad_map_csv: Optional[str] = None
+    skidpad_reference_csv: Optional[str] = None
+    eps_time: float = 0.1
+    entry_exit_halfwidth: float = 1.5
+    kappa_blend_m: float = 1.5
+    terminal_speed: Optional[float] = None
 
     export_trajectory: bool = True
 
     plot_results: bool = True
-    show_plots: bool = True  # Whether to display plots interactively
+    show_plots: bool = True
     normalize_states_and_inputs: bool = True
     solver_verbose: bool = False
 
-    vehicle_config: Optional[object] = None  # VehicleConfig, if loaded from YAML
+    vehicle_config: Optional[object] = None
 
     def __post_init__(self) -> None:
-        if self.mode not in ("autox", "trackdrive"):
-            raise ValueError(f"Unknown mode: {self.mode!r}. Must be 'autox' or 'trackdrive'.")
+        if self.mode not in ("autox", "trackdrive", "skidpad"):
+            raise ValueError(
+                f"Unknown mode: {self.mode!r}. Must be 'autox', 'trackdrive' or 'skidpad'."
+            )
 
         if self.initial_speed is None:
-            self.initial_speed = 3.0 if self.mode == "autox" else 5.0
+            self.initial_speed = 5.0 if self.mode == "trackdrive" else 3.0
 
         if self.repo_root is None:
             self.repo_root = Path(__file__).resolve().parent.parent
@@ -295,6 +302,82 @@ def _extend_track_for_autox(track_data: Dict, extension_m: float) -> Dict:
     return extended
 
 
+def _resolve_path(root: Optional[Path], p: str | Path) -> Path:
+    """Resolve a possibly-relative config path against the repo root."""
+    path = Path(p)
+    if path.is_absolute() or root is None:
+        return path
+    return root / path
+
+
+def step_build_skidpad_track(config: PipelineConfig) -> Path:
+    """Build the skidpad track-with-widths JSON from the cone map + reference."""
+    from tracks.skidpad import build_skidpad_track
+
+    if config.skidpad_map_csv is None or config.skidpad_reference_csv is None:
+        raise ValueError(
+            "mode='skidpad' requires skidpad_map_csv and skidpad_reference_csv."
+        )
+
+    map_csv = _resolve_path(config.repo_root, config.skidpad_map_csv)
+    ref_csv = _resolve_path(config.repo_root, config.skidpad_reference_csv)
+
+    print("[Skidpad] Building track from cone map + reference trajectory")
+    print(f"  Map:       {map_csv}")
+    print(f"  Reference: {ref_csv}")
+
+    track = build_skidpad_track(
+        map_csv=map_csv,
+        ref_csv=ref_csv,
+        ds_m=config.ds_m,
+        entry_exit_halfwidth=config.entry_exit_halfwidth,
+        kappa_blend_m=config.kappa_blend_m,
+    )
+
+    config.discretized_dir.mkdir(parents=True, exist_ok=True)
+    with config.track_with_widths_path.open("w") as f:
+        json.dump(track, f, indent=2)
+
+    sk = track["skidpad"]
+    timed = int(np.sum(track["timed_mask"]))
+    print(
+        f"  N={track['num_points']} total={track['total_length_m']:.1f} m "
+        f"R_c={sk['R_c']:.2f} R_in={sk['R_in']:.2f} R_out={sk['R_out']:.2f} "
+        f"timed_nodes={timed}"
+    )
+    print(f"  Saved track with widths to: {config.track_with_widths_path}")
+    return config.track_with_widths_path
+
+
+def _run_skidpad_pipeline(
+    config: PipelineConfig, end_at: Optional[StepName]
+) -> Dict[str, Path]:
+    """Dedicated skidpad flow: build track -> OCP -> export -> visualize."""
+    results: Dict[str, Path] = {}
+
+    results["bounds"] = step_build_skidpad_track(config)
+    if end_at == "bounds":
+        return results
+
+    solution_path = step_solve_ocp(config)
+    results["ocp"] = solution_path
+    if end_at == "ocp":
+        return results
+
+    if config.export_trajectory:
+        results["export"] = step_export_trajectory(config, solution_path=solution_path)
+    if end_at == "export":
+        return results
+
+    if config.plot_results:
+        map_csv = _resolve_path(config.repo_root, config.skidpad_map_csv)
+        results["plot"] = step_visualize(
+            config, solution_path=solution_path, csv_path=map_csv
+        )
+
+    return results
+
+
 def step_solve_ocp(
     config: PipelineConfig,
     track_with_widths_path: Optional[Path] = None,
@@ -307,7 +390,17 @@ def step_solve_ocp(
 
     track_data: Dict = load_track_with_widths(track_with_widths_path)
 
-    if config.mode == "autox":
+    time_weights = None
+    if config.mode == "skidpad":
+        mask = np.asarray(track_data["timed_mask"], dtype=float)
+        decel = np.asarray(track_data.get("decel_mask", np.zeros_like(mask)), dtype=float)
+        time_weights = np.where(mask > 0.5, 1.0, float(config.eps_time))
+        time_weights = np.where(decel > 0.5, 0.0, time_weights)
+        print(f"  Skidpad: {int(mask.sum())}/{len(mask)} timed nodes, "
+              f"{int(decel.sum())} exit (decel) nodes, "
+              f"un-timed weight eps_time={config.eps_time}, "
+              f"terminal_speed={config.terminal_speed}")
+    elif config.mode == "autox":
         track_data = _extend_track_for_autox(track_data, config.autox_extension_m)
         print(f"  Autox: extended track by {config.autox_extension_m:.0f} m "
               f"({track_data['num_points']} points total)")
@@ -374,6 +467,8 @@ def step_solve_ocp(
         solver_verbose=config.solver_verbose,
         boundary_margin=config.boundary_margin,
         mode=config.mode,
+        time_weights=time_weights,
+        terminal_speed=config.terminal_speed if config.mode == "skidpad" else None,
     )
 
     # Optional concise profiling summary (single line)
@@ -436,6 +531,23 @@ def step_visualize(
 
     with solution_path.open("r") as f:
         data = json.load(f)
+
+    if config.mode == "skidpad":
+        from datetime import datetime
+        from tracks.skidpad import load_skidpad_cones
+        from visualization.skidpad_plots import plot_skidpad
+
+        cones = load_skidpad_cones(csv_path)
+        timestamp_dir = config.plots_dir / datetime.now().strftime("%Y%m%d-%H%M%S")
+        timestamp_dir.mkdir(parents=True, exist_ok=True)
+        plot_path = timestamp_dir / "panels.png"
+        summary = plot_skidpad(
+            data, cones, out_path=plot_path, show=config.show_plots
+        )
+        laps = ", ".join(f"{t:.3f}s" for t in summary["timed_lap_times"])
+        print(f"  Timed laps: {laps}  |  score (avg): {summary['score']:.3f} s")
+        print(f"  Saved plots to: {timestamp_dir}")
+        return timestamp_dir
 
     boundaries = load_boundaries(csv_path)
     cones_left = boundaries["left"]
@@ -559,6 +671,11 @@ def run_pipeline(
 
     if end_at is None:
         end_at = "plot"
+
+    # Skidpad uses a dedicated builder (overlapping path can't go through the
+    # generic spline/bounds machinery); the OCP/export/plot steps are reused.
+    if config.mode == "skidpad" or config.track_type == "skidpad":
+        return _run_skidpad_pipeline(config, end_at)
 
     # Track whether we just generated a new track CSV
     track_just_generated = False

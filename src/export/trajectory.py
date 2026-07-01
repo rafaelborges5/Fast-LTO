@@ -37,6 +37,7 @@ CSV_COLUMNS = [
     "force_long_rr",
     "steering_angle",
     "steering_angle_dot",
+    "timed",
 ]
 
 
@@ -153,6 +154,13 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     N = len(x)
 
     z = np.zeros(N, dtype=np.float64)
+
+    timed_mask = data.get("timed_mask")
+    timed = (
+        np.asarray(timed_mask, dtype=int)
+        if timed_mask is not None
+        else np.zeros(N, dtype=int)
+    )
 
     w_left = np.array(data["w_left"], dtype=np.float64)
     w_right = np.array(data["w_right"], dtype=np.float64)
@@ -319,6 +327,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
                 force_long_rr[i],
                 steering_angle[i],
                 steering_angle_dot[i],
+                int(timed[i]),
             ])
 
     return output_path

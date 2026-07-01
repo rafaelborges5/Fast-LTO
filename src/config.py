@@ -58,8 +58,8 @@ class VehicleConfig:
     d_max: float = 3.0
     psi_err_max: float = 1.2
     mu: float = 1.2
-    lf: float = 0.689
-    lr: float = 0.842
+    lf: float = 0.842
+    lr: float = 0.689
     corners: Optional[List] = None
 
     v_eps: float = 0.5
@@ -179,6 +179,9 @@ _PIPELINE_FIELDS = {
     "use_savgol_bounds", "savgol_window_length", "savgol_polyorder",
     "normalize_states_and_inputs", "solver_verbose",
     "export_trajectory", "plot_results", "show_plots",
+    # Skidpad-specific
+    "skidpad_map_csv", "skidpad_reference_csv",
+    "eps_time", "entry_exit_halfwidth", "kappa_blend_m", "terminal_speed",
 }
 
 
@@ -202,6 +205,14 @@ class RunConfig:
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
     autox_extension_m: float = 50.0
+
+    # Skidpad-specific (only used when mode == "skidpad")
+    skidpad_map_csv: Optional[str] = None
+    skidpad_reference_csv: Optional[str] = None
+    eps_time: float = 0.1
+    entry_exit_halfwidth: float = 1.5
+    kappa_blend_m: float = 1.5
+    terminal_speed: Optional[float] = None
 
     use_savgol_bounds: bool = False
     savgol_window_length: int = 41
