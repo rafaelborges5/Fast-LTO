@@ -29,16 +29,16 @@ vehicle:
     A_f: 1.2
     B_fl: 9.0
     C_fl: 1.3
-    D_fl: 1.2
+    D_fl: 1.4
     B_fr: 9.0
     C_fr: 1.3
-    D_fr: 1.2
+    D_fr: 1.4
     B_rr: 9.0
     C_rr: 1.3
-    D_rr: 1.2
+    D_rr: 1.4
     B_rl: 9.0
     C_rl: 1.3
-    D_rl: 1.2
+    D_rl: 1.4
     dFxmax: 1000.0
     ddeltamax: 1.3
     Fx_max: 1500.0
