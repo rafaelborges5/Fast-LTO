@@ -155,25 +155,28 @@ def plot_skidpad(
 
     # ── A: XY overview ───────────────────────────────────────────────────────
     ax = axes[0, 0]
-    ax.scatter(cones[:, 0], cones[:, 1], c="dimgray", s=16, label="cones", zorder=2)
-    sc = ax.scatter(path_xy[:, 0], path_xy[:, 1], c=v, cmap="viridis", s=8, zorder=3)
+    # Plot Y on x-axis, X on y-axis so the wider cone span (Y ≈ 40 m) runs
+    # horizontally and the entry/exit span (X ≈ 21 m) runs vertically, giving
+    # a landscape view while preserving equal aspect.
+    ax.scatter(cones[:, 1], cones[:, 0], c="dimgray", s=16, label="cones", zorder=2)
+    sc = ax.scatter(path_xy[:, 1], path_xy[:, 0], c=v, cmap="viridis", s=8, zorder=3)
     tm = timed == 1
     ax.scatter(
-        path_xy[tm, 0], path_xy[tm, 1],
+        path_xy[tm, 1], path_xy[tm, 0],
         facecolors="none", edgecolors=_C_TIMED, s=22, linewidths=0.6,
         label="timed laps", zorder=4,
     )
     for key, col in (("c_first", "C1"), ("c_second", "C3")):
         if key in sk:
             c = sk[key]
-            ax.plot(c[0], c[1], "x", color=col, markersize=12, mew=2)
+            ax.plot(c[1], c[0], "x", color=col, markersize=12, mew=2)
     if "gate" in sk:
         g = sk["gate"]
-        ax.plot(g[0], g[1], "k+", markersize=14, mew=2, label="gate")
+        ax.plot(g[1], g[0], "k+", markersize=14, mew=2, label="gate")
     fig.colorbar(sc, ax=ax, label="v [m/s]")
     ax.set_aspect("equal", adjustable="box")
     ax.set_title("A  Optimal path (coloured by speed)")
-    ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]")
+    ax.set_xlabel("y [m]"); ax.set_ylabel("x [m]")
     ax.legend(loc="upper right", fontsize=8)
     ax.grid(True, ls="--", alpha=0.3)
 
