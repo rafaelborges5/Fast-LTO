@@ -4,7 +4,7 @@ vehicle:
   lf: 0.842
   lr: 0.689
   v_min: 0.4
-  v_max: 15.0
+  v_max: 14.0
   d_max: 3.0
   psi_err_max: 1.2
   v_eps: 0.5
