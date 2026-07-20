@@ -89,6 +89,10 @@ class PipelineConfig:
     entry_exit_halfwidth: float = 1.5
     kappa_blend_m: float = 1.5
     terminal_speed: Optional[float] = None
+    # Metres of the exit/decel zone (measured from the finish gate) that keep the
+    # heavy timed time-weight, so the terminal brake starts AFTER the finish line
+    # instead of bleeding back before it. 0.0 = original behaviour.
+    decel_hold_m: float = 0.0
 
     export_trajectory: bool = True
 
@@ -456,9 +460,20 @@ def step_solve_ocp(
         decel = np.asarray(track_data.get("decel_mask", np.zeros_like(mask)), dtype=float)
         time_weights = np.where(mask > 0.5, 1.0, float(config.eps_time))
         time_weights = np.where(decel > 0.5, 0.0, time_weights)
+        # Keep the heavy timed weight for the first `decel_hold_m` metres of the exit
+        # (from the finish gate), so the terminal brake starts after the finish line
+        # rather than bleeding back onto the last timed circle.
+        n_hold = 0
+        if config.decel_hold_m > 0.0:
+            ds_hold = float(track_data.get("ds_m", config.ds_m))
+            decel_idx = np.where(decel > 0.5)[0]
+            n_hold = min(int(round(config.decel_hold_m / ds_hold)), decel_idx.size)
+            if n_hold > 0:
+                time_weights[decel_idx[:n_hold]] = 1.0
         print(f"  Skidpad: {int(mask.sum())}/{len(mask)} timed nodes, "
               f"{int(decel.sum())} exit (decel) nodes, "
               f"un-timed weight eps_time={config.eps_time}, "
+              f"decel_hold={config.decel_hold_m} m ({n_hold} exit nodes held), "
               f"terminal_speed={config.terminal_speed}")
     elif config.mode == "autox":
         track_data = _extend_track_for_autox(

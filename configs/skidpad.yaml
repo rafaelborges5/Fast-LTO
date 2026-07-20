@@ -65,3 +65,4 @@ pipeline:
   entry_exit_halfwidth: 1.5
   kappa_blend_m: 1.5
   terminal_speed: 0.5
+  decel_hold_m: 2.0
