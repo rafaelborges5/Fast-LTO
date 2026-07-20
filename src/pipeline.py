@@ -81,6 +81,7 @@ class PipelineConfig:
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
     autox_extension_m: float = 50.0
+    autox_lead_in_m: float = 0.0
 
     skidpad_map_csv: Optional[str] = None
     skidpad_reference_csv: Optional[str] = None
@@ -272,11 +273,30 @@ def _make_integrator(name: Literal["euler", "rk4"]) -> SpaceIntegrator:
     raise ValueError(f"Unknown integrator_name: {name!r}")
 
 
-def _extend_track_for_autox(track_data: Dict, extension_m: float) -> Dict:
-    """Extend a closed-loop track by wrapping points beyond the finish line."""
+def _extend_track_for_autox(
+    track_data: Dict, extension_m: float, lead_in_m: float = 0.0
+) -> Dict:
+    """Extend a closed-loop track by wrapping points beyond the finish line.
+
+    The OCP horizon itself (``positions``/``headings``/... fed to
+    ``build_ocp``) only ever gets the forward ``extension_m`` run-off — it is
+    unaffected by ``lead_in_m`` and reproduces the original single-lap autox
+    solve exactly. If ``lead_in_m`` > 0, the geometry for a lead-in stretch
+    *before* the start/finish line is also computed (borrowed from the tail
+    of the same closed loop, since the point just "before" s=0 on a closed
+    track is, geometrically, the end of the loop) and returned under
+    ``"autox_lead_in"``. It is not part of the optimization: see
+    ``_prepend_autox_lead_in``, which stitches it onto the solved trajectory
+    afterwards as a prescribed, constant-velocity segment. Solving for it
+    jointly with the OCP would force models with rate-limited actuator states
+    (e.g. four_wheel's tire forces/steering) to hit an exact speed target
+    while ramping those actuators up from a standing start on a coarse mesh,
+    which can make the problem infeasible.
+    """
     ds_m = float(track_data["ds_m"])
     N_orig = len(track_data["arc_lengths"])
     M_pts = min(max(1, round(extension_m / ds_m)), N_orig - 1)
+    K_pts = min(max(0, round(lead_in_m / ds_m)), N_orig - 1)
 
     positions = np.array(track_data["positions"], dtype=np.float64)
     headings = np.array(track_data["headings"], dtype=np.float64)
@@ -299,7 +319,47 @@ def _extend_track_for_autox(track_data: Dict, extension_m: float) -> Dict:
     extended["num_points"] = N_orig + M_pts
     extended["total_length_m"] = float(arc_lengths[-1] + ds_m * M_pts + ds_m)
 
+    if K_pts > 0:
+        extended["autox_lead_in"] = {
+            "positions": positions[-K_pts:].tolist(),
+            "headings": headings[-K_pts:].tolist(),
+            "curvatures": curvatures[-K_pts:].tolist(),
+            "arc_lengths": (arc_lengths[-K_pts:] - total_length).tolist(),
+            "w_left": w_left[-K_pts:].tolist(),
+            "w_right": w_right[-K_pts:].tolist(),
+        }
+
     return extended
+
+
+def _prepend_autox_lead_in(sol_dict: Dict, lead_in: Dict, initial_speed: float) -> Dict:
+    """Stitch a prescribed, constant-velocity lead-in onto a solved autox trajectory.
+
+    The lead-in is not part of the OCP: it's a straight run along the
+    centerline at exactly ``initial_speed``, giving the physical car a
+    stretch of track before the true start/finish line. Lateral dynamics
+    (yaw rate, tire forces, steering, ...) are simply held at the same
+    zero/rest values as the pinned initial condition, since the trajectory
+    tracker mostly consumes speed and lateral-deviation references.
+    """
+    K = len(lead_in["arc_lengths"])
+    positions = lead_in["positions"]
+
+    sol_dict["path_xy"] = positions + list(sol_dict["path_xy"])
+    sol_dict["arc_lengths"] = lead_in["arc_lengths"] + list(sol_dict["arc_lengths"])
+    sol_dict["w_left"] = lead_in["w_left"] + list(sol_dict["w_left"])
+    sol_dict["w_right"] = lead_in["w_right"] + list(sol_dict["w_right"])
+    sol_dict["kappa"] = lead_in["curvatures"] + list(sol_dict["kappa"])
+    sol_dict["headings"] = lead_in["headings"] + list(sol_dict["headings"])
+
+    for name in sol_dict["state_names"]:
+        fill = float(initial_speed) if name in ("v", "v_long") else 0.0
+        sol_dict[name] = [fill] * K + list(sol_dict[name])
+
+    for name in sol_dict["input_names"]:
+        sol_dict[name] = [0.0] * K + list(sol_dict[name])
+
+    return sol_dict
 
 
 def _resolve_path(root: Optional[Path], p: str | Path) -> Path:
@@ -401,9 +461,11 @@ def step_solve_ocp(
               f"un-timed weight eps_time={config.eps_time}, "
               f"terminal_speed={config.terminal_speed}")
     elif config.mode == "autox":
-        track_data = _extend_track_for_autox(track_data, config.autox_extension_m)
+        track_data = _extend_track_for_autox(
+            track_data, config.autox_extension_m, config.autox_lead_in_m
+        )
         print(f"  Autox: extended track by {config.autox_extension_m:.0f} m "
-              f"({track_data['num_points']} points total)")
+              f"({track_data['num_points']} points total, OCP horizon)")
 
     model = _make_model(config.model_name, vehicle_config=config.vehicle_config)
     integrator = _make_integrator(config.integrator_name)
@@ -470,6 +532,16 @@ def step_solve_ocp(
         time_weights=time_weights,
         terminal_speed=config.terminal_speed if config.mode == "skidpad" else None,
     )
+
+    autox_lead_in = track_data.get("autox_lead_in") if config.mode == "autox" else None
+    if autox_lead_in:
+        sol_dict = _prepend_autox_lead_in(sol_dict, autox_lead_in, config.initial_speed)
+        with solution_path.open("w") as f:
+            json.dump(sol_dict, f, indent=2)
+        print(
+            f"  Autox: prepended {config.autox_lead_in_m:.0f} m constant-speed "
+            f"lead-in ({len(autox_lead_in['arc_lengths'])} points, not part of the OCP solve)"
+        )
 
     # Optional concise profiling summary (single line)
     profiling = sol_dict.get("profiling", {})

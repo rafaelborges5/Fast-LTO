@@ -112,6 +112,12 @@ Examples:
         default=None,
         help="Meters of extra track beyond finish line for autox mode. Default: 50.0",
     )
+    parser.add_argument(
+        "--autox-lead-in",
+        type=float,
+        default=None,
+        help="Meters of extra track before the start line for autox mode. Default: 0.0",
+    )
 
     # OCP options
     parser.add_argument(
@@ -233,6 +239,8 @@ Examples:
             run_config.initial_speed = args.initial_speed
         if args.autox_extension is not None:
             run_config.autox_extension_m = args.autox_extension
+        if args.autox_lead_in is not None:
+            run_config.autox_lead_in_m = args.autox_lead_in
         if args.boundary_margin is not None:
             run_config.boundary_margin = args.boundary_margin
         if args.reg_du_vec is not None:
@@ -285,6 +293,8 @@ Examples:
             config_kwargs["initial_speed"] = args.initial_speed
         if args.autox_extension is not None:
             config_kwargs["autox_extension_m"] = args.autox_extension
+        if args.autox_lead_in is not None:
+            config_kwargs["autox_lead_in_m"] = args.autox_lead_in
         if args.boundary_margin is not None:
             config_kwargs["boundary_margin"] = args.boundary_margin
         if args.ds is not None:

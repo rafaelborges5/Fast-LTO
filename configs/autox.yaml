@@ -78,3 +78,4 @@ pipeline:
   initial_speed: 3.0
   boundary_margin: 0.35
   autox_extension_m: 50.0
+  autox_lead_in_m: 5.0
