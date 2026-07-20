@@ -24,6 +24,7 @@ data/processed/
 data/discretized/
 data/solutions/
 data/output_trajectories/
+data/validation/
 ocp_plots/
 results/
 todo-list.md

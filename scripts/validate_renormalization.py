@@ -20,7 +20,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from export.trajectory import _compute_path_geometry, export_reference_trajectory
+from export.trajectory import export_reference_trajectory
 
 
 def load_original(solution_path: Path) -> dict:
@@ -37,8 +37,85 @@ def load_original(solution_path: Path) -> dict:
         "psi_err": np.array(data["psi_err"], dtype=np.float64),
         "d": np.array(data["d"], dtype=np.float64),
         "arc_lengths": np.array(data["arc_lengths"], dtype=np.float64),
-        "v": np.array(data["v"], dtype=np.float64),
+        "v": np.array(data.get("v", data.get("v_long")), dtype=np.float64),
         "model_name": data["run_config"]["model_name"],
+        "mode": data["run_config"].get("mode", "trackdrive"),
+    }
+
+
+def _legacy_spline_kappa(path_xy: np.ndarray, periodic: bool, smooth: bool) -> np.ndarray:
+    """Reimplementation of the old (pre-fix) spline-differentiation kappa.
+
+    This logic used to live in ``export.trajectory._compute_path_geometry``
+    and has been replaced there by an analytic formula. Kept here only as a
+    one-time "before" baseline for the chatter-reduction comparison below.
+    """
+    from scipy.interpolate import CubicSpline
+    from scipy.signal import savgol_filter
+
+    x = path_xy[:, 0]
+    y = path_xy[:, 1]
+
+    diffs = np.diff(path_xy, axis=0)
+    segment_lengths = np.linalg.norm(diffs, axis=1)
+    t = np.zeros(len(x))
+    t[1:] = np.cumsum(segment_lengths)
+
+    if periodic:
+        wrap_distance = np.linalg.norm(path_xy[0] - path_xy[-1])
+        t_periodic = np.append(t, t[-1] + wrap_distance)
+        x_periodic = np.append(x, x[0])
+        y_periodic = np.append(y, y[0])
+        spline_x = CubicSpline(t_periodic, x_periodic, bc_type="periodic")
+        spline_y = CubicSpline(t_periodic, y_periodic, bc_type="periodic")
+    else:
+        spline_x = CubicSpline(t, x, bc_type="not-a-knot")
+        spline_y = CubicSpline(t, y, bc_type="not-a-knot")
+
+    dx_dt = spline_x(t, 1)
+    dy_dt = spline_y(t, 1)
+    d2x_dt2 = spline_x(t, 2)
+    d2y_dt2 = spline_y(t, 2)
+
+    numerator = dx_dt * d2y_dt2 - dy_dt * d2x_dt2
+    denominator = (dx_dt**2 + dy_dt**2) ** 1.5
+    curvatures = numerator / denominator
+
+    if smooth and len(curvatures) > 17:
+        curvatures = savgol_filter(
+            curvatures, window_length=17, polyorder=2,
+            mode="wrap" if periodic else "interp",
+        )
+    return curvatures
+
+
+def _chatter_rms(kappa: np.ndarray) -> float:
+    """RMS of the 2nd finite difference of kappa -- a simple chatter/jerk metric."""
+    return float(np.sqrt(np.mean(np.diff(kappa, n=2) ** 2)))
+
+
+def report_chatter_comparison(orig: dict, exported: dict) -> dict:
+    print("\n=== Curvature chatter comparison ===\n")
+    periodic = orig["mode"] == "trackdrive"
+
+    legacy_raw = _legacy_spline_kappa(orig["path_xy"], periodic, smooth=False)
+    legacy_savgol = _legacy_spline_kappa(orig["path_xy"], periodic, smooth=True)
+    analytic = exported["kappa"]
+
+    rms_raw = _chatter_rms(legacy_raw)
+    rms_savgol = _chatter_rms(legacy_savgol)
+    rms_analytic = _chatter_rms(analytic)
+
+    print(f"  legacy (unfiltered spline-diff): chatter RMS = {rms_raw:.6f}")
+    print(f"  legacy + savgol (current hotfix): chatter RMS = {rms_savgol:.6f}")
+    print(f"  analytic (new fix):               chatter RMS = {rms_analytic:.6f}")
+    if rms_analytic > 0:
+        print(f"  improvement vs unfiltered: {rms_raw / rms_analytic:.1f}x")
+        print(f"  improvement vs savgol:     {rms_savgol / rms_analytic:.1f}x")
+
+    return {
+        "legacy_raw": legacy_raw,
+        "legacy_savgol": legacy_savgol,
     }
 
 
@@ -172,24 +249,48 @@ def check_invariants(orig: dict, exported: dict) -> bool:
         np.all(np.diff(exported["time"]) > 0),
     )
 
+    # 11. Closed-loop total turning == +-2*pi (periodic/trackdrive only).
+    # This is an exact geometric invariant of a closed, non-self-crossing
+    # path -- it depends only on kappa being *correct*, not merely smooth,
+    # so it catches sign errors or dropped terms that a smoothness check
+    # alone would miss.
+    if orig["mode"] == "trackdrive":
+        x_e, y_e = exported["x"], exported["y"]
+        seg = np.linalg.norm(np.diff(np.column_stack([x_e, y_e]), axis=0), axis=1)
+        wrap_len = np.linalg.norm([x_e[0] - x_e[-1], y_e[0] - y_e[-1]])
+        ds_path = np.append(seg, wrap_len)
+        total_turning = np.sum(exported["kappa"] * ds_path)
+        check(
+            "Closed-loop total turning == 2*pi",
+            abs(abs(total_turning) - 2 * np.pi) < 0.05,
+            f"total turning = {total_turning:.4f} rad (target +-{2*np.pi:.4f})",
+        )
+    else:
+        print(f"  [SKIP] Closed-loop total turning -- mode={orig['mode']!r} is not periodic")
+
     return all_ok
 
 
-def plot_comparisons(orig: dict, exported: dict, out_dir: Path) -> None:
+def plot_comparisons(orig: dict, exported: dict, out_dir: Path, legacy: dict | None = None) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     s_orig = orig["arc_lengths"]
     s_new = exported["arc_progress"]
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-    # 1. Curvature comparison
+    # 1. Curvature comparison: centerline vs legacy (spline-diff, +-savgol) vs new analytic
     ax = axes[0, 0]
-    ax.plot(s_orig, orig["kappa"], label="centerline κ", alpha=0.7)
-    ax.plot(s_new, exported["kappa"], label="optimal path κ", alpha=0.7)
+    ax.plot(s_orig, orig["kappa"], label="centerline κ", alpha=0.5, color="gray")
+    if legacy is not None:
+        ax.plot(s_new, legacy["legacy_raw"], label="legacy spline-diff (unfiltered)",
+                alpha=0.5, color="tab:red", lw=0.8)
+        ax.plot(s_new, legacy["legacy_savgol"], label="legacy + savgol (old hotfix)",
+                alpha=0.8, color="tab:orange", lw=1.2)
+    ax.plot(s_new, exported["kappa"], label="analytic κ (new fix)", alpha=0.9, color="tab:blue")
     ax.set_xlabel("arc length [m]")
     ax.set_ylabel("curvature [1/m]")
     ax.set_title("Curvature: centerline vs optimal path")
-    ax.legend()
+    ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
     # 2. Heading comparison
@@ -255,10 +356,12 @@ def main() -> None:
         exported = load_exported_csv(csv_out)
 
         ok = check_invariants(orig, exported)
+        legacy = report_chatter_comparison(orig, exported)
 
         plot_comparisons(
             orig, exported,
             out_dir=REPO_ROOT / "data" / "validation",
+            legacy=legacy,
         )
 
         if ok:

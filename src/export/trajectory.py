@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-from scipy.interpolate import CubicSpline
 
 CSV_COLUMNS = [
     "x",
@@ -40,56 +39,54 @@ CSV_COLUMNS = [
 ]
 
 
-def _compute_path_geometry(
-    path_xy: np.ndarray,
-    periodic: bool = True,
+def _analytic_path_geometry(
+    vehicle_heading: np.ndarray,
+    v_long: np.ndarray,
+    v_lat: np.ndarray,
+    yaw_rate_equiv: np.ndarray,
+    v_path_eps: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Fit a C2 cubic spline to a path and return heading + curvature.
+    """Compute the vehicle's true path heading and curvature analytically.
+
+    Both quantities follow directly from already-smooth OCP state
+    trajectories, with no differentiation of anything at all. Every vehicle
+    model here shares the Frenet-frame kinematic identity
+    ``psi_err_dot = yaw_rate_equiv - kappa_ref(s) * s_dot`` (``yaw_rate_equiv``
+    is the ``yaw_rate`` state for four_wheel/dynamic_bicycle, or ``a_lat/v``
+    for point_mass, which has no separate yaw state). From this, the actual
+    path-tangent heading works out to exactly ``vehicle_heading + beta``
+    (``beta`` = body slip angle), and the path curvature is exactly
+    ``yaw_rate_equiv / v_path`` -- a pure algebraic combination of states,
+    unlike differentiating a freshly re-interpolated (x, y) spline (or even
+    finite-differencing ``beta`` itself, which is ill-conditioned wherever
+    both ``v_long`` and ``v_lat`` are small, e.g. skidpad's terminal
+    deceleration).
 
     Parameters
     ----------
-    path_xy : np.ndarray
-        Shape (N, 2) of [x, y] positions.
-    periodic : bool
-        If True, treat as closed loop (periodic spline). If False, open path.
+    vehicle_heading : np.ndarray
+        Vehicle body heading in the world frame (track heading + psi_err).
+    v_long, v_lat : np.ndarray
+        Body-frame longitudinal/lateral velocity (``v_lat`` all-zero for
+        models without sideslip, e.g. point_mass).
+    yaw_rate_equiv : np.ndarray
+        Yaw rate (or its point_mass equivalent, ``a_lat / v_safe``).
+    v_path_eps : float
+        Floor on path speed, to avoid blow-up at near-standstill points
+        (e.g. skidpad's terminal deceleration).
 
     Returns
     -------
-    headings : np.ndarray
-        Shape (N,) tangent heading angles in radians.
-    curvatures : np.ndarray
-        Shape (N,) signed curvatures.
+    heading_path : np.ndarray
+        True path-tangent heading.
+    kappa_path : np.ndarray
+        Signed curvature of the actual path.
     """
-    x = path_xy[:, 0]
-    y = path_xy[:, 1]
-
-    diffs = np.diff(path_xy, axis=0)
-    segment_lengths = np.linalg.norm(diffs, axis=1)
-    t = np.zeros(len(x))
-    t[1:] = np.cumsum(segment_lengths)
-
-    if periodic:
-        wrap_distance = np.linalg.norm(path_xy[0] - path_xy[-1])
-        t_periodic = np.append(t, t[-1] + wrap_distance)
-        x_periodic = np.append(x, x[0])
-        y_periodic = np.append(y, y[0])
-        spline_x = CubicSpline(t_periodic, x_periodic, bc_type="periodic")
-        spline_y = CubicSpline(t_periodic, y_periodic, bc_type="periodic")
-    else:
-        spline_x = CubicSpline(t, x, bc_type="not-a-knot")
-        spline_y = CubicSpline(t, y, bc_type="not-a-knot")
-
-    dx_dt = spline_x(t, 1)
-    dy_dt = spline_y(t, 1)
-    d2x_dt2 = spline_x(t, 2)
-    d2y_dt2 = spline_y(t, 2)
-
-    headings = np.arctan2(dy_dt, dx_dt)
-    numerator = dx_dt * d2y_dt2 - dy_dt * d2x_dt2
-    denominator = (dx_dt**2 + dy_dt**2) ** 1.5
-    curvatures = numerator / denominator
-
-    return headings, curvatures
+    beta = np.arctan2(v_lat, v_long)
+    v_path = np.hypot(v_long, v_lat)
+    heading_path = vehicle_heading + beta
+    kappa_path = yaw_rate_equiv / np.maximum(v_path, v_path_eps)
+    return heading_path, kappa_path
 
 
 def _finite_diff_periodic(arr: np.ndarray, dt: np.ndarray) -> np.ndarray:
@@ -162,18 +159,13 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     psi_err = np.array(data["psi_err"], dtype=np.float64)
     d = np.array(data["d"], dtype=np.float64)
 
-    # -- Renormalize: make optimal path the new reference --
-    opt_headings, opt_kappa = _compute_path_geometry(path_xy, periodic=periodic)
-
-    boundary_left = w_left - d
-    boundary_right = -(w_right + d)
-
-    vehicle_heading = headings + psi_err
-    psi_err = (vehicle_heading - opt_headings + np.pi) % (2 * np.pi) - np.pi
-
-    kappa = opt_kappa
-    headings = opt_headings
-    d = np.zeros(N, dtype=np.float64)
+    if model_name in ("four_wheel", "dynamic_bicycle"):
+        v_lat = np.array(data["v_lat"], dtype=np.float64)
+        yaw_rate_equiv = np.array(data["yaw_rate"], dtype=np.float64)
+    else:
+        v_lat = np.zeros(N, dtype=np.float64)
+        v_eps = float(params.get("v_eps", 0.1))
+        yaw_rate_equiv = np.array(data.get("a_lat", np.zeros(N)), dtype=np.float64) / np.maximum(v, v_eps)
 
     # -- Arc lengths along the optimal path --
     path_diffs = np.diff(path_xy, axis=0)
@@ -199,13 +191,26 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     # -- Finite-difference function for derivative signals --
     fdiff = _finite_diff_periodic if periodic else _finite_diff_open
 
+    # -- Renormalize: make optimal path the new reference --
+    boundary_left = w_left - d
+    boundary_right = -(w_right + d)
+
+    vehicle_heading = headings + psi_err
+    heading_path, kappa_path = _analytic_path_geometry(
+        vehicle_heading, v, v_lat, yaw_rate_equiv, params.get("v_eps", 0.5)
+    )
+    psi_err = (vehicle_heading - heading_path + np.pi) % (2 * np.pi) - np.pi
+
+    kappa = kappa_path
+    headings = heading_path
+    d = np.zeros(N, dtype=np.float64)
+
     # -- Model-specific fields --
     if model_name == "four_wheel":
-        v_lat_arr = np.array(data["v_lat"], dtype=np.float64)
-        yaw_rate_arr = np.array(data["yaw_rate"], dtype=np.float64)
+        yaw_rate_arr = yaw_rate_equiv
         delta_arr = np.array(data["delta"], dtype=np.float64)
 
-        velocity_lat = v_lat_arr
+        velocity_lat = v_lat
         yaw_angle_dot = yaw_rate_arr
         acceleration_lat = v * yaw_rate_arr
         steering_angle = delta_arr
@@ -230,12 +235,11 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         cd = np.cos(delta_arr)
         Fx_total = ((force_long_fl + force_long_fr) * cd
                     + force_long_rr + force_long_rl - F_roll_val - F_drag)
-        a_long = Fx_total / m + yaw_rate_arr * v_lat_arr
+        a_long = Fx_total / m + yaw_rate_arr * v_lat
 
     elif model_name == "dynamic_bicycle":
         a_long = np.array(data["a_long"], dtype=np.float64)
-        v_lat = np.array(data["v_lat"], dtype=np.float64)
-        yaw_rate = np.array(data["yaw_rate"], dtype=np.float64)
+        yaw_rate = yaw_rate_equiv
         delta = np.array(data["delta"], dtype=np.float64)
 
         velocity_lat = v_lat
@@ -255,7 +259,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         a_lat_arr = np.array(data["a_lat"], dtype=np.float64)
         L = params.get("lf", 0.9) + params.get("lr", 0.9)
 
-        velocity_lat = np.zeros(N, dtype=np.float64)
+        velocity_lat = v_lat
         yaw_angle_dot = v * kappa
         acceleration_lat = a_lat_arr
         steering_angle = np.arctan(L * kappa)
@@ -296,7 +300,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         writer = csv.writer(csvfile)
         writer.writerow(CSV_COLUMNS)
         for i in range(N):
-            writer.writerow([
+            row = [
                 x[i],
                 y[i],
                 z[i],
@@ -319,6 +323,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
                 force_long_rr[i],
                 steering_angle[i],
                 steering_angle_dot[i],
-            ])
+            ]
+            writer.writerow(row)
 
     return output_path
