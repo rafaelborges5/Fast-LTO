@@ -1,0 +1,7 @@
+N,ds_m,error,integrator_name,iter_count,iters_per_point,lap_time_s,model_name,reg_term,reg_term_relative,return_status,solve_time_s,time_per_iter_ms,time_per_iter_per_point_ms,time_per_lap_solve_ratio,time_per_point_ms,track_id
+800,0.5,,euler,42,0.0525,27.19939151239107,dynamic_bicycle,0.46579718852795793,0.01683694239585954,Solve_Succeeded,25.316618177006603,602.7766232620619,0.7534707790775775,0.9307788435441012,31.645772721258258,fsg_random
+371,1.077217345015942,,euler,29,0.07816711590296496,27.764153830643778,dynamic_bicycle,0.998312634869226,0.034708867407676265,Solve_Succeeded,9.130825952001032,314.8560673103804,0.8486686450414567,0.3288710330484908,24.611390706202243,fsg_random
+172,2.320794416806389,,euler,50,0.29069767441860467,29.235773786592002,dynamic_bicycle,1.6581283846098032,0.05367170438428627,Solve_Succeeded,6.062927453007433,121.25854906014865,0.7049915643031898,0.2073804338911662,35.24957821515949,fsg_random
+,5.0,"Error in Opti::solve [OptiNode] at .../casadi/core/optistack.cpp:217:
+.../casadi/core/optistack_internal.cpp:1338: Assertion ""return_success(accept_limit)"" failed:
+Solver failed. You may use opti.debug.value to investigate the latest values of variables. return_status is 'Infeasible_Problem_Detected'",euler,,,,dynamic_bicycle,,,,,,,,,fsg_random
