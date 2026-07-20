@@ -407,9 +407,9 @@ def fit_and_discretize(
     smooth_centerline : int
         Savitzky-Golay window length for smoothing the raw middle line
         points before spline fitting.  Must be an odd integer >= 3.
-        0 (default) disables smoothing.  Smoothing is only applied when
-        quality checks detect irregular point spacing or curvature spikes
-        in the raw data.
+        0 (default) disables smoothing.  Any value > 0 is always applied;
+        the quality check only warns when smoothing looks warranted but
+        smooth_centerline is left at 0.
 
     Returns
     -------
@@ -421,24 +421,24 @@ def fit_and_discretize(
     # 1. Load middle line points
     points = _load_middle_line(csv_path)
 
-    # 1b. Quality check — smooth only as a fallback
+    # 1b. Quality check — advisory only. An explicit smooth_centerline > 0
+    # is always honored; the heuristic here just warns when smoothing looks
+    # warranted but wasn't configured.
     quality = _check_centerline_quality(points)
-    if quality["needs_smoothing"]:
-        if smooth_centerline > 0:
-            print(
-                f"  Centerline noise detected "
-                f"(seg_ratio={quality['seg_ratio']:.2f}, "
-                f"max_dκ/ds={quality['max_curv_rate']:.2f} 1/m²), "
-                f"applying Savgol smoothing (window={smooth_centerline})"
-            )
-            points = _smooth_middle_line(points, smooth_centerline)
-        else:
-            print(
-                f"  WARNING: centerline noise detected "
-                f"(seg_ratio={quality['seg_ratio']:.2f}, "
-                f"max_dκ/ds={quality['max_curv_rate']:.2f} 1/m²). "
-                f"Consider setting smooth_centerline >= 3 in the config."
-            )
+    if smooth_centerline > 0:
+        print(
+            f"  Applying Savgol smoothing to centerline (window={smooth_centerline}) "
+            f"[seg_ratio={quality['seg_ratio']:.2f}, "
+            f"max_dκ/ds={quality['max_curv_rate']:.2f} 1/m²]"
+        )
+        points = _smooth_middle_line(points, smooth_centerline)
+    elif quality["needs_smoothing"]:
+        print(
+            f"  WARNING: centerline noise detected "
+            f"(seg_ratio={quality['seg_ratio']:.2f}, "
+            f"max_dκ/ds={quality['max_curv_rate']:.2f} 1/m²). "
+            f"Consider setting smooth_centerline >= 3 in the config."
+        )
 
     # 2. Compute initial chord-length parameterization
     t = _compute_chord_params(points)
