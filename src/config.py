@@ -182,7 +182,7 @@ _PIPELINE_FIELDS = {
     # Skidpad-specific
     "skidpad_map_csv", "skidpad_reference_csv",
     "eps_time", "entry_exit_halfwidth", "kappa_blend_m", "terminal_speed",
-    "decel_hold_m",
+    "decel_hold_m", "skidpad_start_x", "skidpad_start_y",
 }
 
 
@@ -219,6 +219,10 @@ class RunConfig:
     # Metres of the exit/decel zone (from the finish gate) kept at the heavy timed
     # weight, delaying the terminal brake until after the finish line. 0.0 = off.
     decel_hold_m: float = 0.0
+    # Overrides the entry point (P0), otherwise taken from the reference's first
+    # row. skidpad_start_x=None keeps the original behaviour.
+    skidpad_start_x: Optional[float] = None
+    skidpad_start_y: float = 0.0
 
     use_savgol_bounds: bool = False
     savgol_window_length: int = 41

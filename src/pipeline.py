@@ -92,6 +92,10 @@ class PipelineConfig:
     eps_time: float = 0.1
     entry_exit_halfwidth: float = 1.5
     kappa_blend_m: float = 1.5
+    # Overrides the entry point (P0), otherwise taken from the reference's first
+    # row. skidpad_start_x=None keeps the original behaviour.
+    skidpad_start_x: Optional[float] = None
+    skidpad_start_y: float = 0.0
     terminal_speed: Optional[float] = None
     # Metres of the exit/decel zone (measured from the finish gate) that keep the
     # heavy timed time-weight, so the terminal brake starts AFTER the finish line
@@ -413,12 +417,17 @@ def step_build_skidpad_track(config: PipelineConfig) -> Path:
     print(f"  Map:       {map_csv}")
     print(f"  Reference: {ref_csv}")
 
+    start_xy = None
+    if config.skidpad_start_x is not None:
+        start_xy = (config.skidpad_start_x, config.skidpad_start_y)
+
     track = build_skidpad_track(
         map_csv=map_csv,
         ref_csv=ref_csv,
         ds_m=config.ds_m,
         entry_exit_halfwidth=config.entry_exit_halfwidth,
         kappa_blend_m=config.kappa_blend_m,
+        start_xy=start_xy,
     )
 
     config.discretized_dir.mkdir(parents=True, exist_ok=True)

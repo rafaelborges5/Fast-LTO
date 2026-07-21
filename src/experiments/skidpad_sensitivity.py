@@ -127,12 +127,14 @@ def _build_baseline(config_path: Path) -> Baseline:
 
     map_csv = _resolve_path(pc.repo_root, pc.skidpad_map_csv)
     ref_csv = _resolve_path(pc.repo_root, pc.skidpad_reference_csv)
+    start_xy = (pc.skidpad_start_x, pc.skidpad_start_y) if pc.skidpad_start_x is not None else None
     track = build_skidpad_track(
         map_csv=map_csv,
         ref_csv=ref_csv,
         ds_m=pc.ds_m,
         entry_exit_halfwidth=pc.entry_exit_halfwidth,
         kappa_blend_m=pc.kappa_blend_m,
+        start_xy=start_xy,
     )
 
     mask = np.asarray(track["timed_mask"], dtype=float)

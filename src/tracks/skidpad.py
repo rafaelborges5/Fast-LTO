@@ -221,11 +221,33 @@ def build_skidpad_track(
     n_laps_per_side: int = 2,
     timed_lap_index: int = 2,
     kappa_blend_m: float = 1.5,
+    start_xy: Tuple[float, float] | None = None,
 ) -> Dict:
-    """Build the skidpad track-with-widths dict (see module docstring)."""
+    """Build the skidpad track-with-widths dict (see module docstring).
+
+    start_xy : if given, overrides the entry point (P0) normally taken from
+        the reference trajectory's first row, shortening or lengthening the
+        entry straight. Must lie strictly before the gate, i.e. further along
+        the original entry direction than the gate is invalid.
+    """
     cones = load_skidpad_cones(map_csv)
     ref_xy = _load_reference_xy(ref_csv)
     geo = detect_skidpad_geometry(cones, ref_xy)
+
+    if start_xy is not None:
+        p0 = np.array(start_xy, dtype=np.float64)
+        entry_dir = geo["gate"] - geo["P0"]
+        entry_len = float(np.linalg.norm(entry_dir))
+        if entry_len < 1e-9:
+            raise ValueError("Detected zero-length entry straight; cannot override start_xy.")
+        entry_dir /= entry_len
+        remaining = float(np.dot(geo["gate"] - p0, entry_dir))
+        if remaining <= 0.0:
+            raise ValueError(
+                f"start_xy={start_xy} lies at or beyond the gate "
+                f"{tuple(geo['gate'])}; must be strictly before it on the entry straight."
+            )
+        geo["P0"] = p0
 
     segs = _build_segments(geo, n_laps_per_side, timed_lap_index)
 
