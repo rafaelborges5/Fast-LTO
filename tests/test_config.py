@@ -48,3 +48,24 @@ def test_non_skidpad_configs_unaffected_by_new_fields(name: str) -> None:
 
     pc = rc.to_pipeline_config()
     assert pc.skidpad_start_x is None
+
+
+def test_autox_ocp_lead_defaults_to_zero() -> None:
+    rc = RunConfig()
+    assert rc.autox_ocp_lead_m == 0.0
+
+    pc = rc.to_pipeline_config()
+    assert pc.autox_ocp_lead_m == 0.0
+
+
+def test_autox_yaml_loads_ocp_lead() -> None:
+    config_path = CONFIGS_DIR / "autox.yaml"
+    if not config_path.exists():
+        pytest.skip("configs/autox.yaml not present in this checkout")
+
+    rc = RunConfig.from_yaml(config_path)
+    assert rc.autox_ocp_lead_m == pytest.approx(0.0)
+    assert rc.autox_lead_in_m == pytest.approx(5.0)
+
+    pc = rc.to_pipeline_config()
+    assert pc.autox_ocp_lead_m == pytest.approx(0.0)

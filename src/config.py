@@ -175,7 +175,8 @@ _PIPELINE_FIELDS = {
     "track_id", "track_type", "ds_m", "continuity", "smooth_centerline",
     "mode", "model_name", "integrator_name",
     "reg_u", "reg_u_l2", "initial_speed",
-    "boundary_margin", "autox_extension_m", "autox_lead_in_m", "autox_timing_offset_m",
+    "boundary_margin", "autox_extension_m", "autox_lead_in_m", "autox_ocp_lead_m",
+    "autox_timing_offset_m",
     "use_savgol_bounds", "savgol_window_length", "savgol_polyorder",
     "normalize_states_and_inputs", "solver_verbose",
     "export_trajectory", "plot_results", "show_plots",
@@ -207,6 +208,7 @@ class RunConfig:
     boundary_margin: float = 0.0
     autox_extension_m: float = 50.0
     autox_lead_in_m: float = 0.0
+    autox_ocp_lead_m: float = 0.0
     autox_timing_offset_m: float = 6.0
 
     # Skidpad-specific (only used when mode == "skidpad")

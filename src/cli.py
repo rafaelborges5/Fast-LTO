@@ -119,6 +119,16 @@ Examples:
         help="Meters of extra track before the start line for autox mode. Default: 0.0",
     )
     parser.add_argument(
+        "--autox-ocp-lead",
+        type=float,
+        default=None,
+        help=(
+            "Meters before the start line that the OCP's own optimized horizon "
+            "begins (instead of the flat autox_lead_in hold), for autox mode. "
+            "Default: 0.0"
+        ),
+    )
+    parser.add_argument(
         "--autox-timing-offset",
         type=float,
         default=None,
@@ -251,6 +261,8 @@ Examples:
             run_config.autox_extension_m = args.autox_extension
         if args.autox_lead_in is not None:
             run_config.autox_lead_in_m = args.autox_lead_in
+        if args.autox_ocp_lead is not None:
+            run_config.autox_ocp_lead_m = args.autox_ocp_lead
         if args.autox_timing_offset is not None:
             run_config.autox_timing_offset_m = args.autox_timing_offset
         if args.boundary_margin is not None:
@@ -307,6 +319,8 @@ Examples:
             config_kwargs["autox_extension_m"] = args.autox_extension
         if args.autox_lead_in is not None:
             config_kwargs["autox_lead_in_m"] = args.autox_lead_in
+        if args.autox_ocp_lead is not None:
+            config_kwargs["autox_ocp_lead_m"] = args.autox_ocp_lead
         if args.autox_timing_offset is not None:
             config_kwargs["autox_timing_offset_m"] = args.autox_timing_offset
         if args.boundary_margin is not None:

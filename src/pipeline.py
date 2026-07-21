@@ -82,6 +82,10 @@ class PipelineConfig:
     boundary_margin: float = 0.0
     autox_extension_m: float = 50.0
     autox_lead_in_m: float = 0.0
+    # Metres before s=0 that the OCP's own optimized horizon begins (instead of
+    # the flat autox_lead_in_m hold). The pinned launch condition moves back by
+    # this much; the flat hold is trimmed to sit immediately before it.
+    autox_ocp_lead_m: float = 0.0
     # Distance (m) from the car's start position to the real timing gate; the
     # accurate autox lap time is measured between this point and the same point
     # one lap later, not from s=0 through the run-off extension.
@@ -289,24 +293,34 @@ def _extend_track_for_autox(
     track_data: Dict,
     extension_m: float,
     lead_in_m: float = 0.0,
+    ocp_lead_m: float = 0.0,
     timing_offset_m: float = 0.0,
 ) -> Dict:
     """Extend a closed-loop track by wrapping points beyond the finish line.
 
     The OCP horizon itself (``positions``/``headings``/... fed to
-    ``build_ocp``) only ever gets the forward ``extension_m`` run-off — it is
-    unaffected by ``lead_in_m`` and reproduces the original single-lap autox
-    solve exactly. If ``lead_in_m`` > 0, the geometry for a lead-in stretch
-    *before* the start/finish line is also computed (borrowed from the tail
-    of the same closed loop, since the point just "before" s=0 on a closed
-    track is, geometrically, the end of the loop) and returned under
+    ``build_ocp``) gets the forward ``extension_m`` run-off plus, if
+    ``ocp_lead_m`` > 0, ``ocp_lead_m`` metres of backward run-in before
+    ``s=0`` (also borrowed from the tail of the closed loop, since the point
+    just "before" s=0 on a closed track is, geometrically, the end of the
+    loop). The OCP's pinned launch condition then lands ``ocp_lead_m`` metres
+    earlier, so the solver optimizes the speed/steering profile through that
+    stretch instead of it being a flat hold. With ``ocp_lead_m=0`` this
+    reproduces the original single-lap autox solve exactly.
+
+    If ``lead_in_m`` > 0, the geometry for a further lead-in stretch *before*
+    the (possibly moved-back) OCP horizon start is also computed, from the
+    same tail-of-the-loop wraparound, and returned under
     ``"autox_lead_in"``. It is not part of the optimization: see
     ``_prepend_autox_lead_in``, which stitches it onto the solved trajectory
     afterwards as a prescribed, constant-velocity segment. Solving for it
     jointly with the OCP would force models with rate-limited actuator states
     (e.g. four_wheel's tire forces/steering) to hit an exact speed target
     while ramping those actuators up from a standing start on a coarse mesh,
-    which can make the problem infeasible.
+    which can make the problem infeasible -- this is also the practical limit
+    on ``ocp_lead_m``: pinning that same zero-actuator launch condition too
+    far into a real corner is itself infeasible, and the solver will raise
+    accordingly.
 
     ``timing_offset_m`` is only used to validate that the run-off extension
     reaches far enough for an accurate lap-time measurement (the real timing
@@ -327,6 +341,14 @@ def _extend_track_for_autox(
     N_orig = len(track_data["arc_lengths"])
     M_pts = min(max(1, round(extension_m / ds_m)), N_orig - 1)
     K_pts = min(max(0, round(lead_in_m / ds_m)), N_orig - 1)
+    J_pts = min(max(0, round(ocp_lead_m / ds_m)), N_orig - 1)
+    if K_pts + J_pts > N_orig - 1:
+        raise ValueError(
+            f"autox_lead_in_m + autox_ocp_lead_m ({lead_in_m:.1f} + "
+            f"{ocp_lead_m:.1f} m = {K_pts + J_pts} points) exceeds the "
+            f"track's available run-in ({N_orig - 1} points); reduce one or "
+            "both."
+        )
 
     positions = np.array(track_data["positions"], dtype=np.float64)
     headings = np.array(track_data["headings"], dtype=np.float64)
@@ -338,26 +360,46 @@ def _extend_track_for_autox(
 
     total_length = arc_lengths[-1] + ds_m
 
+    # Tail-of-the-loop layout, in order: [..lead_in K_pts..][..ocp_lead J_pts..][s=0..]
+    ocp_lead_start = N_orig - J_pts
+    lead_in_start = N_orig - J_pts - K_pts
+
     extended = dict(track_data)
-    extended["positions"] = np.concatenate([positions, positions[:M_pts]], axis=0).tolist()
-    extended["headings"] = np.concatenate([headings, headings[:M_pts]]).tolist()
-    extended["curvatures"] = np.concatenate([curvatures, curvatures[:M_pts]]).tolist()
-    extended["curvatures_half"] = np.concatenate([curvatures_half, curvatures_half[:M_pts]]).tolist()
-    extended["arc_lengths"] = np.concatenate([arc_lengths, arc_lengths[:M_pts] + total_length]).tolist()
-    extended["w_left"] = np.concatenate([w_left, w_left[:M_pts]]).tolist()
-    extended["w_right"] = np.concatenate([w_right, w_right[:M_pts]]).tolist()
-    extended["num_points"] = N_orig + M_pts
+    extended["positions"] = np.concatenate(
+        [positions[ocp_lead_start:], positions, positions[:M_pts]], axis=0
+    ).tolist()
+    extended["headings"] = np.concatenate(
+        [headings[ocp_lead_start:], headings, headings[:M_pts]]
+    ).tolist()
+    extended["curvatures"] = np.concatenate(
+        [curvatures[ocp_lead_start:], curvatures, curvatures[:M_pts]]
+    ).tolist()
+    extended["curvatures_half"] = np.concatenate(
+        [curvatures_half[ocp_lead_start:], curvatures_half, curvatures_half[:M_pts]]
+    ).tolist()
+    extended["arc_lengths"] = np.concatenate([
+        arc_lengths[ocp_lead_start:] - total_length,
+        arc_lengths,
+        arc_lengths[:M_pts] + total_length,
+    ]).tolist()
+    extended["w_left"] = np.concatenate(
+        [w_left[ocp_lead_start:], w_left, w_left[:M_pts]]
+    ).tolist()
+    extended["w_right"] = np.concatenate(
+        [w_right[ocp_lead_start:], w_right, w_right[:M_pts]]
+    ).tolist()
+    extended["num_points"] = N_orig + M_pts + J_pts
     extended["total_length_m"] = float(arc_lengths[-1] + ds_m * M_pts + ds_m)
     extended["autox_base_length_m"] = float(total_length)
 
     if K_pts > 0:
         extended["autox_lead_in"] = {
-            "positions": positions[-K_pts:].tolist(),
-            "headings": headings[-K_pts:].tolist(),
-            "curvatures": curvatures[-K_pts:].tolist(),
-            "arc_lengths": (arc_lengths[-K_pts:] - total_length).tolist(),
-            "w_left": w_left[-K_pts:].tolist(),
-            "w_right": w_right[-K_pts:].tolist(),
+            "positions": positions[lead_in_start:ocp_lead_start].tolist(),
+            "headings": headings[lead_in_start:ocp_lead_start].tolist(),
+            "curvatures": curvatures[lead_in_start:ocp_lead_start].tolist(),
+            "arc_lengths": (arc_lengths[lead_in_start:ocp_lead_start] - total_length).tolist(),
+            "w_left": w_left[lead_in_start:ocp_lead_start].tolist(),
+            "w_right": w_right[lead_in_start:ocp_lead_start].tolist(),
         }
 
     return extended
@@ -512,10 +554,12 @@ def step_solve_ocp(
             track_data,
             config.autox_extension_m,
             config.autox_lead_in_m,
+            config.autox_ocp_lead_m,
             timing_offset_m=config.autox_timing_offset_m,
         )
         print(f"  Autox: extended track by {config.autox_extension_m:.0f} m "
-              f"({track_data['num_points']} points total, OCP horizon)")
+              f"({track_data['num_points']} points total, OCP horizon, "
+              f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in)")
 
     model = _make_model(config.model_name, vehicle_config=config.vehicle_config)
     integrator = _make_integrator(config.integrator_name)
@@ -565,6 +609,7 @@ def step_solve_ocp(
         "savgol_polyorder": int(config.savgol_polyorder),
         "boundary_margin": float(config.boundary_margin),
         "autox_timing_offset_m": float(config.autox_timing_offset_m),
+        "autox_ocp_lead_m": float(config.autox_ocp_lead_m),
     }
 
     sol_dict = solve_ocp_and_save(
@@ -970,6 +1015,7 @@ def run_pipeline(
                 "savgol_polyorder": int(config.savgol_polyorder),
                 "boundary_margin": float(config.boundary_margin),
                 "autox_timing_offset_m": float(config.autox_timing_offset_m),
+                "autox_ocp_lead_m": float(config.autox_ocp_lead_m),
             }
 
             # Load stored signature from existing solution, if any.
