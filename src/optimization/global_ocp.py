@@ -221,8 +221,11 @@ def build_ocp(
     if mode in ("autox", "skidpad"):
         opti.subject_to(X[0, :] == x0_param.T)
     elif mode == "trackdrive":
-        opti.subject_to(X[0, 0] == x0_param[0])
-        opti.subject_to(X[0, 1] == x0_param[1])
+        # d(0) and psi_err(0) are left free: the closed-loop constraint below
+        # (X[N-1,:] == X[0,:]) already keeps the full state consistent across
+        # the wrap-around, so pinning them to x0_param would only force the
+        # lap through the centerline with zero heading error for no reason.
+        pass
     else:
         raise ValueError(f"Unknown mode: {mode!r}")
 
