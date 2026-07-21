@@ -242,6 +242,10 @@ def build_ocp(
     total_time = 0
     timed_time = 0
     pure_timed_time = 0
+    # Cumulative time at each node (node 0 = 0 s), used to measure elapsed time
+    # between two arbitrary arc-length points after the solve (e.g. an autox
+    # timing gate offset from the nominal start/finish line).
+    cumulative_time = [total_time]
 
     use_corner_constraints = len(model.get_corner_offsets()) > 0
     if use_normalization:
@@ -318,6 +322,7 @@ def build_ocp(
             smooth_eps=s_dot_smooth_eps,
         )
         total_time += dt_i
+        cumulative_time.append(total_time)
         if time_weights is not None:
             w_i = float(time_weights[i])
             timed_time += w_i * dt_i
@@ -436,6 +441,7 @@ def build_ocp(
         total_time,
         objective_time,
         pure_timed_time,
+        ca.vertcat(*cumulative_time),
     )
 
 
@@ -454,6 +460,7 @@ def solve_ocp_and_save(
     mode: str = "trackdrive",
     time_weights: np.ndarray | None = None,
     terminal_speed: float | None = None,
+    autox_timing_offset_m: float | None = None,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -482,7 +489,7 @@ def solve_ocp_and_save(
     if integrator is None:
         integrator = EulerIntegrator()
 
-    opti, X, U, params, obj, total_time_expr, timed_time_expr, pure_timed_expr = build_ocp(
+    opti, X, U, params, obj, total_time_expr, timed_time_expr, pure_timed_expr, cumulative_time_expr = build_ocp(
         track,
         model,
         integrator=integrator,
@@ -604,6 +611,35 @@ def solve_ocp_and_save(
     pure_timed_s = float(sol.value(pure_timed_expr)) if time_weights is not None else 0.0
     reg_term = obj_val - timed_time_s
 
+    # Autox: the real timing gate sits `autox_timing_offset_m` downstream of the
+    # nominal start/finish line (where the car begins the OCP). The accurate lap
+    # time is the elapsed time between the car passing that gate and passing it
+    # again one lap later — not from s=0 through the run-off extension.
+    autox_lap_time_s = None
+    autox_timing_warning = None
+    if autox_timing_offset_m is not None:
+        base_length_m = track.get("autox_base_length_m")
+        if base_length_m is None:
+            autox_timing_warning = (
+                "track has no 'autox_base_length_m' (not an autox-extended track)"
+            )
+        else:
+            arc_arr = np.asarray(track["arc_lengths"], dtype=np.float64)
+            time_at_node_s = np.asarray(
+                sol.value(cumulative_time_expr), dtype=np.float64
+            ).reshape(-1)
+            s_start = float(autox_timing_offset_m)
+            s_end = float(base_length_m) + float(autox_timing_offset_m)
+            if s_end > arc_arr[-1] + 1e-6 or s_start < arc_arr[0] - 1e-6:
+                autox_timing_warning = (
+                    f"autox_extension_m too short to reach the timing gate "
+                    f"(need s={s_end:.1f} m, horizon ends at {arc_arr[-1]:.1f} m)"
+                )
+            else:
+                t_start = float(np.interp(s_start, arc_arr, time_at_node_s))
+                t_end = float(np.interp(s_end, arc_arr, time_at_node_s))
+                autox_lap_time_s = t_end - t_start
+
     N = len(track["arc_lengths"])
     ds_m = (
         float(track.get("ds_m", track["arc_lengths"][1] - track["arc_lengths"][0]))
@@ -615,6 +651,13 @@ def solve_ocp_and_save(
 
     print(f"Solved full-lap OCP.  Objective value: {obj_val:.2f}")
     print(f"  Full-maneuver time: {lap_time_s:.2f} s")
+    if autox_lap_time_s is not None:
+        print(
+            f"  Autox lap time (timing gate @ {autox_timing_offset_m:.1f} m): "
+            f"{autox_lap_time_s:.3f} s"
+        )
+    elif autox_timing_warning is not None:
+        print(f"  [WARN] Could not compute autox timing-gate lap time: {autox_timing_warning}")
     if time_weights is not None:
         n_timed = int(np.sum(np.asarray(time_weights) >= 1.0 - 1e-9))
         score = pure_timed_s / 2.0 if n_timed > 0 else float("nan")
@@ -691,6 +734,10 @@ def solve_ocp_and_save(
             "timed_time_s": timed_time_s,
             "pure_timed_time_s": pure_timed_s,
             "skidpad_score_s": (pure_timed_s / 2.0) if time_weights is not None else None,
+            "autox_lap_time_s": autox_lap_time_s,
+            "autox_timing_offset_m": (
+                float(autox_timing_offset_m) if autox_timing_offset_m is not None else None
+            ),
             "reg_term": reg_term,
             "reg_term_relative": reg_term / obj_val if obj_val != 0.0 else None,
         },

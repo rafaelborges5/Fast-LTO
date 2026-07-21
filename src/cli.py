@@ -118,6 +118,16 @@ Examples:
         default=None,
         help="Meters of extra track before the start line for autox mode. Default: 0.0",
     )
+    parser.add_argument(
+        "--autox-timing-offset",
+        type=float,
+        default=None,
+        help=(
+            "Meters from the car's start position to the real timing gate, for "
+            "autox mode. The accurate lap time is measured between this point "
+            "and the same point one lap later. Default: 6.0"
+        ),
+    )
 
     # OCP options
     parser.add_argument(
@@ -241,6 +251,8 @@ Examples:
             run_config.autox_extension_m = args.autox_extension
         if args.autox_lead_in is not None:
             run_config.autox_lead_in_m = args.autox_lead_in
+        if args.autox_timing_offset is not None:
+            run_config.autox_timing_offset_m = args.autox_timing_offset
         if args.boundary_margin is not None:
             run_config.boundary_margin = args.boundary_margin
         if args.reg_du_vec is not None:
@@ -295,6 +307,8 @@ Examples:
             config_kwargs["autox_extension_m"] = args.autox_extension
         if args.autox_lead_in is not None:
             config_kwargs["autox_lead_in_m"] = args.autox_lead_in
+        if args.autox_timing_offset is not None:
+            config_kwargs["autox_timing_offset_m"] = args.autox_timing_offset
         if args.boundary_margin is not None:
             config_kwargs["boundary_margin"] = args.boundary_margin
         if args.ds is not None:

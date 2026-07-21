@@ -82,6 +82,10 @@ class PipelineConfig:
     boundary_margin: float = 0.0
     autox_extension_m: float = 50.0
     autox_lead_in_m: float = 0.0
+    # Distance (m) from the car's start position to the real timing gate; the
+    # accurate autox lap time is measured between this point and the same point
+    # one lap later, not from s=0 through the run-off extension.
+    autox_timing_offset_m: float = 6.0
 
     skidpad_map_csv: Optional[str] = None
     skidpad_reference_csv: Optional[str] = None
@@ -278,7 +282,10 @@ def _make_integrator(name: Literal["euler", "rk4"]) -> SpaceIntegrator:
 
 
 def _extend_track_for_autox(
-    track_data: Dict, extension_m: float, lead_in_m: float = 0.0
+    track_data: Dict,
+    extension_m: float,
+    lead_in_m: float = 0.0,
+    timing_offset_m: float = 0.0,
 ) -> Dict:
     """Extend a closed-loop track by wrapping points beyond the finish line.
 
@@ -296,7 +303,22 @@ def _extend_track_for_autox(
     (e.g. four_wheel's tire forces/steering) to hit an exact speed target
     while ramping those actuators up from a standing start on a coarse mesh,
     which can make the problem infeasible.
+
+    ``timing_offset_m`` is only used to validate that the run-off extension
+    reaches far enough for an accurate lap-time measurement (the real timing
+    gate sits this far downstream of s=0, and must be reachable both at the
+    start and one lap later — see ``solve_ocp_and_save``'s
+    ``autox_timing_offset_m``). The true single-lap length is stashed on the
+    returned dict as ``"autox_base_length_m"`` for that same purpose.
     """
+    if timing_offset_m > extension_m:
+        raise ValueError(
+            f"autox_timing_offset_m ({timing_offset_m:.1f} m) exceeds "
+            f"autox_extension_m ({extension_m:.1f} m); the run-off extension "
+            "must reach at least as far as the timing gate for an accurate "
+            "lap time."
+        )
+
     ds_m = float(track_data["ds_m"])
     N_orig = len(track_data["arc_lengths"])
     M_pts = min(max(1, round(extension_m / ds_m)), N_orig - 1)
@@ -322,6 +344,7 @@ def _extend_track_for_autox(
     extended["w_right"] = np.concatenate([w_right, w_right[:M_pts]]).tolist()
     extended["num_points"] = N_orig + M_pts
     extended["total_length_m"] = float(arc_lengths[-1] + ds_m * M_pts + ds_m)
+    extended["autox_base_length_m"] = float(total_length)
 
     if K_pts > 0:
         extended["autox_lead_in"] = {
@@ -477,7 +500,10 @@ def step_solve_ocp(
               f"terminal_speed={config.terminal_speed}")
     elif config.mode == "autox":
         track_data = _extend_track_for_autox(
-            track_data, config.autox_extension_m, config.autox_lead_in_m
+            track_data,
+            config.autox_extension_m,
+            config.autox_lead_in_m,
+            timing_offset_m=config.autox_timing_offset_m,
         )
         print(f"  Autox: extended track by {config.autox_extension_m:.0f} m "
               f"({track_data['num_points']} points total, OCP horizon)")
@@ -529,6 +555,7 @@ def step_solve_ocp(
         "savgol_window_length": int(config.savgol_window_length),
         "savgol_polyorder": int(config.savgol_polyorder),
         "boundary_margin": float(config.boundary_margin),
+        "autox_timing_offset_m": float(config.autox_timing_offset_m),
     }
 
     sol_dict = solve_ocp_and_save(
@@ -546,6 +573,7 @@ def step_solve_ocp(
         mode=config.mode,
         time_weights=time_weights,
         terminal_speed=config.terminal_speed if config.mode == "skidpad" else None,
+        autox_timing_offset_m=config.autox_timing_offset_m if config.mode == "autox" else None,
     )
 
     autox_lead_in = track_data.get("autox_lead_in") if config.mode == "autox" else None
@@ -932,6 +960,7 @@ def run_pipeline(
                 "savgol_window_length": int(config.savgol_window_length),
                 "savgol_polyorder": int(config.savgol_polyorder),
                 "boundary_margin": float(config.boundary_margin),
+                "autox_timing_offset_m": float(config.autox_timing_offset_m),
             }
 
             # Load stored signature from existing solution, if any.
