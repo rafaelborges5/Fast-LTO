@@ -408,26 +408,43 @@ def _extend_track_for_autox(
 def _prepend_autox_lead_in(sol_dict: Dict, lead_in: Dict, initial_speed: float) -> Dict:
     """Stitch a prescribed, constant-velocity lead-in onto a solved autox trajectory.
 
-    The lead-in is not part of the OCP: it's a straight run along the
+    The lead-in is not part of the OCP: it's a constant-speed run along the
     centerline at exactly ``initial_speed``, giving the physical car a
-    stretch of track before the true start/finish line. Lateral dynamics
-    (yaw rate, tire forces, steering, ...) are simply held at the same
-    zero/rest values as the pinned initial condition, since the trajectory
-    tracker mostly consumes speed and lateral-deviation references.
+    stretch of track before the true start/finish line.
+
+    The lead-in geometry is borrowed from the tail of the closed loop, so it
+    genuinely curves. The exporter derives the reference curvature from the
+    ``yaw_rate`` state (``kappa = yaw_rate / v_path``), so we set
+    ``yaw_rate = kappa * initial_speed`` from the borrowed centerline
+    curvature rather than zero-filling it -- otherwise the first few metres
+    would export as straight while the path bends (up to ~0.26 1/m), feeding
+    the tracker a wrong curvature reference at launch. Speed is held at
+    ``initial_speed``; the remaining dynamic states (tire forces, steering,
+    ...) stay at rest -- the tracker consumes speed, lateral deviation and
+    curvature, none of which depend on them.
     """
     K = len(lead_in["arc_lengths"])
     positions = lead_in["positions"]
+    curvatures = lead_in["curvatures"]
 
     sol_dict["path_xy"] = positions + list(sol_dict["path_xy"])
     sol_dict["arc_lengths"] = lead_in["arc_lengths"] + list(sol_dict["arc_lengths"])
     sol_dict["w_left"] = lead_in["w_left"] + list(sol_dict["w_left"])
     sol_dict["w_right"] = lead_in["w_right"] + list(sol_dict["w_right"])
-    sol_dict["kappa"] = lead_in["curvatures"] + list(sol_dict["kappa"])
+    sol_dict["kappa"] = curvatures + list(sol_dict["kappa"])
     sol_dict["headings"] = lead_in["headings"] + list(sol_dict["headings"])
 
+    # yaw_rate = kappa * v so the exporter recovers the true lead-in curvature.
+    yaw_rate_lead_in = [float(k) * float(initial_speed) for k in curvatures]
+
     for name in sol_dict["state_names"]:
-        fill = float(initial_speed) if name in ("v", "v_long") else 0.0
-        sol_dict[name] = [fill] * K + list(sol_dict[name])
+        if name in ("v", "v_long"):
+            fill = [float(initial_speed)] * K
+        elif name == "yaw_rate":
+            fill = yaw_rate_lead_in
+        else:
+            fill = [0.0] * K
+        sol_dict[name] = fill + list(sol_dict[name])
 
     for name in sol_dict["input_names"]:
         sol_dict[name] = [0.0] * K + list(sol_dict[name])

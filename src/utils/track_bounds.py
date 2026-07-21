@@ -285,6 +285,18 @@ def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, ri
     headings = track.headings
     kappa = track.curvatures
 
+    # Wrap length for the closed loop. total_length_m is the true arc length of
+    # one full lap; the discretization ends one ds short of it, so this must
+    # equal arc_lengths[-1] + ds. Guard against a future generator (e.g. a
+    # skidpad-style open track) being routed through this closed-loop path.
+    total_length = float(track.total_length_m)
+    ds = float(s[1] - s[0]) if s.size > 1 else total_length
+    assert abs(total_length - (float(s[-1]) + ds)) < 1e-6, (
+        "compute_lateral_bounds expects a closed track where "
+        "total_length_m == arc_lengths[-1] + ds "
+        f"(got {total_length} vs {float(s[-1]) + ds})"
+    )
+
     tangents = np.column_stack((np.cos(headings), np.sin(headings)))
     normals = np.column_stack((-np.sin(headings), np.cos(headings)))
 
@@ -300,6 +312,13 @@ def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, ri
     def _prepare_side(s_samples: np.ndarray, d_samples: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         if s_samples.size == 0:
             return s_samples, d_samples
+
+        # Wrap into one period [0, L) BEFORE sort/dedup. The cone projections
+        # s_cone = s[idx] + delta_s are unwrapped and can fall just outside
+        # [0, L); wrapping first lets the seam neighbourhood dedup against the
+        # CSV's repeated closing cone and guarantees the tiled sequence below is
+        # strictly increasing.
+        s_samples = np.mod(s_samples, total_length)
 
         order = np.argsort(s_samples)
         s_sorted = s_samples[order]
@@ -320,6 +339,14 @@ def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, ri
     s_left, d_left = _prepare_side(s_left_raw, d_left_raw)
     s_right, d_right = _prepare_side(s_right_raw, d_right_raw)
 
+    def _tile_periodic(s_period: np.ndarray, d_period: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        # Tile the in-period samples over three periods (s-L, s, s+L) so the
+        # natural spline is flanked by real data across the start/finish seam
+        # instead of extrapolating linearly into the cone-free gap there.
+        s_tiled = np.concatenate([s_period - total_length, s_period, s_period + total_length])
+        d_tiled = np.concatenate([d_period, d_period, d_period])
+        return s_tiled, d_tiled
+
     n_samples = track.num_points
     w_left = np.full(n_samples, np.nan, dtype=np.float64)
     w_right = np.full(n_samples, np.nan, dtype=np.float64)
@@ -329,7 +356,7 @@ def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, ri
     misses_right = 0
 
     if s_left.size >= min_points:
-        left_spline = _make_spline(s_left, d_left)
+        left_spline = _make_spline(*_tile_periodic(s_left, d_left))
         d_left_at_s = left_spline(s)
         w_left = np.maximum(d_left_at_s, 0.0)
         misses_left = int(np.count_nonzero(~np.isfinite(w_left)))
@@ -337,7 +364,7 @@ def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, ri
         misses_left = n_samples
 
     if s_right.size >= min_points:
-        right_spline = _make_spline(s_right, d_right)
+        right_spline = _make_spline(*_tile_periodic(s_right, d_right))
         d_right_at_s = right_spline(s)
         w_right = np.maximum(-d_right_at_s, 0.0)
         misses_right = int(np.count_nonzero(~np.isfinite(w_right)))
