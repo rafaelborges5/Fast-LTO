@@ -61,6 +61,15 @@ def plot_path_with_speed(
         plt.close("all")
 
 
+def _contiguous_blocks(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Return (start, end) index ranges of contiguous True runs in ``mask``."""
+    idx = np.where(mask)[0]
+    if idx.size == 0:
+        return []
+    splits = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
+    return [(int(sp[0]), int(sp[-1])) for sp in splits]
+
+
 def plot_speed_profile(
     s: np.ndarray,
     v: np.ndarray,
@@ -69,10 +78,20 @@ def plot_speed_profile(
     show: bool = True,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
+    timed_mask: Optional[np.ndarray] = None,
 ):
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(8, 3))
     ax.plot(s, v, label="v(s)")
+    if timed_mask is not None:
+        # Shade only the LAST untimed block (e.g. autox's post-finish run-off,
+        # where the objective stops rewarding speed) -- not every place the
+        # car happens to be slowing down.
+        mask = np.asarray(timed_mask)
+        untimed_blocks = _contiguous_blocks(mask < 0.5)
+        if untimed_blocks:
+            a, b = untimed_blocks[-1]
+            ax.axvspan(s[a], s[b], color="tab:red", alpha=0.15, label="untimed (post-finish)")
     if v_max is not None:
         ax.axhline(v_max, color="r", linestyle="--", label="v_max")
     ax.set_xlabel("s [m]")
@@ -362,6 +381,7 @@ def plot_all_panels(
     mu_g: float,
     profiling: Optional[Dict] = None,
     constraint_activity: Optional[Dict[str, float]] = None,
+    timed_mask: Optional[np.ndarray] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
@@ -371,7 +391,7 @@ def plot_all_panels(
     plot_path_with_speed(cones_left, cones_right, path_xy, v, out_path=None, show=False, fig=fig, ax=axes[0])
     axes[0].set_title("Path vs cones")
 
-    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1])
+    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1], timed_mask=timed_mask)
     axes[1].set_title("Speed profile")
 
     plot_offsets(s, d, w_left, w_right, out_path=None, show=False, fig=fig, ax=axes[2])

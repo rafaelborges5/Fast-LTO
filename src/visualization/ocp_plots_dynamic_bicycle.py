@@ -371,6 +371,7 @@ def plot_all_panels_dynamic_bicycle(
     yaw_rate: np.ndarray,
     params: Dict,
     profiling: Optional[Dict] = None,
+    timed_mask: Optional[np.ndarray] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
@@ -397,7 +398,7 @@ def plot_all_panels_dynamic_bicycle(
     plot_path_with_speed(cones_left, cones_right, path_xy, v, out_path=None, show=False, fig=fig, ax=axes[0])
     axes[0].set_title("Path vs cones")
 
-    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1])
+    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1], timed_mask=timed_mask)
     axes[1].set_title("Speed profile")
 
     plot_offsets(s, d, w_left, w_right, out_path=None, show=False, fig=fig, ax=axes[2])

@@ -370,6 +370,7 @@ def plot_all_panels_four_wheel(
     params: Dict,
     profiling: Optional[Dict] = None,
     input_data: Optional[Dict] = None,
+    timed_mask: Optional[np.ndarray] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
@@ -404,7 +405,7 @@ def plot_all_panels_four_wheel(
     axes[0].set_title("Path (speed colormap)")
 
     # 2. Speed profile
-    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1])
+    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1], timed_mask=timed_mask)
     axes[1].set_title("Speed profile")
 
     # 3. Lateral offset
