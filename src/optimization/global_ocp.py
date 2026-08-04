@@ -158,6 +158,7 @@ def build_ocp(
     mode: str = "trackdrive",
     time_weights: np.ndarray | None = None,
     terminal_speed: float | None = None,
+    enforce_terminal_constraints: bool = True,
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -354,10 +355,42 @@ def build_ocp(
         opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
         opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
 
+    # State-dependent constraints (friction circles, D_kappa/s_dot floors, ...)
+    # at the final node. The main loop above only evaluates get_constraints at
+    # x_i for i in range(N-1): Euler's constraint-eval point is x_i alone (see
+    # _constraint_eval_points), so X[N-1] is never checked by it. Without this,
+    # models whose friction limit depends on persistent state rather than the
+    # control input (e.g. four_wheel's per-wheel tire forces, which are states,
+    # not inputs) can land on a final state that violates their own physical
+    # limits -- normally harmless since nothing pins X[N-1] to an extreme
+    # value, but exploitable once `terminal_speed` forces a hard equality
+    # there (the solver can "cheat" at that one unchecked node to hit the
+    # target cheaply). mode == "trackdrive" doesn't need this: its closed-loop
+    # equality below already ties X[N-1] back to X[0], which the loop does
+    # check at i=0. enforce_terminal_constraints=False skips this (and thus
+    # tolerates a possibly-violated final-node friction circle) in exchange
+    # for a noticeably easier/faster solve -- useful for a quick draft pass.
+    if mode != "trackdrive" and enforce_terminal_constraints:
+        x_last = X[N - 1, :].T
+        u_last = U[N - 1, :].T
+        kappa_last = kappa_param[N - 1]
+        if use_normalization:
+            g_list_last = model.get_constraints_normalized(x_last, u_last, kappa_last)
+        else:
+            full_state_last, _ = eval_at_point(x_last, u_last, kappa_last)
+            g_list_last = model.get_constraints(full_state_last, u_last, kappa_last)
+        for g in g_list_last:
+            opti.subject_to(g <= 0)
+
     if mode == "trackdrive":
         opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
     # Optional terminal speed (e.g. skidpad: come to ~rest after the finish line).
+    # An upper-bound inequality (v <= terminal_speed) rather than an equality:
+    # an exact equality forces the solver to land on one precise point via the
+    # discrete dynamics step, right where the friction-circle constraint above
+    # is also newly binding -- a much more tightly coupled (and slower to
+    # solve) system than just requiring "at or under" the target.
     if terminal_speed is not None:
         reduced_names = model.reduced_state_names()
         v_idx = (
@@ -369,9 +402,9 @@ def build_ocp(
             x_scale, x_shift = model.get_reduced_state_scaling()
             v_scale = float(np.array(x_scale).reshape(-1)[v_idx])
             v_shift = float(np.array(x_shift).reshape(-1)[v_idx])
-            opti.subject_to(X[N - 1, v_idx] == (terminal_speed - v_shift) / v_scale)
+            opti.subject_to(X[N - 1, v_idx] <= (terminal_speed - v_shift) / v_scale)
         else:
-            opti.subject_to(X[N - 1, v_idx] == terminal_speed)
+            opti.subject_to(X[N - 1, v_idx] <= terminal_speed)
 
     if N > 1:
         dU = U[1:, :] - U[:-1, :]
@@ -463,6 +496,7 @@ def solve_ocp_and_save(
     mode: str = "trackdrive",
     time_weights: np.ndarray | None = None,
     terminal_speed: float | None = None,
+    enforce_terminal_constraints: bool = True,
     autox_timing_offset_m: float | None = None,
 ) -> Dict:
     """
@@ -504,6 +538,7 @@ def solve_ocp_and_save(
         mode=mode,
         time_weights=time_weights,
         terminal_speed=terminal_speed,
+        enforce_terminal_constraints=enforce_terminal_constraints,
     )
 
     reduced_names = model.reduced_state_names()

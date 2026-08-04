@@ -121,6 +121,14 @@ class PipelineConfig:
                 f"Unknown mode: {self.mode!r}. Must be 'autox', 'trackdrive' or 'skidpad'."
             )
 
+        if self.terminal_speed is not None and self.mode == "trackdrive":
+            raise ValueError(
+                "terminal_speed is not supported for mode='trackdrive': the "
+                "closed-loop constraint (X[N-1] == X[0]) would silently pin "
+                "the free launch speed at node 0 too. Use 'autox' or "
+                "'skidpad'."
+            )
+
         if self.initial_speed is None:
             self.initial_speed = 5.0 if self.mode == "trackdrive" else 3.0
 
@@ -299,14 +307,26 @@ def _extend_track_for_autox(
     """Extend a closed-loop track by wrapping points beyond the finish line.
 
     The OCP horizon itself (``positions``/``headings``/... fed to
-    ``build_ocp``) gets the forward ``extension_m`` run-off plus, if
-    ``ocp_lead_m`` > 0, ``ocp_lead_m`` metres of backward run-in before
-    ``s=0`` (also borrowed from the tail of the closed loop, since the point
-    just "before" s=0 on a closed track is, geometrically, the end of the
-    loop). The OCP's pinned launch condition then lands ``ocp_lead_m`` metres
-    earlier, so the solver optimizes the speed/steering profile through that
-    stretch instead of it being a flat hold. With ``ocp_lead_m=0`` this
-    reproduces the original single-lap autox solve exactly.
+    ``build_ocp``) gets a forward run-off plus, if ``ocp_lead_m`` > 0,
+    ``ocp_lead_m`` metres of backward run-in before ``s=0`` (also borrowed
+    from the tail of the closed loop, since the point just "before" s=0 on a
+    closed track is, geometrically, the end of the loop). The OCP's pinned
+    launch condition then lands ``ocp_lead_m`` metres earlier, so the solver
+    optimizes the speed/steering profile through that stretch instead of it
+    being a flat hold. With ``ocp_lead_m=0`` this reproduces the original
+    single-lap autox solve exactly.
+
+    ``extension_m`` is measured from the *timing gate*, not from the track's
+    nominal (but physically arbitrary) ``s = autox_base_length_m`` wrap
+    point: the real timing gate sits ``timing_offset_m`` downstream of s=0,
+    and is crossed a second time one lap later at
+    ``s = autox_base_length_m + timing_offset_m`` (see
+    ``solve_ocp_and_save``'s ``autox_lap_time_s``, which measures elapsed
+    time between those two crossings). So the forward run-off appended here
+    covers ``timing_offset_m + extension_m`` metres past
+    ``s = autox_base_length_m``, guaranteeing ``extension_m`` metres of
+    horizon remain *after* the real finish line — e.g. for braking down to a
+    terminal speed once the timed lap is over.
 
     If ``lead_in_m`` > 0, the geometry for a further lead-in stretch *before*
     the (possibly moved-back) OCP horizon start is also computed, from the
@@ -322,24 +342,13 @@ def _extend_track_for_autox(
     far into a real corner is itself infeasible, and the solver will raise
     accordingly.
 
-    ``timing_offset_m`` is only used to validate that the run-off extension
-    reaches far enough for an accurate lap-time measurement (the real timing
-    gate sits this far downstream of s=0, and must be reachable both at the
-    start and one lap later — see ``solve_ocp_and_save``'s
-    ``autox_timing_offset_m``). The true single-lap length is stashed on the
-    returned dict as ``"autox_base_length_m"`` for that same purpose.
+    The true single-lap length is stashed on the returned dict as
+    ``"autox_base_length_m"``, used both for the lap-time measurement above
+    and for building the post-finish untimed weighting in ``step_solve_ocp``.
     """
-    if timing_offset_m > extension_m:
-        raise ValueError(
-            f"autox_timing_offset_m ({timing_offset_m:.1f} m) exceeds "
-            f"autox_extension_m ({extension_m:.1f} m); the run-off extension "
-            "must reach at least as far as the timing gate for an accurate "
-            "lap time."
-        )
-
     ds_m = float(track_data["ds_m"])
     N_orig = len(track_data["arc_lengths"])
-    M_pts = min(max(1, round(extension_m / ds_m)), N_orig - 1)
+    M_pts = min(max(1, round((timing_offset_m + extension_m) / ds_m)), N_orig - 1)
     K_pts = min(max(0, round(lead_in_m / ds_m)), N_orig - 1)
     J_pts = min(max(0, round(ocp_lead_m / ds_m)), N_orig - 1)
     if K_pts + J_pts > N_orig - 1:
@@ -449,7 +458,40 @@ def _prepend_autox_lead_in(sol_dict: Dict, lead_in: Dict, initial_speed: float) 
     for name in sol_dict["input_names"]:
         sol_dict[name] = [0.0] * K + list(sol_dict[name])
 
+    if sol_dict.get("timed_mask") is not None:
+        # Lead-in sits before the timing gate, so it counts as "timed" under
+        # the same convention as the rest of the run-up (see
+        # _autox_time_weights): only the post-finish tail is untimed.
+        sol_dict["timed_mask"] = [1] * K + list(sol_dict["timed_mask"])
+
     return sol_dict
+
+
+def _autox_time_weights(
+    arc_lengths,
+    base_length_m: float,
+    timing_offset_m: float,
+    eps_time: float,
+    decel_hold_m: float,
+) -> np.ndarray:
+    """Per-node objective time weights for autox: full weight through the
+    timed lap, ``eps_time`` after the finish line.
+
+    Mirrors skidpad's timed/untimed masking (``step_solve_ocp``'s
+    ``mode == "skidpad"`` branch), but the "finish line" here is the timing
+    gate's second crossing, ``gate2 = base_length_m + timing_offset_m`` (see
+    ``_extend_track_for_autox``), not a track-provided mask. ``decel_hold_m``
+    keeps the heavy timed weight for that many extra metres past the gate,
+    so the terminal brake starts after crossing rather than bleeding back
+    onto the timed lap.
+    """
+    arc = np.asarray(arc_lengths, dtype=float)
+    gate2 = float(base_length_m) + float(timing_offset_m)
+    weights = np.where(arc < gate2, 1.0, float(eps_time))
+    if decel_hold_m > 0.0:
+        hold_end = gate2 + float(decel_hold_m)
+        weights = np.where((arc >= gate2) & (arc < hold_end), 1.0, weights)
+    return weights
 
 
 def _resolve_path(root: Optional[Path], p: str | Path) -> Path:
@@ -574,9 +616,26 @@ def step_solve_ocp(
             config.autox_ocp_lead_m,
             timing_offset_m=config.autox_timing_offset_m,
         )
-        print(f"  Autox: extended track by {config.autox_extension_m:.0f} m "
+        print(f"  Autox: extended track by {config.autox_timing_offset_m + config.autox_extension_m:.0f} m "
               f"({track_data['num_points']} points total, OCP horizon, "
-              f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in)")
+              f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in, "
+              f"{config.autox_extension_m:.0f} m of which is post-finish run-off)")
+        time_weights = _autox_time_weights(
+            track_data["arc_lengths"],
+            track_data["autox_base_length_m"],
+            config.autox_timing_offset_m,
+            config.eps_time,
+            config.decel_hold_m,
+        )
+        n_timed = int(np.sum(time_weights >= 1.0 - 1e-9))
+        # Flows through to the solution JSON via the generic
+        # `track.get("timed_mask")` in solve_ocp_and_save (same field skidpad
+        # uses), so visualization can shade the post-finish untimed zone.
+        track_data["timed_mask"] = (time_weights >= 1.0 - 1e-9).astype(int).tolist()
+        print(f"  Autox: {n_timed}/{len(time_weights)} timed nodes, "
+              f"un-timed weight eps_time={config.eps_time}, "
+              f"decel_hold={config.decel_hold_m} m, "
+              f"terminal_speed={config.terminal_speed}")
 
     model = _make_model(config.model_name, vehicle_config=config.vehicle_config)
     integrator = _make_integrator(config.integrator_name)
@@ -643,7 +702,7 @@ def step_solve_ocp(
         boundary_margin=config.boundary_margin,
         mode=config.mode,
         time_weights=time_weights,
-        terminal_speed=config.terminal_speed if config.mode == "skidpad" else None,
+        terminal_speed=config.terminal_speed if config.mode in ("skidpad", "autox") else None,
         autox_timing_offset_m=config.autox_timing_offset_m if config.mode == "autox" else None,
     )
 
@@ -747,6 +806,7 @@ def step_visualize(
     w_right = np.array(data["w_right"], dtype=np.float64)
     params = data.get("model_params", {})
     profiling = data.get("profiling")
+    timed_mask = data.get("timed_mask")
 
     timestamp_dir = config.plots_dir / datetime.now().strftime("%Y%m%d-%H%M%S")
     timestamp_dir.mkdir(parents=True, exist_ok=True)
@@ -786,6 +846,7 @@ def step_visualize(
             mu_g,
             profiling=profiling,
             constraint_activity=constraint_activity,
+            timed_mask=timed_mask,
             out_path=plot_path,
             show=config.show_plots,
         )
@@ -812,6 +873,7 @@ def step_visualize(
             yaw_rate,
             params=params,
             profiling=profiling,
+            timed_mask=timed_mask,
             out_path=plot_path,
             show=config.show_plots,
         )
@@ -836,6 +898,7 @@ def step_visualize(
             v_lat, yaw_rate,
             params=params, profiling=profiling,
             input_data=input_data,
+            timed_mask=timed_mask,
             out_path=plot_path, show=config.show_plots,
         )
     else:

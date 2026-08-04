@@ -4,7 +4,7 @@ vehicle:
   lf: 0.842
   lr: 0.689
   v_min: 0.4
-  v_max: 24.0
+  v_max: 16.0
   d_max: 3.0
   psi_err_max: 1.2
   v_eps: 0.5
@@ -12,8 +12,8 @@ vehicle:
   eps_s_dot: 1.0
   eps_D_kappa: 0.05
   corners:
-    - [FL, 1.809, 0.750]
-    - [FR, 1.809, -0.750]
+    - [FL, 1.73, 0.750]
+    - [FR, 1.73, -0.750]
     - [RL, -0.850, 0.630]
     - [RR, -0.850, -0.630]
 
@@ -79,6 +79,9 @@ pipeline:
   reg_u_l2: 0.0005
   initial_speed: 3.0
   boundary_margin: 0.45
-  autox_extension_m: 50.0
+  autox_extension_m: 20.0
   autox_lead_in_m: 5.0
-  autox_ocp_lead_m: 1.5
+  autox_ocp_lead_m: 0.5
+  terminal_speed: 0.5
+  eps_time: 0.05
+  decel_hold_m: 0.0
