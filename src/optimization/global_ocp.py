@@ -498,6 +498,7 @@ def solve_ocp_and_save(
     terminal_speed: float | None = None,
     enforce_terminal_constraints: bool = True,
     autox_timing_offset_m: float | None = None,
+    initial_guess: Dict[str, np.ndarray] | None = None,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -517,6 +518,11 @@ def solve_ocp_and_save(
     reg_du : float or array-like, optional
         Input rate-regularization weight(s). If one scalar is given
         make isotropic matrix.
+    initial_guess : dict, optional
+        ``{"X": (N, nx), "U": (N, nu)}`` in the same units the solver uses
+        (normalised when ``use_normalization``). Replaces the default
+        centreline / constant-speed guess, which is what makes margin
+        continuation possible on corridors too tight to start from d = 0.
 
     Returns
     -------
@@ -563,6 +569,12 @@ def solve_ocp_and_save(
         opti.set_initial(X, 0)
         opti.set_initial(U, 0)
         opti.set_initial(X[:, v_idx], initial_speed)
+
+    if initial_guess is not None:
+        if "X" in initial_guess:
+            opti.set_initial(X, np.asarray(initial_guess["X"], dtype=float))
+        if "U" in initial_guess:
+            opti.set_initial(U, np.asarray(initial_guess["U"], dtype=float))
 
     start_time = time.perf_counter()
     try:
