@@ -180,6 +180,9 @@ _PIPELINE_FIELDS = {
     "use_savgol_bounds", "savgol_window_length", "savgol_polyorder",
     "normalize_states_and_inputs", "solver_verbose",
     "export_trajectory", "plot_results", "show_plots",
+    # Warm start
+    "warm_start", "warm_start_max_margin_gap", "warm_start_ladder_step",
+    "warm_start_max_seeds", "warm_start_seed",
     # Skidpad-specific
     "skidpad_map_csv", "skidpad_reference_csv",
     "eps_time", "entry_exit_halfwidth", "kappa_blend_m", "terminal_speed",
@@ -235,6 +238,16 @@ class RunConfig:
     export_trajectory: bool = True
     plot_results: bool = True
     show_plots: bool = True
+
+    # Warm start: "off" (no seed read, none written, no extra solves),
+    # "auto" (seed when a compatible one exists, plus one intermediate solve
+    # when the target margin is past the critical margin), or "ladder"
+    # (always walk up from a safe margin, ignoring the store).
+    warm_start: str = "auto"
+    warm_start_max_margin_gap: float = 0.15
+    warm_start_ladder_step: float = 0.05
+    warm_start_max_seeds: int = 50
+    warm_start_seed: Optional[str] = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "RunConfig":

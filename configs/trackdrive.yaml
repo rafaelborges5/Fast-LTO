@@ -78,3 +78,6 @@ pipeline:
   reg_u_l2: 0.0005
   initial_speed: 5.0
   boundary_margin: 0.45
+
+  # Warm start: off | auto | ladder (see optimization/warm_start.py)
+  warm_start: auto

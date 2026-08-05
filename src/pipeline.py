@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import numpy as np
 
@@ -44,6 +44,8 @@ from vehicle_models import DynamicBicycleModel, FourWheelModel, PointMassModel, 
 
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
+WarmStartPolicy = Literal["off", "auto", "ladder"]
+WARM_START_POLICIES = ("off", "auto", "ladder")
 
 
 @dataclass
@@ -113,6 +115,19 @@ class PipelineConfig:
     normalize_states_and_inputs: bool = True
     solver_verbose: bool = False
 
+    # Warm start. "off" is a hard off: no seed is read, none is written and no
+    # extra solve is inserted, so the solve is bit for bit the cold one.
+    # "auto" seeds from the store when a compatible solution exists, and when
+    # none does but the target margin is past the critical margin (the point
+    # where the default centreline guess leaves the feasible set) it first
+    # solves one easier problem and continues from that. "ladder" always walks
+    # up from a safe margin, ignoring the store.
+    warm_start: WarmStartPolicy = "auto"
+    warm_start_max_margin_gap: float = 0.15
+    warm_start_ladder_step: float = 0.05
+    warm_start_max_seeds: int = 50
+    warm_start_seed: Optional[str] = None
+
     vehicle_config: Optional[object] = None
 
     def __post_init__(self) -> None:
@@ -131,6 +146,12 @@ class PipelineConfig:
 
         if self.initial_speed is None:
             self.initial_speed = 5.0 if self.mode == "trackdrive" else 3.0
+
+        if self.warm_start not in WARM_START_POLICIES:
+            raise ValueError(
+                f"Unknown warm_start: {self.warm_start!r}. "
+                f"Must be one of {list(WARM_START_POLICIES)}."
+            )
 
         if self.repo_root is None:
             self.repo_root = Path(__file__).resolve().parent.parent
@@ -575,6 +596,262 @@ def _run_skidpad_pipeline(
     return results
 
 
+def _seed_signature_for(
+    config: PipelineConfig,
+    track_data: Dict,
+    model: VehicleModel,
+    boundary_margin: float,
+) -> Dict:
+    from optimization.warm_start import seed_signature
+
+    return seed_signature(
+        track_id=config.track_id,
+        mode=config.mode,
+        model_name=config.model_name,
+        integrator_name=config.integrator_name,
+        continuity=config.continuity,
+        normalize_states_and_inputs=config.normalize_states_and_inputs,
+        boundary_margin=boundary_margin,
+        track=track_data,
+        model=model,
+        reg_u=config.reg_u,
+        reg_u_l2=config.reg_u_l2,
+        initial_speed=config.initial_speed,
+        terminal_speed=config.terminal_speed,
+        eps_time=config.eps_time,
+        decel_hold_m=config.decel_hold_m,
+    )
+
+
+def _plan_ladder(
+    config: PipelineConfig,
+    track_data: Dict,
+    model: VehicleModel,
+) -> List[float]:
+    """Margins to solve on the way to the target, target included.
+
+    A single value means "solve the target directly". The starting rung is the
+    largest margin at which the default centreline guess is still feasible, so
+    the first (cold) solve of the ladder is an easy one.
+    """
+    from utils.corridor import critical_margin, describe_critical_margin
+
+    target = float(config.boundary_margin)
+    corners = model.get_corner_offsets()
+    if not corners:
+        return [target]
+
+    crit = critical_margin(track_data, corners)
+    print(f"  Warm start: {describe_critical_margin(crit, target)}")
+
+    if crit.already_closed:
+        # No margin makes the centreline guess feasible; a ladder cannot help.
+        return [target]
+
+    start = max(crit.margin - 0.02, 0.0)
+    if start >= target:
+        return [target]
+
+    if config.warm_start == "auto":
+        return [start, target]
+
+    step = max(float(config.warm_start_ladder_step), 1e-3)
+    # Drop a rung that would sit right on top of the target: solving twice at
+    # essentially the same margin buys nothing.
+    rungs = [m for m in np.arange(start, target, step) if target - m > 0.5 * step]
+    rungs.append(target)
+    return [float(m) for m in rungs]
+
+
+def _solve_once(
+    config: PipelineConfig,
+    track_data: Dict,
+    model: VehicleModel,
+    integrator: SpaceIntegrator,
+    time_weights,
+    solution_path: Path,
+    run_config: Optional[Dict],
+    boundary_margin: float,
+    initial_guess: Optional[Dict] = None,
+) -> Dict:
+    return solve_ocp_and_save(
+        track=track_data,
+        model=model,
+        solution_path=solution_path,
+        integrator=integrator,
+        initial_speed=config.initial_speed,
+        reg_du=config.reg_u,
+        reg_u_l2=config.reg_u_l2,
+        run_config=run_config,
+        use_normalization=config.normalize_states_and_inputs,
+        solver_verbose=config.solver_verbose,
+        boundary_margin=boundary_margin,
+        mode=config.mode,
+        time_weights=time_weights,
+        terminal_speed=(
+            config.terminal_speed if config.mode in ("skidpad", "autox") else None
+        ),
+        autox_timing_offset_m=(
+            config.autox_timing_offset_m if config.mode == "autox" else None
+        ),
+        initial_guess=initial_guess,
+    )
+
+
+def _save_seed_quietly(ws, seeds_root: Path, signature: Dict, solution: Dict,
+                       max_seeds: int) -> None:
+    """Store a seed, but never let a cache write throw away a good solve."""
+    try:
+        ws.save_seed(seeds_root, signature, solution, max_seeds)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Warm start: could not store seed ({type(exc).__name__}: {exc})")
+
+
+def _solve_with_warm_start(
+    config: PipelineConfig,
+    track_data: Dict,
+    model: VehicleModel,
+    integrator: SpaceIntegrator,
+    time_weights,
+    solution_path: Path,
+    run_config: Dict,
+) -> Dict:
+    """Solve the target problem, seeded from the store when that helps.
+
+    Never decides *whether* to solve — only what the solver starts from. With
+    ``warm_start='off'`` nothing here touches the disk and the solve is the cold
+    one.
+    """
+    import tempfile
+
+    from optimization import warm_start as ws
+
+    provenance: Dict = {
+        "policy": str(config.warm_start),
+        "seed_file": None,
+        "seed_margin": None,
+        "seed_vehicle_distance": None,
+        "ladder": [],
+        "fell_back_cold": False,
+    }
+
+    def finish(sol: Dict) -> Dict:
+        """Record how the solve was seeded, in the file as well as the dict."""
+        sol["warm_start"] = provenance
+        with solution_path.open("w") as f:
+            json.dump(sol, f, indent=2)
+        return sol
+
+    if config.warm_start == "off":
+        return finish(
+            _solve_once(
+                config, track_data, model, integrator, time_weights,
+                solution_path, run_config, config.boundary_margin,
+            )
+        )
+
+    seeds_root = config.solutions_dir / ws.SEEDS_DIRNAME
+    signature = _seed_signature_for(config, track_data, model, config.boundary_margin)
+
+    def guess_from(solution: Dict, source: str) -> Optional[Dict]:
+        try:
+            guess = ws.resample_guess(
+                solution, track_data, model, config.normalize_states_and_inputs
+            )
+        except Exception as exc:  # noqa: BLE001 - a bad seed must never be fatal
+            print(f"  Warm start: ignoring seed ({source}): {exc}")
+            return None
+        ok, why = ws.validate_guess(
+            guess, track_data, model, float(config.boundary_margin)
+        )
+        if not ok:
+            print(f"  Warm start: ignoring seed ({source}): {why}")
+            return None
+        return guess
+
+    guess: Optional[Dict] = None
+
+    # 1. An explicitly requested seed always wins.
+    if config.warm_start_seed:
+        seed_path = _resolve_path(config.repo_root, config.warm_start_seed)
+        if seed_path is not None and Path(seed_path).is_file():
+            solution = json.loads(Path(seed_path).read_text())
+            guess = guess_from(solution, str(seed_path))
+            if guess is not None:
+                print(f"  Warm start: seeded from {seed_path}")
+                provenance["seed_file"] = str(seed_path)
+        else:
+            print(f"  Warm start: seed file not found: {config.warm_start_seed}")
+
+    # 2. Otherwise take the closest compatible solve out of the store.
+    if guess is None and config.warm_start != "ladder":
+        match = ws.find_seed(
+            seeds_root, signature, float(config.warm_start_max_margin_gap)
+        )
+        if match is not None:
+            solution = json.loads(match.path.read_text())
+            guess = guess_from(solution, match.path.name)
+            if guess is not None:
+                print(
+                    f"  Warm start: seeded from {match.path.name} "
+                    f"(margin {match.margin:.2f}, gap {match.margin_gap:.2f} m, "
+                    f"vehicle distance {match.vehicle_distance:.3f})"
+                )
+                provenance.update(match.as_provenance())
+
+    # 3. No seed: walk up to the target when a cold start would begin infeasible.
+    if guess is None:
+        ladder = _plan_ladder(config, track_data, model)
+        if len(ladder) > 1:
+            print(
+                "  Warm start: no compatible seed, solving "
+                + " -> ".join(f"{m:.2f}" for m in ladder)
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                for rung in ladder[:-1]:
+                    print(f"  Warm start: intermediate solve at margin {rung:.2f}")
+                    rung_path = Path(tmp) / f"ladder_m{round(rung * 1000):04d}.json"
+                    try:
+                        rung_sol = _solve_once(
+                            config, track_data, model, integrator, time_weights,
+                            rung_path, None, rung,
+                            initial_guess=guess,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # An intermediate solve is an optimisation, not a
+                        # requirement: fall through and solve the target with
+                        # whatever guess we have (possibly none).
+                        print(
+                            f"  Warm start: intermediate solve at {rung:.2f} failed "
+                            f"({type(exc).__name__}), continuing to the target"
+                        )
+                        provenance["fell_back_cold"] = guess is None
+                        break
+                    provenance["ladder"].append(float(rung))
+                    _save_seed_quietly(
+                        ws, seeds_root,
+                        _seed_signature_for(config, track_data, model, rung),
+                        rung_sol, int(config.warm_start_max_seeds),
+                    )
+                    guess = guess_from(rung_sol, f"ladder rung {rung:.2f}")
+                    if guess is None:
+                        break
+        else:
+            provenance["fell_back_cold"] = True
+
+    sol = finish(
+        _solve_once(
+            config, track_data, model, integrator, time_weights,
+            solution_path, run_config, config.boundary_margin,
+            initial_guess=guess,
+        )
+    )
+    _save_seed_quietly(
+        ws, seeds_root, signature, sol, int(config.warm_start_max_seeds)
+    )
+    return sol
+
+
 def step_solve_ocp(
     config: PipelineConfig,
     track_with_widths_path: Optional[Path] = None,
@@ -688,22 +965,14 @@ def step_solve_ocp(
         "autox_ocp_lead_m": float(config.autox_ocp_lead_m),
     }
 
-    sol_dict = solve_ocp_and_save(
-        track=track_data,
+    sol_dict = _solve_with_warm_start(
+        config=config,
+        track_data=track_data,
         model=model,
-        solution_path=solution_path,
         integrator=integrator,
-        initial_speed=config.initial_speed,
-        reg_du=config.reg_u,
-        reg_u_l2=config.reg_u_l2,
-        run_config=run_config,
-        use_normalization=config.normalize_states_and_inputs,
-        solver_verbose=config.solver_verbose,
-        boundary_margin=config.boundary_margin,
-        mode=config.mode,
         time_weights=time_weights,
-        terminal_speed=config.terminal_speed if config.mode in ("skidpad", "autox") else None,
-        autox_timing_offset_m=config.autox_timing_offset_m if config.mode == "autox" else None,
+        solution_path=solution_path,
+        run_config=run_config,
     )
 
     autox_lead_in = track_data.get("autox_lead_in") if config.mode == "autox" else None
@@ -1048,72 +1317,11 @@ def run_pipeline(
         return results
 
     if start_from in ("track", "spline", "bounds", "ocp"):
-        solution_path = config.solution_path
-
-        # Decide whether we can safely reuse an existing solution or must re-solve.
-        need_solve = False
-
-        try:
-            track_for_sig = load_track_with_widths(config.track_with_widths_path)
-            track_ds_m = float(
-                track_for_sig.get(
-                    "ds_m",
-                    (
-                        track_for_sig["arc_lengths"][1]
-                        - track_for_sig["arc_lengths"][0]
-                        if len(track_for_sig.get("arc_lengths", [])) > 1
-                        else config.ds_m
-                    ),
-                )
-            )
-            track_num_points = int(track_for_sig.get("num_points", len(track_for_sig.get("arc_lengths", []))))
-        except Exception:
-            track_ds_m = float(config.ds_m)
-            track_num_points = -1
-
-        if start_from == "ocp" or track_just_generated or not solution_path.exists():
-            need_solve = True
-        else:
-            # Build current run signature.
-            if isinstance(config.reg_u, (list, tuple, np.ndarray)):
-                reg_du_sig = [float(v) for v in config.reg_u]
-            else:
-                reg_du_sig = float(config.reg_u)
-
-            current_sig = {
-                "track_id": config.track_id,
-                "mode": config.mode,
-                "model_name": config.model_name,
-                "ds_m": float(track_ds_m),
-                "num_points": int(track_num_points),
-                "continuity": str(config.continuity),
-                "integrator_name": config.integrator_name,
-                "reg_du": reg_du_sig,
-                "initial_speed": float(config.initial_speed),
-                "use_savgol_bounds": bool(config.use_savgol_bounds),
-                "savgol_window_length": int(config.savgol_window_length),
-                "savgol_polyorder": int(config.savgol_polyorder),
-                "boundary_margin": float(config.boundary_margin),
-                "autox_timing_offset_m": float(config.autox_timing_offset_m),
-                "autox_ocp_lead_m": float(config.autox_ocp_lead_m),
-            }
-
-            # Load stored signature from existing solution, if any.
-            try:
-                with solution_path.open("r") as f:
-                    existing_data = json.load(f)
-                stored_sig = existing_data.get("run_config")
-            except Exception:
-                stored_sig = None
-
-            if stored_sig != current_sig:
-                need_solve = True
-
-        if need_solve:
-            solution_path = step_solve_ocp(config)
-        else:
-            print(f"[Step 4] Using existing solution: {solution_path}")
-
+        # Solution reuse is deliberately off: every run re-solves, so a config
+        # change can never be masked by a stale file on disk. Caching lives one
+        # level down instead, in optimization/warm_start.py, which only changes
+        # where the solver starts from — never whether it runs.
+        solution_path = step_solve_ocp(config)
         results["ocp"] = solution_path
     else:
         if not config.solution_path.exists():
