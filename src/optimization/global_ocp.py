@@ -22,6 +22,16 @@ else:
     from optimization.integrators import SpaceIntegrator, EulerIntegrator, RK4Integrator
 
 
+# Tolerances for the optional skidpad terminal-straight window (see
+# `terminal_straight_m` in `build_ocp`): how close to centered/aligned the
+# last stretch must stay. Tight but not exact-equality, to keep the discrete
+# dynamics from being over-determined across many consecutive nodes.
+_TERMINAL_D_TOL_M = 0.05
+_TERMINAL_PSI_TOL_RAD = 0.03
+_TERMINAL_YAW_RATE_TOL = 0.15
+_TERMINAL_V_LAT_TOL = 0.15
+
+
 def _safe_debug_value(opti: ca.Opti, expr) -> np.ndarray | float | None:
     """Return opti.debug.value(expr) as plain Python/numpy, or None on failure."""
     try:
@@ -159,6 +169,7 @@ def build_ocp(
     time_weights: np.ndarray | None = None,
     terminal_speed: float | None = None,
     enforce_terminal_constraints: bool = True,
+    terminal_straight_m: float | None = None,
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -406,6 +417,46 @@ def build_ocp(
         else:
             opti.subject_to(X[N - 1, v_idx] <= terminal_speed)
 
+    # Optional terminal-straight window (skidpad): the controller tracks
+    # lat_deviation/yaw_angle_error directly, so force the last
+    # `terminal_straight_m` metres to stay centered (d) and heading-aligned
+    # (psi_err) within a tight tolerance, rather than just the exact final
+    # node -- otherwise the untimed exit stretch has no incentive to
+    # straighten out before the finish.
+    #
+    # Also bound yaw_rate and v_lat over the same window (wherever the model
+    # has them as states). Root cause found empirically: with terminal_speed
+    # active and no cost/constraint on state *shape* in the untimed exit
+    # zone, nothing stops the solver from taking a violent, cost-free
+    # excursion on the last step or two to land exactly on the speed target
+    # -- v_long itself decays smoothly, but yaw_rate and then (once yaw_rate
+    # alone was capped) v_lat were each seen spiking on the final node/two,
+    # dragging psi_err/the exported yaw_angle_error (which is essentially
+    # -atan2(v_lat, v_long), and blows up as v_long -> 0) along with them.
+    # Capping both removes the "cheat" instead of just capping one symptom
+    # at a time.
+    if mode == "skidpad" and terminal_straight_m is not None and terminal_straight_m > 0.0:
+        n_window = min(N, max(1, int(round(terminal_straight_m / ds))))
+        reduced_names_local = model.reduced_state_names()
+
+        def _phys_to_norm(idx: int, tol: float) -> tuple[float, float]:
+            if not use_normalization:
+                return -tol, tol
+            s = float(np.array(x_scale).reshape(-1)[idx])
+            sh = float(np.array(x_shift).reshape(-1)[idx])
+            return (-tol - sh) / s, (tol - sh) / s
+
+        window_vars = [(0, _TERMINAL_D_TOL_M), (1, _TERMINAL_PSI_TOL_RAD)]
+        for name, tol in (("yaw_rate", _TERMINAL_YAW_RATE_TOL), ("v_lat", _TERMINAL_V_LAT_TOL)):
+            if name in reduced_names_local:
+                window_vars.append((reduced_names_local.index(name), tol))
+        window_bounds = [(idx, *_phys_to_norm(idx, tol)) for idx, tol in window_vars]
+
+        for i in range(N - n_window, N):
+            for idx, lo, hi in window_bounds:
+                opti.subject_to(lo <= X[i, idx])
+                opti.subject_to(X[i, idx] <= hi)
+
     if N > 1:
         dU = U[1:, :] - U[:-1, :]
         penalty = 0
@@ -498,6 +549,8 @@ def solve_ocp_and_save(
     terminal_speed: float | None = None,
     enforce_terminal_constraints: bool = True,
     autox_timing_offset_m: float | None = None,
+    warm_start: Dict[str, np.ndarray] | None = None,
+    terminal_straight_m: float | None = None,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -539,6 +592,7 @@ def solve_ocp_and_save(
         time_weights=time_weights,
         terminal_speed=terminal_speed,
         enforce_terminal_constraints=enforce_terminal_constraints,
+        terminal_straight_m=terminal_straight_m,
     )
 
     reduced_names = model.reduced_state_names()
@@ -554,12 +608,35 @@ def solve_ocp_and_save(
     if use_normalization:
         x0_norm = model.reduced_state_phys_to_norm(x0_phys)
         opti.set_value(params["x0"], x0_norm)
-        v_norm = model.reduced_state_phys_to_norm(x0_phys)[v_idx]
+    else:
+        opti.set_value(params["x0"], x0_phys)
+
+    if warm_start is not None:
+        X_ws_phys = np.asarray(warm_start["X_phys"], dtype=float)
+        U_ws_phys = np.asarray(warm_start["U_phys"], dtype=float)
+        if X_ws_phys.shape != (N, model.nx_reduced) or U_ws_phys.shape != (N, model.nu):
+            raise ValueError(
+                f"warm_start shape mismatch: expected X {(N, model.nx_reduced)}, "
+                f"U {(N, model.nu)}, got X {X_ws_phys.shape}, U {U_ws_phys.shape}"
+            )
+        if use_normalization:
+            x_scale, x_shift = model.get_reduced_state_scaling()
+            u_scale, u_shift = model.get_input_scaling()
+            x_scale_np = np.asarray(x_scale).astype(float).reshape(1, -1)
+            x_shift_np = np.asarray(x_shift).astype(float).reshape(1, -1)
+            u_scale_np = np.asarray(u_scale).astype(float).reshape(1, -1)
+            u_shift_np = np.asarray(u_shift).astype(float).reshape(1, -1)
+            opti.set_initial(X, (X_ws_phys - x_shift_np) / x_scale_np)
+            opti.set_initial(U, (U_ws_phys - u_shift_np) / u_scale_np)
+        else:
+            opti.set_initial(X, X_ws_phys)
+            opti.set_initial(U, U_ws_phys)
+    elif use_normalization:
+        v_norm = x0_norm[v_idx]
         opti.set_initial(X, 0)
         opti.set_initial(U, 0)
         opti.set_initial(X[:, v_idx], v_norm)
     else:
-        opti.set_value(params["x0"], x0_phys)
         opti.set_initial(X, 0)
         opti.set_initial(U, 0)
         opti.set_initial(X[:, v_idx], initial_speed)

@@ -183,7 +183,8 @@ _PIPELINE_FIELDS = {
     # Skidpad-specific
     "skidpad_map_csv", "skidpad_reference_csv",
     "eps_time", "entry_exit_halfwidth", "kappa_blend_m", "terminal_speed",
-    "decel_hold_m", "skidpad_start_x", "skidpad_start_y",
+    "decel_hold_m", "skidpad_start_x", "skidpad_start_y", "skidpad_lead_in_m",
+    "skidpad_terminal_straight_m",
 }
 
 
@@ -225,6 +226,13 @@ class RunConfig:
     # row. skidpad_start_x=None keeps the original behaviour.
     skidpad_start_x: Optional[float] = None
     skidpad_start_y: float = 0.0
+    # Metres of straight, prescribed constant-speed run-in prepended before the
+    # OCP's s=0 (at initial_speed), not part of the optimization. 0.0 = off.
+    skidpad_lead_in_m: float = 0.0
+    # Metres before the finish that must stay centered (d) and heading-aligned
+    # (psi_err) within a tight tolerance, so the trajectory ends straight
+    # instead of at a residual angle. 0.0 = off.
+    skidpad_terminal_straight_m: float = 0.0
 
     use_savgol_bounds: bool = False
     savgol_window_length: int = 41

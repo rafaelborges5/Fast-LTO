@@ -100,11 +100,18 @@ class PipelineConfig:
     # row. skidpad_start_x=None keeps the original behaviour.
     skidpad_start_x: Optional[float] = None
     skidpad_start_y: float = 0.0
+    # Metres of straight, prescribed constant-speed run-in prepended before the
+    # OCP's s=0 (at initial_speed), not part of the optimization. 0.0 = off.
+    skidpad_lead_in_m: float = 0.0
     terminal_speed: Optional[float] = None
     # Metres of the exit/decel zone (measured from the finish gate) that keep the
     # heavy timed time-weight, so the terminal brake starts AFTER the finish line
     # instead of bleeding back before it. 0.0 = original behaviour.
     decel_hold_m: float = 0.0
+    # Metres before the finish that must stay centered (d) and heading-aligned
+    # (psi_err) within a tight tolerance, so the trajectory ends straight
+    # instead of at a residual angle. 0.0 = off.
+    skidpad_terminal_straight_m: float = 0.0
 
     export_trajectory: bool = True
 
@@ -467,6 +474,79 @@ def _prepend_autox_lead_in(sol_dict: Dict, lead_in: Dict, initial_speed: float) 
     return sol_dict
 
 
+def _build_skidpad_lead_in(track_data: Dict, lead_in_m: float) -> Optional[Dict]:
+    """Geometry for a straight, prescribed run-in before the skidpad OCP's s=0.
+
+    Unlike autox (a closed loop, so the run-in has to be borrowed from the tail
+    of the lap), the skidpad centerline already starts on a straight (see
+    ``tracks/skidpad.py``), so the lead-in is just that same straight
+    extrapolated backward from node 0 by ``lead_in_m``. Requires curvature[0]
+    to be exactly 0 -- true as long as ``skidpad_start_x/y`` (if set) still
+    leaves the node before the corner's kappa-blend zone.
+    """
+    if lead_in_m <= 0.0:
+        return None
+
+    ds_m = float(track_data["ds_m"])
+    K = max(1, int(round(lead_in_m / ds_m)))
+
+    kappa0 = float(track_data["curvatures"][0])
+    if abs(kappa0) > 1e-6:
+        raise ValueError(
+            f"skidpad_lead_in_m requires the track to start on a straight "
+            f"(curvature[0]={kappa0:.4f} != 0); move skidpad_start_x/y "
+            "further from the gate or shorten the lead-in."
+        )
+
+    x0, y0 = track_data["positions"][0]
+    heading0 = float(track_data["headings"][0])
+    dir_x, dir_y = float(np.cos(heading0)), float(np.sin(heading0))
+    w_left0 = float(track_data["w_left"][0])
+    w_right0 = float(track_data["w_right"][0])
+
+    offsets = ds_m * np.arange(K, 0, -1)
+    return {
+        "positions": [[x0 - dir_x * off, y0 - dir_y * off] for off in offsets],
+        "headings": [heading0] * K,
+        "curvatures": [0.0] * K,
+        "arc_lengths": (-offsets).tolist(),
+        "w_left": [w_left0] * K,
+        "w_right": [w_right0] * K,
+    }
+
+
+def _prepend_skidpad_lead_in(sol_dict: Dict, lead_in: Dict, speed: float) -> Dict:
+    """Stitch a prescribed, constant-speed straight lead-in onto a solved
+    skidpad trajectory (mirrors ``_prepend_autox_lead_in``). Simpler than the
+    autox version since the lead-in is a straight line: curvature and
+    yaw_rate are exactly zero throughout, not just held at launch.
+    """
+    K = len(lead_in["arc_lengths"])
+
+    sol_dict["path_xy"] = lead_in["positions"] + list(sol_dict["path_xy"])
+    sol_dict["arc_lengths"] = lead_in["arc_lengths"] + list(sol_dict["arc_lengths"])
+    sol_dict["w_left"] = lead_in["w_left"] + list(sol_dict["w_left"])
+    sol_dict["w_right"] = lead_in["w_right"] + list(sol_dict["w_right"])
+    sol_dict["kappa"] = lead_in["curvatures"] + list(sol_dict["kappa"])
+    sol_dict["headings"] = lead_in["headings"] + list(sol_dict["headings"])
+
+    for name in sol_dict["state_names"]:
+        fill = [float(speed)] * K if name in ("v", "v_long") else [0.0] * K
+        sol_dict[name] = fill + list(sol_dict[name])
+
+    for name in sol_dict["input_names"]:
+        sol_dict[name] = [0.0] * K + list(sol_dict[name])
+
+    # Lead-in sits before the gate, same as the rest of the entry straight it
+    # extends, so it stays untimed/decel-free under the existing masks.
+    if sol_dict.get("timed_mask") is not None:
+        sol_dict["timed_mask"] = [0] * K + list(sol_dict["timed_mask"])
+    if sol_dict.get("decel_mask") is not None:
+        sol_dict["decel_mask"] = [0] * K + list(sol_dict["decel_mask"])
+
+    return sol_dict
+
+
 def _autox_time_weights(
     arc_lengths,
     base_length_m: float,
@@ -704,6 +784,7 @@ def step_solve_ocp(
         time_weights=time_weights,
         terminal_speed=config.terminal_speed if config.mode in ("skidpad", "autox") else None,
         autox_timing_offset_m=config.autox_timing_offset_m if config.mode == "autox" else None,
+        terminal_straight_m=config.skidpad_terminal_straight_m if config.mode == "skidpad" else None,
     )
 
     autox_lead_in = track_data.get("autox_lead_in") if config.mode == "autox" else None
@@ -714,6 +795,20 @@ def step_solve_ocp(
         print(
             f"  Autox: prepended {config.autox_lead_in_m:.0f} m constant-speed "
             f"lead-in ({len(autox_lead_in['arc_lengths'])} points, not part of the OCP solve)"
+        )
+
+    skidpad_lead_in = (
+        _build_skidpad_lead_in(track_data, config.skidpad_lead_in_m)
+        if config.mode == "skidpad" else None
+    )
+    if skidpad_lead_in:
+        sol_dict = _prepend_skidpad_lead_in(sol_dict, skidpad_lead_in, config.initial_speed)
+        with solution_path.open("w") as f:
+            json.dump(sol_dict, f, indent=2)
+        print(
+            f"  Skidpad: prepended {config.skidpad_lead_in_m:.1f} m constant-speed "
+            f"({config.initial_speed:.1f} m/s) lead-in "
+            f"({len(skidpad_lead_in['arc_lengths'])} points, not part of the OCP solve)"
         )
 
     # Optional concise profiling summary (single line)

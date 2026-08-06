@@ -56,15 +56,17 @@ pipeline:
   model_name: four_wheel
   integrator_name: euler
   reg_u: 0.0
-  reg_u_l2: 0.0215
+  reg_u_l2: 0.0055
   initial_speed: 2.0
   boundary_margin: 0.50
   skidpad_map_csv: data/tracks/skidpad/skidpad_map.csv
   skidpad_reference_csv: data/tracks/skidpad/skidpad_reference.csv
-  eps_time: 0.05
+  eps_time: 0.005
   entry_exit_halfwidth: 1.5
   kappa_blend_m: 1.5
-  terminal_speed: 0.5
+  terminal_speed: 1.0
   decel_hold_m: 4.0
   skidpad_start_x: 0.0
   skidpad_start_y: 0.0
+  skidpad_lead_in_m: 10.0
+  skidpad_terminal_straight_m: 5.0
