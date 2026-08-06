@@ -85,3 +85,6 @@ pipeline:
   terminal_speed: 0.5
   eps_time: 0.05
   decel_hold_m: 0.0
+
+  # Warm start: off | auto | ladder (see optimization/warm_start.py)
+  warm_start: auto

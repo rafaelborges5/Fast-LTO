@@ -194,6 +194,32 @@ Examples:
         help="Disable Savitzky–Golay smoothing of lateral bounds.",
     )
 
+    # Warm start
+    parser.add_argument(
+        "--warm-start",
+        type=str,
+        choices=["off", "auto", "ladder"],
+        default=None,
+        help=(
+            "Seeding policy for the OCP. 'off' solves cold and touches no seed "
+            "store; 'auto' seeds from the closest compatible previous solve, "
+            "and inserts one easier solve when the margin is past the point "
+            "where the centreline guess goes infeasible; 'ladder' always walks "
+            "up from a safe margin. Default: auto."
+        ),
+    )
+    parser.add_argument(
+        "--no-warm-start",
+        action="store_true",
+        help="Alias for --warm-start off.",
+    )
+    parser.add_argument(
+        "--warm-start-seed",
+        type=str,
+        default=None,
+        help="Path to a solution JSON to seed this solve from, bypassing the store.",
+    )
+
     parser.add_argument(
         "--no-normalization",
         action="store_true",
@@ -267,6 +293,12 @@ Examples:
             run_config.autox_timing_offset_m = args.autox_timing_offset
         if args.boundary_margin is not None:
             run_config.boundary_margin = args.boundary_margin
+        if args.no_warm_start:
+            run_config.warm_start = "off"
+        elif args.warm_start is not None:
+            run_config.warm_start = args.warm_start
+        if args.warm_start_seed is not None:
+            run_config.warm_start_seed = args.warm_start_seed
         if args.reg_du_vec is not None:
             reg_vec = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
             run_config.reg_u = reg_vec
@@ -325,6 +357,12 @@ Examples:
             config_kwargs["autox_timing_offset_m"] = args.autox_timing_offset
         if args.boundary_margin is not None:
             config_kwargs["boundary_margin"] = args.boundary_margin
+        if args.no_warm_start:
+            config_kwargs["warm_start"] = "off"
+        elif args.warm_start is not None:
+            config_kwargs["warm_start"] = args.warm_start
+        if args.warm_start_seed is not None:
+            config_kwargs["warm_start_seed"] = args.warm_start_seed
         if args.ds is not None:
             config_kwargs["ds_m"] = args.ds
         if args.reg_du_vec is not None:

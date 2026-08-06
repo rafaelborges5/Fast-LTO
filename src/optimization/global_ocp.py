@@ -549,7 +549,7 @@ def solve_ocp_and_save(
     terminal_speed: float | None = None,
     enforce_terminal_constraints: bool = True,
     autox_timing_offset_m: float | None = None,
-    warm_start: Dict[str, np.ndarray] | None = None,
+    initial_guess: Dict[str, np.ndarray] | None = None,
     terminal_straight_m: float | None = None,
 ) -> Dict:
     """
@@ -570,6 +570,11 @@ def solve_ocp_and_save(
     reg_du : float or array-like, optional
         Input rate-regularization weight(s). If one scalar is given
         make isotropic matrix.
+    initial_guess : dict, optional
+        ``{"X": (N, nx), "U": (N, nu)}`` in the same units the solver uses
+        (normalised when ``use_normalization``). Replaces the default
+        centreline / constant-speed guess, which is what makes margin
+        continuation possible on corridors too tight to start from d = 0.
 
     Returns
     -------
@@ -611,27 +616,7 @@ def solve_ocp_and_save(
     else:
         opti.set_value(params["x0"], x0_phys)
 
-    if warm_start is not None:
-        X_ws_phys = np.asarray(warm_start["X_phys"], dtype=float)
-        U_ws_phys = np.asarray(warm_start["U_phys"], dtype=float)
-        if X_ws_phys.shape != (N, model.nx_reduced) or U_ws_phys.shape != (N, model.nu):
-            raise ValueError(
-                f"warm_start shape mismatch: expected X {(N, model.nx_reduced)}, "
-                f"U {(N, model.nu)}, got X {X_ws_phys.shape}, U {U_ws_phys.shape}"
-            )
-        if use_normalization:
-            x_scale, x_shift = model.get_reduced_state_scaling()
-            u_scale, u_shift = model.get_input_scaling()
-            x_scale_np = np.asarray(x_scale).astype(float).reshape(1, -1)
-            x_shift_np = np.asarray(x_shift).astype(float).reshape(1, -1)
-            u_scale_np = np.asarray(u_scale).astype(float).reshape(1, -1)
-            u_shift_np = np.asarray(u_shift).astype(float).reshape(1, -1)
-            opti.set_initial(X, (X_ws_phys - x_shift_np) / x_scale_np)
-            opti.set_initial(U, (U_ws_phys - u_shift_np) / u_scale_np)
-        else:
-            opti.set_initial(X, X_ws_phys)
-            opti.set_initial(U, U_ws_phys)
-    elif use_normalization:
+    if use_normalization:
         v_norm = x0_norm[v_idx]
         opti.set_initial(X, 0)
         opti.set_initial(U, 0)
@@ -640,6 +625,12 @@ def solve_ocp_and_save(
         opti.set_initial(X, 0)
         opti.set_initial(U, 0)
         opti.set_initial(X[:, v_idx], initial_speed)
+
+    if initial_guess is not None:
+        if "X" in initial_guess:
+            opti.set_initial(X, np.asarray(initial_guess["X"], dtype=float))
+        if "U" in initial_guess:
+            opti.set_initial(U, np.asarray(initial_guess["U"], dtype=float))
 
     start_time = time.perf_counter()
     try:
