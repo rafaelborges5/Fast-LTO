@@ -138,6 +138,28 @@ Examples:
             "and the same point one lap later. Default: 6.0"
         ),
     )
+    parser.add_argument(
+        "--autox-start-x",
+        type=float,
+        default=None,
+        help="Car's real start x (m) in the map frame, for autox mode. Default: 0.0",
+    )
+    parser.add_argument(
+        "--autox-start-y",
+        type=float,
+        default=None,
+        help="Car's real start y (m) in the map frame, for autox mode. Default: 0.0",
+    )
+    parser.add_argument(
+        "--autox-start-node-offset",
+        type=int,
+        default=None,
+        help=(
+            "Nodes to step forward from the track sample nearest "
+            "(--autox-start-x, --autox-start-y) before pinning the OCP's "
+            "launch node, for autox mode. Default: 1"
+        ),
+    )
 
     # OCP options
     parser.add_argument(
@@ -291,6 +313,12 @@ Examples:
             run_config.autox_ocp_lead_m = args.autox_ocp_lead
         if args.autox_timing_offset is not None:
             run_config.autox_timing_offset_m = args.autox_timing_offset
+        if args.autox_start_x is not None:
+            run_config.autox_start_x = args.autox_start_x
+        if args.autox_start_y is not None:
+            run_config.autox_start_y = args.autox_start_y
+        if args.autox_start_node_offset is not None:
+            run_config.autox_start_node_offset = args.autox_start_node_offset
         if args.boundary_margin is not None:
             run_config.boundary_margin = args.boundary_margin
         if args.no_warm_start:
@@ -355,6 +383,12 @@ Examples:
             config_kwargs["autox_ocp_lead_m"] = args.autox_ocp_lead
         if args.autox_timing_offset is not None:
             config_kwargs["autox_timing_offset_m"] = args.autox_timing_offset
+        if args.autox_start_x is not None:
+            config_kwargs["autox_start_x"] = args.autox_start_x
+        if args.autox_start_y is not None:
+            config_kwargs["autox_start_y"] = args.autox_start_y
+        if args.autox_start_node_offset is not None:
+            config_kwargs["autox_start_node_offset"] = args.autox_start_node_offset
         if args.boundary_margin is not None:
             config_kwargs["boundary_margin"] = args.boundary_margin
         if args.no_warm_start:
