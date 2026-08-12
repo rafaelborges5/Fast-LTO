@@ -22,14 +22,56 @@ else:
     from optimization.integrators import SpaceIntegrator, EulerIntegrator, RK4Integrator
 
 
-# Tolerances for the optional skidpad terminal-straight window (see
-# `terminal_straight_m` in `build_ocp`): how close to centered/aligned the
-# last stretch must stay. Tight but not exact-equality, to keep the discrete
-# dynamics from being over-determined across many consecutive nodes.
+# Tolerances for the optional terminal centering/heading constraints (see
+# `_terminal_state_bounds` in `build_ocp`): how close to centered/aligned the
+# end of the trajectory must be -- skidpad's `terminal_straight_m` window, or
+# autox's short `terminal_state_constraint` window. Tight but not
+# exact-equality, to keep the discrete dynamics from being over-determined.
 _TERMINAL_D_TOL_M = 0.05
 _TERMINAL_PSI_TOL_RAD = 0.03
 _TERMINAL_YAW_RATE_TOL = 0.15
 _TERMINAL_V_LAT_TOL = 0.15
+
+
+def _terminal_state_bounds(
+    model: VehicleModel, use_normalization: bool
+) -> list[tuple[int, float, float]]:
+    """(state_idx, lo, hi) triples enforcing the terminal tolerances (d,
+    psi_err, and yaw_rate/v_lat where the model has them) in solver units --
+    shared by skidpad's terminal-straight window and autox's terminal-state
+    constraint (see their call sites in `build_ocp`).
+    """
+    reduced_names = model.reduced_state_names()
+    if use_normalization:
+        x_scale, x_shift = model.get_reduced_state_scaling()
+
+    def _phys_to_norm(idx: int, tol: float) -> tuple[float, float]:
+        if not use_normalization:
+            return -tol, tol
+        s = float(np.array(x_scale).reshape(-1)[idx])
+        sh = float(np.array(x_shift).reshape(-1)[idx])
+        return (-tol - sh) / s, (tol - sh) / s
+
+    state_tols = [(0, _TERMINAL_D_TOL_M), (1, _TERMINAL_PSI_TOL_RAD)]
+    for name, tol in (("yaw_rate", _TERMINAL_YAW_RATE_TOL), ("v_lat", _TERMINAL_V_LAT_TOL)):
+        if name in reduced_names:
+            state_tols.append((reduced_names.index(name), tol))
+    return [(idx, *_phys_to_norm(idx, tol)) for idx, tol in state_tols]
+
+
+def _apply_terminal_window(
+    opti: ca.Opti,
+    X: ca.MX,
+    N: int,
+    n_window: int,
+    bounds: list[tuple[int, float, float]],
+) -> None:
+    """Bound each (idx, lo, hi) in `bounds` over the last `n_window` nodes."""
+    n_window = min(N, max(1, int(n_window)))
+    for i in range(N - n_window, N):
+        for idx, lo, hi in bounds:
+            opti.subject_to(lo <= X[i, idx])
+            opti.subject_to(X[i, idx] <= hi)
 
 
 def _safe_debug_value(opti: ca.Opti, expr) -> np.ndarray | float | None:
@@ -170,6 +212,9 @@ def build_ocp(
     terminal_speed: float | None = None,
     enforce_terminal_constraints: bool = True,
     terminal_straight_m: float | None = None,
+    terminal_state_constraint: bool = False,
+    terminal_window_nodes: int = 2,
+    D_safe_braking: float | None = None,
 ):
     """
     Build a space-domain OCP over the full lap.
@@ -254,6 +299,64 @@ def build_ocp(
     else:
         f_space, eval_at_point = build_space_dynamics(model)
     s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
+
+    # Optional conservative-D braking zone (autox): a second model instance,
+    # identical to `model` except D_fl/D_fr/D_rr/D_rl replaced outright by
+    # `D_safe_braking` (an absolute override, not a scale factor), swapped in
+    # for every node with no timing objective -- i.e. the untimed tail after
+    # the timing gate's second crossing, using the exact same boundary
+    # `_autox_time_weights`/`track["timed_mask"]` already define (see
+    # pipeline.py), not a separately-specified distance. This does NOT reach
+    # the constant-speed pad appended after the OCP solve
+    # (`autox_terminal_pad_m`): that pad isn't part of the OCP horizon at
+    # all, so there's nothing there to apply a model to.
+    #
+    # D is baked as a plain float into each node's constraint/dynamics
+    # expressions rather than carried as a CasADi parameter (see
+    # `_all_pacejka_coeffs`/`get_constraints` in four_wheel.py), so nothing
+    # stops different nodes from being built against different model
+    # instances -- the node loop below just picks which one per index.
+    # Off by default (D_safe_braking=None): zero extra nodes, identical
+    # graph to before this feature existed.
+    brake_model: VehicleModel | None = None
+    f_space_brake = eval_at_point_brake = None
+    brake_zone_mask: np.ndarray | None = None
+    if mode == "autox" and D_safe_braking is not None:
+        timed_mask_raw = track.get("timed_mask")
+        if timed_mask_raw is None:
+            raise ValueError(
+                "D_safe_braking requires track['timed_mask'] (set by "
+                "step_solve_ocp's autox branch) to know which nodes have no "
+                "timing objective."
+            )
+        timed_arr = np.asarray(timed_mask_raw, dtype=float)
+        if timed_arr.size != N:
+            raise ValueError(
+                f"track['timed_mask'] has {timed_arr.size} entries, expected {N}"
+            )
+        brake_zone_mask = timed_arr < 0.5  # untimed = no timing objective = braking zone
+
+        d_keys = ("D_fl", "D_fr", "D_rr", "D_rl")
+        missing = [k for k in d_keys if k not in model.params]
+        if missing:
+            raise ValueError(
+                f"D_safe_braking requires per-wheel D params {d_keys}, but "
+                f"{type(model).__name__} is missing {missing}."
+            )
+        brake_params = dict(model.params)
+        for k in d_keys:
+            brake_params[k] = float(D_safe_braking)
+        brake_model = type(model)(brake_params)
+        if use_normalization:
+            f_space_brake, eval_at_point_brake = build_space_dynamics_normalized(brake_model)
+        else:
+            f_space_brake, eval_at_point_brake = build_space_dynamics(brake_model)
+
+    def _node_model(i: int):
+        if brake_zone_mask is not None and brake_zone_mask[i]:
+            return brake_model, f_space_brake, eval_at_point_brake
+        return model, f_space, eval_at_point
+
     total_time = 0
     timed_time = 0
     pure_timed_time = 0
@@ -278,9 +381,10 @@ def build_ocp(
         kappa_i = kappa_param[i]
         kappa_half_i = kappa_half_param[i]
         kappa_next_i = kappa_param[i + 1]
+        model_i, f_space_i, eval_at_point_i = _node_model(i)
 
         x_next = integrator.step(
-            f_space,
+            f_space_i,
             x_i,
             u_i,
             kappa_i,
@@ -292,7 +396,7 @@ def build_ocp(
 
         for x_c, kappa_c in _constraint_eval_points(
             integrator,
-            f_space,
+            f_space_i,
             x_i,
             u_i,
             kappa_i,
@@ -301,10 +405,10 @@ def build_ocp(
             kappa_next=kappa_next_i,
         ):
             if use_normalization:
-                g_list = model.get_constraints_normalized(x_c, u_i, kappa_c)
+                g_list = model_i.get_constraints_normalized(x_c, u_i, kappa_c)
             else:
-                full_state, _ = eval_at_point(x_c, u_i, kappa_c)
-                g_list = model.get_constraints(full_state, u_i, kappa_c)
+                full_state, _ = eval_at_point_i(x_c, u_i, kappa_c)
+                g_list = model_i.get_constraints(full_state, u_i, kappa_c)
             for g in g_list:
                 opti.subject_to(g <= 0)
 
@@ -330,7 +434,7 @@ def build_ocp(
             opti.subject_to(x_i[0] <= w_left_param[i])
 
         dt_i = integrator.time_step(
-            f_space, eval_at_point, x_i, u_i, kappa_i, ds,
+            f_space_i, eval_at_point_i, x_i, u_i, kappa_i, ds,
             kappa_half=kappa_half_i,
             kappa_next=kappa_next_i,
             eps=s_dot_floor,
@@ -385,11 +489,12 @@ def build_ocp(
         x_last = X[N - 1, :].T
         u_last = U[N - 1, :].T
         kappa_last = kappa_param[N - 1]
+        model_last, _, eval_at_point_last = _node_model(N - 1)
         if use_normalization:
-            g_list_last = model.get_constraints_normalized(x_last, u_last, kappa_last)
+            g_list_last = model_last.get_constraints_normalized(x_last, u_last, kappa_last)
         else:
-            full_state_last, _ = eval_at_point(x_last, u_last, kappa_last)
-            g_list_last = model.get_constraints(full_state_last, u_last, kappa_last)
+            full_state_last, _ = eval_at_point_last(x_last, u_last, kappa_last)
+            g_list_last = model_last.get_constraints(full_state_last, u_last, kappa_last)
         for g in g_list_last:
             opti.subject_to(g <= 0)
 
@@ -436,26 +541,23 @@ def build_ocp(
     # Capping both removes the "cheat" instead of just capping one symptom
     # at a time.
     if mode == "skidpad" and terminal_straight_m is not None and terminal_straight_m > 0.0:
-        n_window = min(N, max(1, int(round(terminal_straight_m / ds))))
-        reduced_names_local = model.reduced_state_names()
+        n_window = int(round(terminal_straight_m / ds))
+        _apply_terminal_window(opti, X, N, n_window, _terminal_state_bounds(model, use_normalization))
 
-        def _phys_to_norm(idx: int, tol: float) -> tuple[float, float]:
-            if not use_normalization:
-                return -tol, tol
-            s = float(np.array(x_scale).reshape(-1)[idx])
-            sh = float(np.array(x_shift).reshape(-1)[idx])
-            return (-tol - sh) / s, (tol - sh) / s
-
-        window_vars = [(0, _TERMINAL_D_TOL_M), (1, _TERMINAL_PSI_TOL_RAD)]
-        for name, tol in (("yaw_rate", _TERMINAL_YAW_RATE_TOL), ("v_lat", _TERMINAL_V_LAT_TOL)):
-            if name in reduced_names_local:
-                window_vars.append((reduced_names_local.index(name), tol))
-        window_bounds = [(idx, *_phys_to_norm(idx, tol)) for idx, tol in window_vars]
-
-        for i in range(N - n_window, N):
-            for idx, lo, hi in window_bounds:
-                opti.subject_to(lo <= X[i, idx])
-                opti.subject_to(X[i, idx] <= hi)
+    # Optional terminal-state constraint (autox): unlike skidpad, the path
+    # leading up to the finish is left free -- only the last
+    # `terminal_window_nodes` discrete steps have to land centered/
+    # heading-aligned (and yaw_rate/v_lat capped, same "cheat" rationale as
+    # above), since that's the state the prescribed, constant-speed terminal
+    # pad (see `_append_autox_terminal_pad` in pipeline.py) picks up from. A
+    # true single node (n_window=1) was tried first and found infeasible for
+    # rate-limited actuator models (four_wheel's dFxmax/ddeltamax): the state
+    # can't snap to the target in zero discrete steps, so a couple of nodes
+    # of slack are needed for the dynamics to actually converge into it.
+    if mode == "autox" and terminal_state_constraint:
+        _apply_terminal_window(
+            opti, X, N, terminal_window_nodes, _terminal_state_bounds(model, use_normalization)
+        )
 
     if N > 1:
         dU = U[1:, :] - U[:-1, :]
@@ -551,6 +653,9 @@ def solve_ocp_and_save(
     autox_timing_offset_m: float | None = None,
     initial_guess: Dict[str, np.ndarray] | None = None,
     terminal_straight_m: float | None = None,
+    terminal_state_constraint: bool = False,
+    terminal_window_nodes: int = 2,
+    D_safe_braking: float | None = None,
 ) -> Dict:
     """
     Build and solve OCP, then save solution to JSON.
@@ -598,6 +703,9 @@ def solve_ocp_and_save(
         terminal_speed=terminal_speed,
         enforce_terminal_constraints=enforce_terminal_constraints,
         terminal_straight_m=terminal_straight_m,
+        terminal_state_constraint=terminal_state_constraint,
+        terminal_window_nodes=terminal_window_nodes,
+        D_safe_braking=D_safe_braking,
     )
 
     reduced_names = model.reduced_state_names()
