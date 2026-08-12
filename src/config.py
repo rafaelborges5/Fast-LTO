@@ -177,7 +177,9 @@ _PIPELINE_FIELDS = {
     "reg_u", "reg_u_l2", "initial_speed",
     "boundary_margin", "autox_extension_m", "autox_start_x", "autox_start_y",
     "autox_start_node_offset", "autox_lead_in_m", "autox_ocp_lead_m",
-    "autox_timing_offset_m",
+    "autox_timing_offset_m", "autox_terminal_state_constraint",
+    "autox_terminal_window_nodes", "autox_terminal_pad_m",
+    "D_safe_braking",
     "use_savgol_bounds", "savgol_window_length", "savgol_polyorder",
     "normalize_states_and_inputs", "solver_verbose",
     "export_trajectory", "plot_results", "show_plots",
@@ -234,6 +236,31 @@ class RunConfig:
     # optimized rather than held flat.
     autox_ocp_lead_m: float = 0.0
     autox_timing_offset_m: float = 6.0
+    # If True, only the last autox_terminal_window_nodes of the OCP horizon
+    # must land centered (d) and heading-aligned (psi_err) within a tight
+    # tolerance -- unlike skidpad_terminal_straight_m, the path leading up to
+    # that short window is left free.
+    autox_terminal_state_constraint: bool = False
+    # Discrete steps the terminal-state constraint above is enforced over.
+    # 1 was tried first and found infeasible for rate-limited actuator models
+    # (e.g. four_wheel): the state can't snap to the target in zero steps, so
+    # a couple of nodes of slack let the dynamics actually converge into it.
+    autox_terminal_window_nodes: int = 2
+    # Metres of straight, prescribed constant-speed pad appended after the OCP
+    # horizon (held at the solved terminal speed on the real centerline), not
+    # part of the optimization -- reference margin in case the controller
+    # tracks past the solved end. 0.0 = off.
+    autox_terminal_pad_m: float = 0.0
+    # If set, replaces D_fl/D_fr/D_rr/D_rl (absolute override, not a scale)
+    # with this single value for every OCP node with no timing objective --
+    # i.e. the untimed tail after the timing gate's second crossing, same
+    # boundary as `timed_mask`/_autox_time_weights. Everything else (B, C,
+    # aero, mass, ...) stays at the nominal, racing-line value. Does not
+    # reach the constant-speed pad appended after the OCP solve
+    # (autox_terminal_pad_m) -- that pad isn't part of the OCP at all.
+    # None = off (nominal D used everywhere, same as before this option
+    # existed).
+    D_safe_braking: Optional[float] = None
 
     # Skidpad-specific (only used when mode == "skidpad")
     skidpad_map_csv: Optional[str] = None

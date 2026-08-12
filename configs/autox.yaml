@@ -88,6 +88,10 @@ pipeline:
   terminal_speed: 0.5
   eps_time: 0.05
   decel_hold_m: 0.0
+  autox_terminal_state_constraint: true
+  autox_terminal_window_nodes: 2
+  autox_terminal_pad_m: 10.0
+  D_safe_braking: 1.075
 
   # Warm start: off | auto | ladder (see optimization/warm_start.py)
   warm_start: auto

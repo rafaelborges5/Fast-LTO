@@ -109,6 +109,31 @@ class PipelineConfig:
     # accurate autox lap time is measured between this point and the same point
     # one lap later, not from s=0 through the run-off extension.
     autox_timing_offset_m: float = 6.0
+    # If True, only the last autox_terminal_window_nodes of the OCP horizon
+    # must land centered (d) and heading-aligned (psi_err) within a tight
+    # tolerance -- unlike skidpad_terminal_straight_m, the path leading up to
+    # that short window is left free.
+    autox_terminal_state_constraint: bool = False
+    # Discrete steps the terminal-state constraint above is enforced over.
+    # 1 was tried first and found infeasible for rate-limited actuator models
+    # (e.g. four_wheel): the state can't snap to the target in zero steps, so
+    # a couple of nodes of slack let the dynamics actually converge into it.
+    autox_terminal_window_nodes: int = 2
+    # Metres of straight, prescribed constant-speed pad appended after the OCP
+    # horizon (held at the solved terminal speed on the real centerline), not
+    # part of the optimization -- reference margin in case the controller
+    # tracks past the solved end. 0.0 = off.
+    autox_terminal_pad_m: float = 0.0
+    # If set, replaces D_fl/D_fr/D_rr/D_rl (absolute override, not a scale)
+    # with this single value for every OCP node with no timing objective --
+    # i.e. the untimed tail after the timing gate's second crossing, same
+    # boundary as `timed_mask`/_autox_time_weights. Everything else (B, C,
+    # aero, mass, ...) stays at the nominal, racing-line value. Does not
+    # reach the constant-speed pad appended after the OCP solve
+    # (autox_terminal_pad_m) -- that pad isn't part of the OCP at all.
+    # None = off (nominal D used everywhere, same as before this option
+    # existed).
+    D_safe_braking: Optional[float] = None
 
     skidpad_map_csv: Optional[str] = None
     skidpad_reference_csv: Optional[str] = None
@@ -381,6 +406,7 @@ def _extend_track_for_autox(
     lead_in_m: float = 0.0,
     ocp_lead_m: float = 0.0,
     timing_offset_m: float = 0.0,
+    terminal_pad_m: float = 0.0,
     start_x: float = 0.0,
     start_y: float = 0.0,
     start_node_offset: int = 1,
@@ -438,6 +464,14 @@ def _extend_track_for_autox(
     The true single-lap length is stashed on the returned dict as
     ``"autox_base_length_m"``, used both for the lap-time measurement above
     and for building the post-finish untimed weighting in ``step_solve_ocp``.
+
+    If ``terminal_pad_m`` > 0, geometry for a further constant-speed pad
+    *after* the OCP horizon is also computed (from the same wraparound,
+    continuing past the run-off) and returned under
+    ``"autox_terminal_pad"``. Like ``autox_lead_in``, it is not part of the
+    optimization: see ``_append_autox_terminal_pad``, which stitches it onto
+    the solved trajectory at the solved terminal speed, purely as reference
+    margin in case the controller tracks a little past the solved end.
     """
     ds_m = float(track_data["ds_m"])
     N_orig = len(track_data["arc_lengths"])
@@ -526,6 +560,21 @@ def _extend_track_for_autox(
             "w_right": w_right[lead_in_start:ocp_lead_start].tolist(),
         }
 
+    if terminal_pad_m > 0.0:
+        P_pts = max(1, round(terminal_pad_m / ds_m))
+        # Continue past the run-off (index M_pts in the *original* closed
+        # loop), wrapping around again if the pad is long enough to need it.
+        pad_idx = (M_pts + np.arange(P_pts)) % N_orig
+        last_arc = extended["arc_lengths"][-1]
+        extended["autox_terminal_pad"] = {
+            "positions": positions[pad_idx].tolist(),
+            "headings": headings[pad_idx].tolist(),
+            "curvatures": curvatures[pad_idx].tolist(),
+            "arc_lengths": [last_arc + ds_m * (i + 1) for i in range(P_pts)],
+            "w_left": w_left[pad_idx].tolist(),
+            "w_right": w_right[pad_idx].tolist(),
+        }
+
     return extended
 
 
@@ -578,6 +627,51 @@ def _prepend_autox_lead_in(sol_dict: Dict, lead_in: Dict, initial_speed: float) 
         # the same convention as the rest of the run-up (see
         # _autox_time_weights): only the post-finish tail is untimed.
         sol_dict["timed_mask"] = [1] * K + list(sol_dict["timed_mask"])
+
+    return sol_dict
+
+
+def _append_autox_terminal_pad(sol_dict: Dict, pad: Dict, speed: float) -> Dict:
+    """Stitch a prescribed, constant-speed pad onto the tail of a solved autox
+    trajectory (mirrors ``_prepend_autox_lead_in``, appended instead of
+    prepended). Not part of the OCP -- pure reference margin in case the
+    controller tracks a little past the solved horizon. Held on the
+    centerline at ``speed`` (the actual solved terminal speed, not the
+    ``terminal_speed`` target), with yaw_rate set from the borrowed
+    centerline curvature so the exported reference curvature is consistent,
+    same as the lead-in.
+    """
+    P = len(pad["arc_lengths"])
+    curvatures = pad["curvatures"]
+
+    sol_dict["path_xy"] = list(sol_dict["path_xy"]) + pad["positions"]
+    sol_dict["arc_lengths"] = list(sol_dict["arc_lengths"]) + pad["arc_lengths"]
+    sol_dict["w_left"] = list(sol_dict["w_left"]) + pad["w_left"]
+    sol_dict["w_right"] = list(sol_dict["w_right"]) + pad["w_right"]
+    sol_dict["kappa"] = list(sol_dict["kappa"]) + curvatures
+    sol_dict["headings"] = list(sol_dict["headings"]) + pad["headings"]
+
+    # yaw_rate = kappa * v so the exporter recovers the true pad curvature.
+    yaw_rate_pad = [float(k) * float(speed) for k in curvatures]
+
+    for name in sol_dict["state_names"]:
+        if name in ("v", "v_long"):
+            fill = [float(speed)] * P
+        elif name == "yaw_rate":
+            fill = yaw_rate_pad
+        else:
+            fill = [0.0] * P
+        sol_dict[name] = list(sol_dict[name]) + fill
+
+    for name in sol_dict["input_names"]:
+        sol_dict[name] = list(sol_dict[name]) + [0.0] * P
+
+    # Pad sits after the finish, same as the rest of the untimed tail it
+    # extends, so it stays untimed under the existing mask.
+    if sol_dict.get("timed_mask") is not None:
+        sol_dict["timed_mask"] = list(sol_dict["timed_mask"]) + [0] * P
+    if sol_dict.get("decel_mask") is not None:
+        sol_dict["decel_mask"] = list(sol_dict["decel_mask"]) + [0] * P
 
     return sol_dict
 
@@ -787,6 +881,18 @@ def _seed_signature_for(
         terminal_speed=config.terminal_speed,
         eps_time=config.eps_time,
         decel_hold_m=config.decel_hold_m,
+        terminal_straight_m=(
+            config.skidpad_terminal_straight_m if config.mode == "skidpad" else None
+        ),
+        terminal_state_constraint=(
+            config.autox_terminal_state_constraint if config.mode == "autox" else False
+        ),
+        terminal_window_nodes=(
+            config.autox_terminal_window_nodes if config.mode == "autox" else None
+        ),
+        D_safe_braking=(
+            config.D_safe_braking if config.mode == "autox" else None
+        ),
     )
 
 
@@ -863,6 +969,13 @@ def _solve_once(
         ),
         terminal_straight_m=(
             config.skidpad_terminal_straight_m if config.mode == "skidpad" else None
+        ),
+        terminal_state_constraint=(
+            config.autox_terminal_state_constraint if config.mode == "autox" else False
+        ),
+        terminal_window_nodes=config.autox_terminal_window_nodes,
+        D_safe_braking=(
+            config.D_safe_braking if config.mode == "autox" else None
         ),
         initial_guess=initial_guess,
     )
@@ -1062,6 +1175,7 @@ def step_solve_ocp(
             config.autox_lead_in_m,
             config.autox_ocp_lead_m,
             timing_offset_m=config.autox_timing_offset_m,
+            terminal_pad_m=config.autox_terminal_pad_m,
             start_x=config.autox_start_x,
             start_y=config.autox_start_y,
             start_node_offset=config.autox_start_node_offset,
@@ -1143,6 +1257,9 @@ def step_solve_ocp(
         "autox_start_y": float(config.autox_start_y),
         "autox_start_node_offset": int(config.autox_start_node_offset),
         "autox_idx_ref": int(track_data.get("autox_idx_ref", 0)),
+        "D_safe_braking": (
+            float(config.D_safe_braking) if config.D_safe_braking is not None else None
+        ),
     }
 
     sol_dict = _solve_with_warm_start(
@@ -1163,6 +1280,19 @@ def step_solve_ocp(
         print(
             f"  Autox: prepended {config.autox_lead_in_m:.0f} m constant-speed "
             f"lead-in ({len(autox_lead_in['arc_lengths'])} points, not part of the OCP solve)"
+        )
+
+    autox_terminal_pad = track_data.get("autox_terminal_pad") if config.mode == "autox" else None
+    if autox_terminal_pad:
+        v_name = "v" if "v" in sol_dict["state_names"] else "v_long"
+        pad_speed = float(sol_dict[v_name][-1])
+        sol_dict = _append_autox_terminal_pad(sol_dict, autox_terminal_pad, pad_speed)
+        with solution_path.open("w") as f:
+            json.dump(sol_dict, f, indent=2)
+        print(
+            f"  Autox: appended {config.autox_terminal_pad_m:.0f} m constant-speed "
+            f"({pad_speed:.2f} m/s) terminal pad "
+            f"({len(autox_terminal_pad['arc_lengths'])} points, not part of the OCP solve)"
         )
 
     skidpad_lead_in = (
