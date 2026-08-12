@@ -50,6 +50,10 @@ HARD_KEYS = (
     "state_names",
     "input_names",
     "geom_hash",
+    "terminal_straight_m",
+    "terminal_state_constraint",
+    "terminal_window_nodes",
+    "D_safe_braking",
 )
 
 
@@ -121,6 +125,10 @@ def seed_signature(
     terminal_speed: Optional[float] = None,
     eps_time: Optional[float] = None,
     decel_hold_m: Optional[float] = None,
+    terminal_straight_m: Optional[float] = None,
+    terminal_state_constraint: bool = False,
+    terminal_window_nodes: Optional[int] = None,
+    D_safe_braking: Optional[float] = None,
 ) -> Dict:
     """Build the ``{"hard": …, "soft": …}`` description of one solve."""
     params = model_params if model_params is not None else getattr(model, "params", {})
@@ -136,6 +144,20 @@ def seed_signature(
         "state_names": list(model.reduced_state_names()),
         "input_names": list(model.get_input_names()),
         "geom_hash": geom_hash(track),
+        # These add/remove hard constraints near the terminal region rather
+        # than just retuning the objective (unlike boundary_margin, which
+        # narrows the same corridor the ladder is built to climb), so a seed
+        # solved under a different value isn't just lower quality -- it may
+        # not even satisfy the target problem's constraints.
+        "terminal_straight_m": _round_floats(terminal_straight_m),
+        "terminal_state_constraint": bool(terminal_state_constraint),
+        "terminal_window_nodes": (
+            int(terminal_window_nodes) if terminal_window_nodes is not None else None
+        ),
+        # Also changes the feasible set (a different tyre D over the untimed
+        # tail of the horizon), not just the objective -- same reasoning as
+        # the terminal keys above.
+        "D_safe_braking": _round_floats(D_safe_braking),
     }
     soft = {
         "boundary_margin": round(float(boundary_margin), 9),
