@@ -65,7 +65,33 @@ def test_autox_yaml_loads_ocp_lead() -> None:
 
     rc = RunConfig.from_yaml(config_path)
     assert rc.autox_ocp_lead_m == pytest.approx(0.0)
-    assert rc.autox_lead_in_m == pytest.approx(5.0)
+    assert rc.autox_lead_in_m == pytest.approx(8.0)
 
     pc = rc.to_pipeline_config()
     assert pc.autox_ocp_lead_m == pytest.approx(0.0)
+
+
+def test_autox_start_defaults_to_origin() -> None:
+    rc = RunConfig()
+    assert rc.autox_start_x == 0.0
+    assert rc.autox_start_y == 0.0
+    assert rc.autox_start_node_offset == 1
+
+    pc = rc.to_pipeline_config()
+    assert pc.autox_start_x == 0.0
+    assert pc.autox_start_y == 0.0
+    assert pc.autox_start_node_offset == 1
+
+
+def test_autox_yaml_loads_start_fields() -> None:
+    config_path = CONFIGS_DIR / "autox.yaml"
+    if not config_path.exists():
+        pytest.skip("configs/autox.yaml not present in this checkout")
+
+    rc = RunConfig.from_yaml(config_path)
+    assert rc.autox_start_x == pytest.approx(0.0)
+    assert rc.autox_start_y == pytest.approx(0.0)
+    assert rc.autox_start_node_offset == 1
+
+    pc = rc.to_pipeline_config()
+    assert pc.autox_start_node_offset == 1
