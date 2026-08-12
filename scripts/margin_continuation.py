@@ -45,6 +45,9 @@ def build_track(config, widths_path: Path):
         config.autox_lead_in_m,
         config.autox_ocp_lead_m,
         timing_offset_m=config.autox_timing_offset_m,
+        start_x=config.autox_start_x,
+        start_y=config.autox_start_y,
+        start_node_offset=config.autox_start_node_offset,
     )
     tw = _autox_time_weights(
         track["arc_lengths"],

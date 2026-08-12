@@ -132,6 +132,9 @@ def build_baseline(case: Case) -> Baseline:
             pc.autox_lead_in_m,
             pc.autox_ocp_lead_m,
             timing_offset_m=pc.autox_timing_offset_m,
+            start_x=pc.autox_start_x,
+            start_y=pc.autox_start_y,
+            start_node_offset=pc.autox_start_node_offset,
         )
         time_weights = _autox_time_weights(
             track["arc_lengths"],
