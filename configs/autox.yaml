@@ -80,8 +80,11 @@ pipeline:
   initial_speed: 3.0
   boundary_margin: 0.45
   autox_extension_m: 20.0
-  autox_lead_in_m: 5.0
-  autox_ocp_lead_m: 0.5
+  autox_start_x: 0.0
+  autox_start_y: 0.0
+  autox_start_node_offset: 1
+  autox_lead_in_m: 8.0
+  autox_ocp_lead_m: 0.0
   terminal_speed: 0.5
   eps_time: 0.05
   decel_hold_m: 0.0
