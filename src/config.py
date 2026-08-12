@@ -175,7 +175,8 @@ _PIPELINE_FIELDS = {
     "track_id", "track_type", "ds_m", "continuity", "smooth_centerline",
     "mode", "model_name", "integrator_name",
     "reg_u", "reg_u_l2", "initial_speed",
-    "boundary_margin", "autox_extension_m", "autox_lead_in_m", "autox_ocp_lead_m",
+    "boundary_margin", "autox_extension_m", "autox_start_x", "autox_start_y",
+    "autox_start_node_offset", "autox_lead_in_m", "autox_ocp_lead_m",
     "autox_timing_offset_m",
     "use_savgol_bounds", "savgol_window_length", "savgol_polyorder",
     "normalize_states_and_inputs", "solver_verbose",
@@ -211,7 +212,26 @@ class RunConfig:
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
     autox_extension_m: float = 50.0
+    # Car's real start position in the map frame (x, y), used to find the autox
+    # horizon's anchor node instead of trusting the track CSV's arbitrary array
+    # index 0 (see pipeline._resolve_autox_start_index). Default (0.0, 0.0):
+    # this stack's SLAM pose-graph anchors the first pose at the origin, so
+    # this is reliably close to the car's actual start regardless of which CSV
+    # row the boundary-estimation tool happened to emit first.
+    autox_start_x: float = 0.0
+    autox_start_y: float = 0.0
+    # Nodes to step forward (direction of travel) from the sample nearest
+    # (autox_start_x, autox_start_y) before pinning it as the OCP's launch
+    # node -- a small mesh-scale safety margin so the pin sits slightly ahead
+    # of, not behind, the car. Default 1 (~0.5 m at ds_m=0.5).
+    autox_start_node_offset: int = 1
     autox_lead_in_m: float = 0.0
+    # Metres before the anchor node (see autox_start_x/y above) that the OCP's
+    # own optimized horizon begins (instead of the flat autox_lead_in_m hold).
+    # With the anchor now genuinely at the car's position, there's usually
+    # nothing to gain by pushing the pin further back -- 0.0 is the normal
+    # setting; only raise this if part of the approach itself needs to be
+    # optimized rather than held flat.
     autox_ocp_lead_m: float = 0.0
     autox_timing_offset_m: float = 6.0
 

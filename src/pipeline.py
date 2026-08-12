@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -83,10 +83,27 @@ class PipelineConfig:
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
     autox_extension_m: float = 50.0
+    # Car's real start position in the map frame (x, y), used to find the autox
+    # horizon's anchor node instead of trusting the track CSV's arbitrary array
+    # index 0 (see pipeline._resolve_autox_start_index). Default (0.0, 0.0):
+    # this stack's SLAM pose-graph anchors the first pose at the origin, so
+    # this is reliably close to the car's actual start regardless of which CSV
+    # row the boundary-estimation tool happened to emit first.
+    autox_start_x: float = 0.0
+    autox_start_y: float = 0.0
+    # Nodes to step forward (direction of travel) from the sample nearest
+    # (autox_start_x, autox_start_y) before pinning it as the OCP's launch
+    # node -- a small mesh-scale safety margin so the pin sits slightly ahead
+    # of, not behind, the car. Default 1 (~0.5 m at ds_m=0.5).
+    autox_start_node_offset: int = 1
     autox_lead_in_m: float = 0.0
-    # Metres before s=0 that the OCP's own optimized horizon begins (instead of
-    # the flat autox_lead_in_m hold). The pinned launch condition moves back by
-    # this much; the flat hold is trimmed to sit immediately before it.
+    # Metres before the anchor node (see autox_start_x/y above) that the OCP's
+    # own optimized horizon begins (instead of the flat autox_lead_in_m hold).
+    # The pinned launch condition moves back by this much; the flat hold is
+    # trimmed to sit immediately before it. With the anchor now genuinely at
+    # the car's position, there's usually nothing to gain by pushing the pin
+    # further back -- 0.0 is the normal setting; only raise this if part of
+    # the approach itself needs to be optimized rather than held flat.
     autox_ocp_lead_m: float = 0.0
     # Distance (m) from the car's start position to the real timing gate; the
     # accurate autox lap time is measured between this point and the same point
@@ -325,14 +342,61 @@ def _make_integrator(name: Literal["euler", "rk4"]) -> SpaceIntegrator:
     raise ValueError(f"Unknown integrator_name: {name!r}")
 
 
+def _resolve_autox_start_index(
+    positions: np.ndarray,
+    start_x: float,
+    start_y: float,
+    node_offset: int = 1,
+) -> Tuple[int, float]:
+    """Resolve the autox horizon's anchor node ("s=0") from the car's real
+    start position, instead of trusting the track CSV's array index 0.
+
+    Index 0 is just whichever ``M`` row an upstream mapping/boundary-
+    estimation tool happened to write first -- an artifact of that tool's
+    internal conventions, not the car's actual position. It has been
+    observed to drift by several metres between mapping sessions on the same
+    physical track. Anchoring instead on the sample nearest ``(start_x,
+    start_y)`` -- the car's real start pose in the map frame -- fixes that.
+
+    ``node_offset`` steps the anchor forward (direction of travel) by that
+    many additional samples past the nearest one, as a small safety margin
+    so the OCP's pinned launch condition sits slightly ahead of the car
+    rather than behind it.
+
+    Returns ``(idx_ref, snap_distance_m)``: the resolved index, and the
+    distance from ``(start_x, start_y)`` to the nearest sample (before
+    applying ``node_offset``) -- a large snap distance is a sign the wrong
+    track or wrong coordinates were used.
+    """
+    n = positions.shape[0]
+    d2 = (positions[:, 0] - start_x) ** 2 + (positions[:, 1] - start_y) ** 2
+    nearest = int(np.argmin(d2))
+    idx_ref = (nearest + int(node_offset)) % n
+    return idx_ref, float(np.sqrt(d2[nearest]))
+
+
 def _extend_track_for_autox(
     track_data: Dict,
     extension_m: float,
     lead_in_m: float = 0.0,
     ocp_lead_m: float = 0.0,
     timing_offset_m: float = 0.0,
+    start_x: float = 0.0,
+    start_y: float = 0.0,
+    start_node_offset: int = 1,
 ) -> Dict:
     """Extend a closed-loop track by wrapping points beyond the finish line.
+
+    ``s = 0`` -- and every offset measured "from s=0" below (``ocp_lead_m``,
+    ``lead_in_m``, ``timing_offset_m``) -- is anchored at ``idx_ref``: the
+    track sample nearest ``(start_x, start_y)``, stepped ``start_node_offset``
+    nodes forward (see ``_resolve_autox_start_index``). This is deliberately
+    *not* the track CSV's array index 0, which is an artifact of the
+    upstream boundary-estimation tool's row ordering and has been observed
+    to drift several metres between mapping sessions on the same physical
+    track -- anchoring on the car's real start position instead removes that
+    drift from the OCP's launch point, the lead-in, and the timing gate all
+    at once, since they all move together.
 
     The OCP horizon itself (``positions``/``headings``/... fed to
     ``build_ocp``) gets a forward run-off plus, if ``ocp_lead_m`` > 0,
@@ -341,8 +405,9 @@ def _extend_track_for_autox(
     closed track is, geometrically, the end of the loop). The OCP's pinned
     launch condition then lands ``ocp_lead_m`` metres earlier, so the solver
     optimizes the speed/steering profile through that stretch instead of it
-    being a flat hold. With ``ocp_lead_m=0`` this reproduces the original
-    single-lap autox solve exactly.
+    being a flat hold. With ``ocp_lead_m=0`` (the normal setting now that
+    ``s=0`` sits at the car's real position) the pin lands exactly at
+    ``idx_ref``.
 
     ``extension_m`` is measured from the *timing gate*, not from the track's
     nominal (but physically arbitrary) ``s = autox_base_length_m`` wrap
@@ -391,9 +456,29 @@ def _extend_track_for_autox(
     headings = np.array(track_data["headings"], dtype=np.float64)
     curvatures = np.array(track_data["curvatures"], dtype=np.float64)
     curvatures_half = np.array(track_data["curvatures_half"], dtype=np.float64)
-    arc_lengths = np.array(track_data["arc_lengths"], dtype=np.float64)
     w_left = np.array(track_data["w_left"], dtype=np.float64)
     w_right = np.array(track_data["w_right"], dtype=np.float64)
+
+    # Re-anchor s=0 at idx_ref (the car's real start) instead of array index
+    # 0, by rotating local copies of every per-point array. This never
+    # touches track_data itself -- the map/CSV/JSON on disk stay untouched --
+    # only this function's disposable, per-solve working copy is reordered.
+    # A circular roll preserves every adjacency relationship (including the
+    # one wrap seam), so everything below this point -- the tail-of-the-loop
+    # wraparound math, curvatures_half's inter-node midpoints, etc. -- is
+    # unchanged and operates correctly on the rotated copies.
+    idx_ref, start_snap_m = _resolve_autox_start_index(
+        positions, start_x, start_y, start_node_offset
+    )
+    if idx_ref != 0:
+        positions = np.roll(positions, -idx_ref, axis=0)
+        headings = np.roll(headings, -idx_ref, axis=0)
+        curvatures = np.roll(curvatures, -idx_ref, axis=0)
+        curvatures_half = np.roll(curvatures_half, -idx_ref, axis=0)
+        w_left = np.roll(w_left, -idx_ref, axis=0)
+        w_right = np.roll(w_right, -idx_ref, axis=0)
+    # Uniform arc-length spacing survives a circular roll exactly.
+    arc_lengths = np.arange(N_orig, dtype=np.float64) * ds_m
 
     total_length = arc_lengths[-1] + ds_m
 
@@ -428,6 +513,8 @@ def _extend_track_for_autox(
     extended["num_points"] = N_orig + M_pts + J_pts
     extended["total_length_m"] = float(arc_lengths[-1] + ds_m * M_pts + ds_m)
     extended["autox_base_length_m"] = float(total_length)
+    extended["autox_idx_ref"] = int(idx_ref)
+    extended["autox_start_snap_m"] = float(start_snap_m)
 
     if K_pts > 0:
         extended["autox_lead_in"] = {
@@ -975,11 +1062,17 @@ def step_solve_ocp(
             config.autox_lead_in_m,
             config.autox_ocp_lead_m,
             timing_offset_m=config.autox_timing_offset_m,
+            start_x=config.autox_start_x,
+            start_y=config.autox_start_y,
+            start_node_offset=config.autox_start_node_offset,
         )
         print(f"  Autox: extended track by {config.autox_timing_offset_m + config.autox_extension_m:.0f} m "
               f"({track_data['num_points']} points total, OCP horizon, "
               f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in, "
               f"{config.autox_extension_m:.0f} m of which is post-finish run-off)")
+        print(f"  Autox: start anchored at idx_ref={track_data['autox_idx_ref']} "
+              f"(snapped {track_data['autox_start_snap_m']:.2f} m from "
+              f"requested ({config.autox_start_x:.2f}, {config.autox_start_y:.2f}))")
         time_weights = _autox_time_weights(
             track_data["arc_lengths"],
             track_data["autox_base_length_m"],
@@ -1046,6 +1139,10 @@ def step_solve_ocp(
         "boundary_margin": float(config.boundary_margin),
         "autox_timing_offset_m": float(config.autox_timing_offset_m),
         "autox_ocp_lead_m": float(config.autox_ocp_lead_m),
+        "autox_start_x": float(config.autox_start_x),
+        "autox_start_y": float(config.autox_start_y),
+        "autox_start_node_offset": int(config.autox_start_node_offset),
+        "autox_idx_ref": int(track_data.get("autox_idx_ref", 0)),
     }
 
     sol_dict = _solve_with_warm_start(
