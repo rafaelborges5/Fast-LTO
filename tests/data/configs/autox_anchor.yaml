@@ -1,0 +1,11 @@
+# Fixture: autox run with a moved start anchor and an optimized run-in.
+# Values are deliberately non-default so the assertions prove the YAML was
+# read, not that the dataclass defaults happen to match.
+pipeline:
+  mode: autox
+  model_name: four_wheel
+  autox_lead_in_m: 8.0
+  autox_ocp_lead_m: 2.5
+  autox_start_x: 12.5
+  autox_start_y: -3.25
+  autox_start_node_offset: 3

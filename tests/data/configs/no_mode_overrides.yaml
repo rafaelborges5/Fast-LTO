@@ -1,0 +1,5 @@
+# Fixture: a config that sets no mode-specific anchor fields at all, so the
+# skidpad/autox start options must fall back to their declared defaults.
+pipeline:
+  mode: trackdrive
+  model_name: point_mass

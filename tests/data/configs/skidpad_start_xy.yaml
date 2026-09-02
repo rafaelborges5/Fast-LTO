@@ -1,0 +1,9 @@
+# Fixture: skidpad run that overrides the entry point (P0).
+# Values are deliberately non-default so the assertions prove the YAML was
+# read, not that the dataclass defaults happen to match.
+pipeline:
+  mode: skidpad
+  track_type: skidpad
+  model_name: four_wheel
+  skidpad_start_x: 4.0
+  skidpad_start_y: 1.5
