@@ -859,21 +859,21 @@ def _resolve_non_swept_params(args: argparse.Namespace) -> Dict[str, Any]:
 
         rc = RunConfig.from_yaml(args.config)
         params["vehicle_config"] = rc.vehicle
-        params["model_name"] = rc.model_name
-        params["reg_u"] = rc.reg_u
-        params["boundary_margin"] = rc.boundary_margin
-        params["smooth_centerline"] = rc.smooth_centerline
-        params["mode"] = rc.mode
-        if rc.initial_speed is not None:
-            params["initial_speed"] = rc.initial_speed
+        params["model_name"] = rc.pipeline.model_name
+        params["reg_u"] = rc.pipeline.reg_u
+        params["boundary_margin"] = rc.pipeline.boundary_margin
+        params["smooth_centerline"] = rc.pipeline.smooth_centerline
+        params["mode"] = rc.pipeline.mode
+        if rc.pipeline.initial_speed is not None:
+            params["initial_speed"] = rc.pipeline.initial_speed
         # Use the YAML reg_u_l2 as the reference weight unless overridden.
         if args.reg_l2_ref is None:
-            params["reg_u_l2_ref"] = rc.reg_u_l2
+            params["reg_u_l2_ref"] = rc.pipeline.reg_u_l2
         rc.validate_for_model()
         print(
-            f"Loaded config from {args.config}: model={rc.model_name}, "
-            f"v_max={rc.vehicle.v_max}, margin={rc.boundary_margin}, "
-            f"smooth={rc.smooth_centerline}, reg_u={rc.reg_u}, "
+            f"Loaded config from {args.config}: model={rc.pipeline.model_name}, "
+            f"v_max={rc.vehicle.v_max}, margin={rc.pipeline.boundary_margin}, "
+            f"smooth={rc.pipeline.smooth_centerline}, reg_u={rc.pipeline.reg_u}, "
             f"reg_u_l2_ref={params['reg_u_l2_ref']}"
         )
 

@@ -118,7 +118,7 @@ class Baseline:
 
 def build_baseline(case: Case) -> Baseline:
     rc = RunConfig.from_yaml(REPO / case.config)
-    rc.track_id = case.track_id
+    rc.pipeline.track_id = case.track_id
     rc.validate_for_model()
     pc: PipelineConfig = rc.to_pipeline_config()
     pc.repo_root = REPO

@@ -11,12 +11,102 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from fast_lto.pipeline import PipelineConfig, run_pipeline
+from fast_lto.pipeline import run_pipeline
+
+if TYPE_CHECKING:
+    from fast_lto.config import RunConfig
 
 
-def main() -> None:
-    """Main CLI entry point."""
+# argparse dest -> PipelineConfig field, for every flag that simply replaces a
+# value when given. Flags needing real logic (the store_true pairs, the two
+# regularisation flags) are handled explicitly in build_run_config below.
+_VALUE_OVERRIDES = {
+    "track_id": "track_id",
+    "track_type": "track_type",
+    "mode": "mode",
+    "model": "model_name",
+    "integrator": "integrator_name",
+    "ds": "ds_m",
+    "continuity": "continuity",
+    "boundary_margin": "boundary_margin",
+    "autox_extension": "autox_extension_m",
+    "autox_lead_in": "autox_lead_in_m",
+    "autox_ocp_lead": "autox_ocp_lead_m",
+    "autox_timing_offset": "autox_timing_offset_m",
+    "autox_start_x": "autox_start_x",
+    "autox_start_y": "autox_start_y",
+    "autox_start_node_offset": "autox_start_node_offset",
+    "warm_start_seed": "warm_start_seed",
+    "reg_u_l2": "reg_u_l2",
+}
+
+
+def build_run_config(args: argparse.Namespace) -> "RunConfig":
+    """Build the run configuration from parsed arguments.
+
+    One path, whether or not ``--config`` was given: start from the YAML (or
+    from the dataclass defaults when there is none), then apply exactly the
+    flags the user actually passed.  A flag left at its default never
+    overwrites a value from the file.
+    """
+    from fast_lto.config import RunConfig
+
+    run_config = RunConfig.from_yaml(args.config) if args.config else RunConfig()
+    pipeline = run_config.pipeline
+
+    for arg_name, field_name in _VALUE_OVERRIDES.items():
+        value = getattr(args, arg_name)
+        if value is not None:
+            setattr(pipeline, field_name, value)
+
+    # Not part of the table above: an explicitly requested launch speed has to
+    # be pinned, or a `--mode` on the same command line re-derives it.
+    if args.initial_speed is not None:
+        pipeline.set_initial_speed(args.initial_speed)
+
+    # --reg-du-vec beats --reg-u, per its own help text.
+    if args.reg_du_vec is not None:
+        pipeline.reg_u = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
+    elif args.reg_u is not None:
+        pipeline.reg_u = args.reg_u
+
+    if args.no_warm_start:
+        pipeline.warm_start = "off"
+    elif args.warm_start is not None:
+        pipeline.warm_start = args.warm_start
+
+    # store_true/store_false flags carry no "unset" state, so each one is only
+    # applied when it differs from its default -- otherwise simply parsing the
+    # command line would silently override the config file.
+    if args.solver_verbose:
+        pipeline.solver_verbose = True
+    if args.no_normalization:
+        pipeline.normalize_states_and_inputs = False
+    if args.no_export:
+        pipeline.export_trajectory = False
+    if args.no_plot:
+        pipeline.plot_results = False
+    if args.no_show_plots:
+        pipeline.show_plots = False
+    if args.generate_track:
+        pipeline.generate_track = True
+    if not args.savgol_bounds:
+        pipeline.use_savgol_bounds = True
+
+    if args.repo_root is not None:
+        pipeline.repo_root = args.repo_root
+
+    return run_config
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the argument parser.
+
+    Separate from :func:`main` so tests can parse a command line without
+    running a pipeline.
+    """
     parser = argparse.ArgumentParser(
         description="Fast-LTO: Lap Time Optimization Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -280,134 +370,16 @@ Examples:
         help="Repository root directory. Auto-detected if not set.",
     )
 
-    args = parser.parse_args()
+    return parser
 
-    if args.config is not None:
-        # ── YAML-based config with optional CLI overrides ──
-        from fast_lto.config import RunConfig
 
-        run_config = RunConfig.from_yaml(args.config)
+def main() -> None:
+    """Main CLI entry point."""
+    args = build_parser().parse_args()
 
-        # Apply CLI overrides on top of YAML values
-        if args.track_id is not None:
-            run_config.track_id = args.track_id
-        if args.track_type is not None:
-            run_config.track_type = args.track_type
-        if args.mode is not None:
-            run_config.mode = args.mode
-        if args.model is not None:
-            run_config.model_name = args.model
-        if args.integrator is not None:
-            run_config.integrator_name = args.integrator
-        if args.ds is not None:
-            run_config.ds_m = args.ds
-        if args.continuity is not None:
-            run_config.continuity = args.continuity
-        if args.initial_speed is not None:
-            run_config.initial_speed = args.initial_speed
-        if args.autox_extension is not None:
-            run_config.autox_extension_m = args.autox_extension
-        if args.autox_lead_in is not None:
-            run_config.autox_lead_in_m = args.autox_lead_in
-        if args.autox_ocp_lead is not None:
-            run_config.autox_ocp_lead_m = args.autox_ocp_lead
-        if args.autox_timing_offset is not None:
-            run_config.autox_timing_offset_m = args.autox_timing_offset
-        if args.autox_start_x is not None:
-            run_config.autox_start_x = args.autox_start_x
-        if args.autox_start_y is not None:
-            run_config.autox_start_y = args.autox_start_y
-        if args.autox_start_node_offset is not None:
-            run_config.autox_start_node_offset = args.autox_start_node_offset
-        if args.boundary_margin is not None:
-            run_config.boundary_margin = args.boundary_margin
-        if args.no_warm_start:
-            run_config.warm_start = "off"
-        elif args.warm_start is not None:
-            run_config.warm_start = args.warm_start
-        if args.warm_start_seed is not None:
-            run_config.warm_start_seed = args.warm_start_seed
-        if args.reg_du_vec is not None:
-            reg_vec = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
-            run_config.reg_u = reg_vec
-        elif args.reg_u is not None:
-            run_config.reg_u = args.reg_u
-        if args.reg_u_l2 is not None:
-            run_config.reg_u_l2 = args.reg_u_l2
-        if args.solver_verbose:
-            run_config.solver_verbose = True
-        if args.no_normalization:
-            run_config.normalize_states_and_inputs = False
-        if args.no_export:
-            run_config.export_trajectory = False
-        if args.no_plot:
-            run_config.plot_results = False
-        if args.no_show_plots:
-            run_config.show_plots = False
-
-        # Validate vehicle params against selected model before running
-        run_config.validate_for_model()
-
-        config = run_config.to_pipeline_config()
-        config.generate_track = args.generate_track
-        if args.repo_root is not None:
-            config.repo_root = args.repo_root
-        # Re-run __post_init__ to derive paths with updated fields
-        config.__post_init__()
-
-    else:
-        # ── Legacy CLI-only mode ──
-        config_kwargs = dict(
-            track_id=args.track_id or "fsg_random",
-            track_type=args.track_type or "fsg",
-            generate_track=args.generate_track,
-            repo_root=args.repo_root,
-            continuity=args.continuity or "C2",
-            use_savgol_bounds=not args.savgol_bounds,
-            mode=args.mode or "trackdrive",
-            model_name=args.model or "point_mass",
-            integrator_name=args.integrator or "euler",
-            normalize_states_and_inputs=not args.no_normalization,
-            solver_verbose=args.solver_verbose,
-            export_trajectory=not args.no_export,
-            plot_results=not args.no_plot,
-            show_plots=not args.no_show_plots,
-        )
-        if args.initial_speed is not None:
-            config_kwargs["initial_speed"] = args.initial_speed
-        if args.autox_extension is not None:
-            config_kwargs["autox_extension_m"] = args.autox_extension
-        if args.autox_lead_in is not None:
-            config_kwargs["autox_lead_in_m"] = args.autox_lead_in
-        if args.autox_ocp_lead is not None:
-            config_kwargs["autox_ocp_lead_m"] = args.autox_ocp_lead
-        if args.autox_timing_offset is not None:
-            config_kwargs["autox_timing_offset_m"] = args.autox_timing_offset
-        if args.autox_start_x is not None:
-            config_kwargs["autox_start_x"] = args.autox_start_x
-        if args.autox_start_y is not None:
-            config_kwargs["autox_start_y"] = args.autox_start_y
-        if args.autox_start_node_offset is not None:
-            config_kwargs["autox_start_node_offset"] = args.autox_start_node_offset
-        if args.boundary_margin is not None:
-            config_kwargs["boundary_margin"] = args.boundary_margin
-        if args.no_warm_start:
-            config_kwargs["warm_start"] = "off"
-        elif args.warm_start is not None:
-            config_kwargs["warm_start"] = args.warm_start
-        if args.warm_start_seed is not None:
-            config_kwargs["warm_start_seed"] = args.warm_start_seed
-        if args.ds is not None:
-            config_kwargs["ds_m"] = args.ds
-        if args.reg_du_vec is not None:
-            reg_vec = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
-            config_kwargs["reg_u"] = reg_vec
-        elif args.reg_u is not None:
-            config_kwargs["reg_u"] = args.reg_u
-        if args.reg_u_l2 is not None:
-            config_kwargs["reg_u_l2"] = args.reg_u_l2
-
-        config = PipelineConfig(**config_kwargs)
+    run_config = build_run_config(args)
+    run_config.validate_for_model()
+    config = run_config.to_pipeline_config()
 
     # Run pipeline
     print("Running Fast-LTO pipeline")

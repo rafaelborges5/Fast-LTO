@@ -20,7 +20,7 @@ for reuse in subsequent runs.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -183,6 +183,12 @@ class PipelineConfig:
 
     vehicle_config: Optional[object] = None
 
+    # True while `initial_speed` still holds a value derived from `mode` rather
+    # than one the caller asked for. Lets __post_init__ be re-run after a field
+    # changes (see RunConfig.to_pipeline_config) and re-derive the speed for the
+    # new mode, instead of silently keeping the old mode's default.
+    _initial_speed_from_mode: bool = field(default=False, repr=False)
+
     def __post_init__(self) -> None:
         if self.mode not in ("autox", "trackdrive", "skidpad"):
             raise ValueError(
@@ -197,8 +203,9 @@ class PipelineConfig:
                 "'skidpad'."
             )
 
-        if self.initial_speed is None:
+        if self.initial_speed is None or self._initial_speed_from_mode:
             self.initial_speed = 5.0 if self.mode == "trackdrive" else 3.0
+            self._initial_speed_from_mode = True
 
         if self.warm_start not in WARM_START_POLICIES:
             raise ValueError(
@@ -220,6 +227,18 @@ class PipelineConfig:
         self.solutions_dir = self.repo_root / "data" / "solutions"
         self.output_trajectories_dir = self.repo_root / "data" / "output_trajectories"
         self.plots_dir = self.repo_root / "ocp_plots"
+
+    def set_initial_speed(self, speed: float) -> None:
+        """Pin the launch speed to a value the caller chose.
+
+        Plain assignment to ``initial_speed`` is not enough when the config is
+        re-initialised afterwards (see ``RunConfig.to_pipeline_config``): if the
+        current value came from ``mode``, re-running ``__post_init__`` derives it
+        again and overwrites the assignment. Going through here says the value is
+        the caller's, so the mode never reclaims it.
+        """
+        self.initial_speed = float(speed)
+        self._initial_speed_from_mode = False
 
     @property
     def discretized_track_path(self) -> Path:
