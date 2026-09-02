@@ -31,11 +31,10 @@ from pathlib import Path
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
 
-from config import RunConfig  # noqa: E402
-from optimization.global_ocp import load_track_with_widths  # noqa: E402
-from pipeline import _extend_track_for_autox, run_pipeline  # noqa: E402
+from fast_lto.config import RunConfig  # noqa: E402
+from fast_lto.optimization.global_ocp import load_track_with_widths  # noqa: E402
+from fast_lto.pipeline import _extend_track_for_autox, run_pipeline  # noqa: E402
 
 # Every autox-style (side,cone_id,x,y L/R/M) track CSV under data/tracks/,
 # excluding accidental *.csv.csv re-saves and the tiny test_pipeline.csv

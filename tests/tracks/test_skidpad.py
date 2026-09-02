@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tracks.skidpad import _load_reference_xy, build_skidpad_track
+from fast_lto.tracks.skidpad import _load_reference_xy, build_skidpad_track
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 MAP_CSV = REPO_ROOT / "data" / "tracks" / "skidpad" / "skidpad_map.csv"

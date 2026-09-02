@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from optimization import warm_start as ws
-from utils.corridor import corridor_at, corridor_widths, critical_margin
-from vehicle_models import FourWheelModel
-from vehicle_models.vehicle_base import CornerOffset
+from fast_lto.optimization import warm_start as ws
+from fast_lto.utils.corridor import corridor_at, corridor_widths, critical_margin
+from fast_lto.vehicle_models import FourWheelModel
+from fast_lto.vehicle_models.vehicle_base import CornerOffset
 
 
 # --------------------------------------------------------------------------- #
@@ -263,14 +263,14 @@ def test_validate_guess_rejects_wrong_shapes_and_nans(track, model):
 #  Pipeline policy
 # --------------------------------------------------------------------------- #
 def test_policy_is_validated():
-    from pipeline import PipelineConfig
+    from fast_lto.pipeline import PipelineConfig
 
     with pytest.raises(ValueError):
         PipelineConfig(mode="autox", warm_start="sometimes")
 
 
 def test_ladder_planning(track, model):
-    from pipeline import PipelineConfig
+    from fast_lto.pipeline import PipelineConfig
 
     corners = model.get_corner_offsets()
     crit = critical_margin(track, corners)
@@ -289,14 +289,14 @@ def test_ladder_planning(track, model):
 
 
 def _ladder(config, track, model):
-    from pipeline import _plan_ladder
+    from fast_lto.pipeline import _plan_ladder
 
     return _plan_ladder(config, track, model)
 
 
 def test_warm_start_off_does_no_store_io(tmp_path, track, model, monkeypatch):
     """`off` must not read or write the seed store."""
-    import pipeline
+    from fast_lto import pipeline
 
     calls = {"find": 0, "save": 0}
     monkeypatch.setattr(ws, "find_seed", lambda *a, **k: calls.__setitem__("find", 1))
@@ -328,7 +328,7 @@ def test_warm_start_off_does_no_store_io(tmp_path, track, model, monkeypatch):
 
 def test_run_pipeline_always_resolves(monkeypatch, tmp_path):
     """Solution reuse stays off: a repeat run with an unchanged config re-solves."""
-    import pipeline
+    from fast_lto import pipeline
 
     calls = []
     monkeypatch.setattr(

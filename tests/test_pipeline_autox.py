@@ -55,7 +55,7 @@ def _circular_track(N: int = 40, radius: float = 20.0) -> dict:
 
 def test_extension_measured_from_timing_gate():
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _extend_track_for_autox
+    from fast_lto.pipeline import _extend_track_for_autox
 
     ds_m = 0.5
     N = 200
@@ -87,7 +87,7 @@ def test_extension_measured_from_timing_gate():
 
 def test_extension_no_longer_requires_offset_le_extension():
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _extend_track_for_autox
+    from fast_lto.pipeline import _extend_track_for_autox
 
     track = _closed_track()
     # Previously this raised ValueError; now extension_m is measured past the
@@ -102,7 +102,7 @@ def test_extension_no_longer_requires_offset_le_extension():
 class TestAutoxTimeWeights:
     def test_weight_one_through_timed_lap(self):
         pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-        from pipeline import _autox_time_weights
+        from fast_lto.pipeline import _autox_time_weights
 
         arc = np.array([-1.0, 0.0, 3.0, 6.0, 50.0, 55.9, 56.0, 60.0, 100.0])
         base_length_m = 50.0
@@ -116,7 +116,7 @@ class TestAutoxTimeWeights:
 
     def test_decel_hold_extends_full_weight_past_gate(self):
         pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-        from pipeline import _autox_time_weights
+        from fast_lto.pipeline import _autox_time_weights
 
         arc = np.array([50.0, 56.0, 58.0, 59.9, 60.0, 65.0])
         base_length_m = 50.0
@@ -131,7 +131,7 @@ class TestAutoxTimeWeights:
 
 def test_resolve_start_index_nearest_plus_offset():
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _resolve_autox_start_index
+    from fast_lto.pipeline import _resolve_autox_start_index
 
     positions = np.array([[float(i), float(i)] for i in range(10)])
     x, y = positions[4]
@@ -148,7 +148,7 @@ def test_resolve_start_index_nearest_plus_offset():
 
 def test_resolve_start_index_wraps_at_array_boundary():
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _resolve_autox_start_index
+    from fast_lto.pipeline import _resolve_autox_start_index
 
     positions = np.array([[float(i), float(i)] for i in range(10)])
     x, y = positions[-1]
@@ -162,7 +162,7 @@ def test_resolve_start_index_wraps_at_array_boundary():
 
 def test_extend_track_pins_launch_at_resolved_anchor():
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _extend_track_for_autox
+    from fast_lto.pipeline import _extend_track_for_autox
 
     track = _closed_track(N=200, ds_m=0.5)
     positions = np.asarray(track["positions"])
@@ -186,7 +186,7 @@ def test_extend_track_pins_launch_at_resolved_anchor():
 
 def test_extend_track_invariant_under_rotation():
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _extend_track_for_autox
+    from fast_lto.pipeline import _extend_track_for_autox
 
     track = _closed_track(N=200, ds_m=0.5)
     positions = np.asarray(track["positions"])
@@ -217,7 +217,7 @@ def test_extend_track_invariant_under_rotation():
 
 def test_extend_track_no_discontinuity_at_wrap_seam():
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _extend_track_for_autox
+    from fast_lto.pipeline import _extend_track_for_autox
 
     track = _circular_track(N=40, radius=20.0)
     ds_m = track["ds_m"]

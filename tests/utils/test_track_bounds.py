@@ -18,10 +18,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tracks.ellipse import EllipseTrackConfig, generate_ellipse_track
-from tracks.bean import BeanTrackConfig, generate_bean_track
-from splines.spline_fitter import fit_and_discretize
-from utils.track_bounds import compute_lateral_bounds, load_boundaries
+from fast_lto.tracks.ellipse import EllipseTrackConfig, generate_ellipse_track
+from fast_lto.tracks.bean import BeanTrackConfig, generate_bean_track
+from fast_lto.splines.spline_fitter import fit_and_discretize
+from fast_lto.utils.track_bounds import compute_lateral_bounds, load_boundaries
 
 
 def _widths_for_track(gen, config, csv_path: Path):

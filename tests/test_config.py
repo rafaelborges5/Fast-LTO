@@ -14,7 +14,7 @@ from typing import List
 
 import pytest
 
-from config import RunConfig
+from fast_lto.config import RunConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = REPO_ROOT / "configs"

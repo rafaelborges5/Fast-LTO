@@ -18,7 +18,7 @@ import json
 import numpy as np
 import pytest
 
-from export.trajectory import export_reference_trajectory
+from fast_lto.export.trajectory import export_reference_trajectory
 
 # four_wheel reduced state / input names (see FourWheelModel).
 _STATE_NAMES = [
@@ -91,7 +91,7 @@ def test_leadin_kappa_matches_path_geometry(tmp_path):
     # the OCP solver (casadi). Import lazily so this module still collects where
     # casadi is unavailable; the exporter itself has no such dependency.
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from pipeline import _prepend_autox_lead_in
+    from fast_lto.pipeline import _prepend_autox_lead_in
 
     k0, ds, v0, K, N = 0.12, 0.5, 3.0, 10, 4
 

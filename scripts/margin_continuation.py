@@ -16,17 +16,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
 
-from config import RunConfig  # noqa: E402
-from optimization.global_ocp import load_track_with_widths, solve_ocp_and_save  # noqa: E402
-from optimization.warm_start import resample_guess  # noqa: E402
-from pipeline import (  # noqa: E402
+from fast_lto.config import RunConfig  # noqa: E402
+from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save  # noqa: E402
+from fast_lto.optimization.warm_start import resample_guess  # noqa: E402
+from fast_lto.pipeline import (  # noqa: E402
     _autox_time_weights,
     _extend_track_for_autox,
     _make_integrator,

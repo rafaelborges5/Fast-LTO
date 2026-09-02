@@ -13,16 +13,14 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
 
-from splines.spline_fitter import fit_and_discretize  # noqa: E402
-from utils.track_bounds import compute_lateral_bounds, load_boundaries  # noqa: E402
+from fast_lto.splines.spline_fitter import fit_and_discretize  # noqa: E402
+from fast_lto.utils.track_bounds import compute_lateral_bounds, load_boundaries  # noqa: E402
 
 
 def raw_midline(csv_path: Path) -> np.ndarray:

@@ -18,9 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from export.trajectory import export_reference_trajectory
+from fast_lto.export.trajectory import export_reference_trajectory
 
 
 def load_original(solution_path: Path) -> dict:
