@@ -22,12 +22,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional
 
 import numpy as np
 
 from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
+from fast_lto.modes import EventMode, get_mode
 from fast_lto.splines.discretized_track import DiscretizedTrack
 from fast_lto.splines.spline_fitter import ContinuityType, fit_and_discretize
 from fast_lto.tracks.bean import generate_bean_track
@@ -392,217 +393,6 @@ def _make_integrator(name: Literal["euler", "rk4"]) -> SpaceIntegrator:
     raise ValueError(f"Unknown integrator_name: {name!r}")
 
 
-def _resolve_autox_start_index(
-    positions: np.ndarray,
-    start_x: float,
-    start_y: float,
-    node_offset: int = 1,
-) -> Tuple[int, float]:
-    """Resolve the autox horizon's anchor node ("s=0") from the car's real
-    start position, instead of trusting the track CSV's array index 0.
-
-    Index 0 is just whichever ``M`` row an upstream mapping/boundary-
-    estimation tool happened to write first -- an artifact of that tool's
-    internal conventions, not the car's actual position. It has been
-    observed to drift by several metres between mapping sessions on the same
-    physical track. Anchoring instead on the sample nearest ``(start_x,
-    start_y)`` -- the car's real start pose in the map frame -- fixes that.
-
-    ``node_offset`` steps the anchor forward (direction of travel) by that
-    many additional samples past the nearest one, as a small safety margin
-    so the OCP's pinned launch condition sits slightly ahead of the car
-    rather than behind it.
-
-    Returns ``(idx_ref, snap_distance_m)``: the resolved index, and the
-    distance from ``(start_x, start_y)`` to the nearest sample (before
-    applying ``node_offset``) -- a large snap distance is a sign the wrong
-    track or wrong coordinates were used.
-    """
-    n = positions.shape[0]
-    d2 = (positions[:, 0] - start_x) ** 2 + (positions[:, 1] - start_y) ** 2
-    nearest = int(np.argmin(d2))
-    idx_ref = (nearest + int(node_offset)) % n
-    return idx_ref, float(np.sqrt(d2[nearest]))
-
-
-def _extend_track_for_autox(
-    track_data: Dict,
-    extension_m: float,
-    lead_in_m: float = 0.0,
-    ocp_lead_m: float = 0.0,
-    timing_offset_m: float = 0.0,
-    terminal_pad_m: float = 0.0,
-    start_x: float = 0.0,
-    start_y: float = 0.0,
-    start_node_offset: int = 1,
-) -> Dict:
-    """Extend a closed-loop track by wrapping points beyond the finish line.
-
-    ``s = 0`` -- and every offset measured "from s=0" below (``ocp_lead_m``,
-    ``lead_in_m``, ``timing_offset_m``) -- is anchored at ``idx_ref``: the
-    track sample nearest ``(start_x, start_y)``, stepped ``start_node_offset``
-    nodes forward (see ``_resolve_autox_start_index``). This is deliberately
-    *not* the track CSV's array index 0, which is an artifact of the
-    upstream boundary-estimation tool's row ordering and has been observed
-    to drift several metres between mapping sessions on the same physical
-    track -- anchoring on the car's real start position instead removes that
-    drift from the OCP's launch point, the lead-in, and the timing gate all
-    at once, since they all move together.
-
-    The OCP horizon itself (``positions``/``headings``/... fed to
-    ``build_ocp``) gets a forward run-off plus, if ``ocp_lead_m`` > 0,
-    ``ocp_lead_m`` metres of backward run-in before ``s=0`` (also borrowed
-    from the tail of the closed loop, since the point just "before" s=0 on a
-    closed track is, geometrically, the end of the loop). The OCP's pinned
-    launch condition then lands ``ocp_lead_m`` metres earlier, so the solver
-    optimizes the speed/steering profile through that stretch instead of it
-    being a flat hold. With ``ocp_lead_m=0`` (the normal setting now that
-    ``s=0`` sits at the car's real position) the pin lands exactly at
-    ``idx_ref``.
-
-    ``extension_m`` is measured from the *timing gate*, not from the track's
-    nominal (but physically arbitrary) ``s = autox_base_length_m`` wrap
-    point: the real timing gate sits ``timing_offset_m`` downstream of s=0,
-    and is crossed a second time one lap later at
-    ``s = autox_base_length_m + timing_offset_m`` (see
-    ``solve_ocp_and_save``'s ``autox_lap_time_s``, which measures elapsed
-    time between those two crossings). So the forward run-off appended here
-    covers ``timing_offset_m + extension_m`` metres past
-    ``s = autox_base_length_m``, guaranteeing ``extension_m`` metres of
-    horizon remain *after* the real finish line — e.g. for braking down to a
-    terminal speed once the timed lap is over.
-
-    If ``lead_in_m`` > 0, the geometry for a further lead-in stretch *before*
-    the (possibly moved-back) OCP horizon start is also computed, from the
-    same tail-of-the-loop wraparound, and returned under
-    ``"autox_lead_in"``. It is not part of the optimization: see
-    ``_splice_segment``, which stitches it onto the solved trajectory
-    afterwards as a prescribed, constant-velocity segment. Solving for it
-    jointly with the OCP would force models with rate-limited actuator states
-    (e.g. four_wheel's tire forces/steering) to hit an exact speed target
-    while ramping those actuators up from a standing start on a coarse mesh,
-    which can make the problem infeasible -- this is also the practical limit
-    on ``ocp_lead_m``: pinning that same zero-actuator launch condition too
-    far into a real corner is itself infeasible, and the solver will raise
-    accordingly.
-
-    The true single-lap length is stashed on the returned dict as
-    ``"autox_base_length_m"``, used both for the lap-time measurement above
-    and for building the post-finish untimed weighting in ``step_solve_ocp``.
-
-    If ``terminal_pad_m`` > 0, geometry for a further constant-speed pad
-    *after* the OCP horizon is also computed (from the same wraparound,
-    continuing past the run-off) and returned under
-    ``"autox_terminal_pad"``. Like ``autox_lead_in``, it is not part of the
-    optimization: see ``_splice_segment``, which stitches it onto
-    the solved trajectory at the solved terminal speed, purely as reference
-    margin in case the controller tracks a little past the solved end.
-    """
-    ds_m = float(track_data["ds_m"])
-    N_orig = len(track_data["arc_lengths"])
-    M_pts = min(max(1, round((timing_offset_m + extension_m) / ds_m)), N_orig - 1)
-    K_pts = min(max(0, round(lead_in_m / ds_m)), N_orig - 1)
-    J_pts = min(max(0, round(ocp_lead_m / ds_m)), N_orig - 1)
-    if K_pts + J_pts > N_orig - 1:
-        raise ValueError(
-            f"autox_lead_in_m + autox_ocp_lead_m ({lead_in_m:.1f} + "
-            f"{ocp_lead_m:.1f} m = {K_pts + J_pts} points) exceeds the "
-            f"track's available run-in ({N_orig - 1} points); reduce one or "
-            "both."
-        )
-
-    positions = np.array(track_data["positions"], dtype=np.float64)
-    headings = np.array(track_data["headings"], dtype=np.float64)
-    curvatures = np.array(track_data["curvatures"], dtype=np.float64)
-    curvatures_half = np.array(track_data["curvatures_half"], dtype=np.float64)
-    w_left = np.array(track_data["w_left"], dtype=np.float64)
-    w_right = np.array(track_data["w_right"], dtype=np.float64)
-
-    # Re-anchor s=0 at idx_ref (the car's real start) instead of array index
-    # 0, by rotating local copies of every per-point array. This never
-    # touches track_data itself -- the map/CSV/JSON on disk stay untouched --
-    # only this function's disposable, per-solve working copy is reordered.
-    # A circular roll preserves every adjacency relationship (including the
-    # one wrap seam), so everything below this point -- the tail-of-the-loop
-    # wraparound math, curvatures_half's inter-node midpoints, etc. -- is
-    # unchanged and operates correctly on the rotated copies.
-    idx_ref, start_snap_m = _resolve_autox_start_index(
-        positions, start_x, start_y, start_node_offset
-    )
-    if idx_ref != 0:
-        positions = np.roll(positions, -idx_ref, axis=0)
-        headings = np.roll(headings, -idx_ref, axis=0)
-        curvatures = np.roll(curvatures, -idx_ref, axis=0)
-        curvatures_half = np.roll(curvatures_half, -idx_ref, axis=0)
-        w_left = np.roll(w_left, -idx_ref, axis=0)
-        w_right = np.roll(w_right, -idx_ref, axis=0)
-    # Uniform arc-length spacing survives a circular roll exactly.
-    arc_lengths = np.arange(N_orig, dtype=np.float64) * ds_m
-
-    total_length = arc_lengths[-1] + ds_m
-
-    # Tail-of-the-loop layout, in order: [..lead_in K_pts..][..ocp_lead J_pts..][s=0..]
-    ocp_lead_start = N_orig - J_pts
-    lead_in_start = N_orig - J_pts - K_pts
-
-    extended = dict(track_data)
-    extended["positions"] = np.concatenate(
-        [positions[ocp_lead_start:], positions, positions[:M_pts]], axis=0
-    ).tolist()
-    extended["headings"] = np.concatenate(
-        [headings[ocp_lead_start:], headings, headings[:M_pts]]
-    ).tolist()
-    extended["curvatures"] = np.concatenate(
-        [curvatures[ocp_lead_start:], curvatures, curvatures[:M_pts]]
-    ).tolist()
-    extended["curvatures_half"] = np.concatenate(
-        [curvatures_half[ocp_lead_start:], curvatures_half, curvatures_half[:M_pts]]
-    ).tolist()
-    extended["arc_lengths"] = np.concatenate(
-        [
-            arc_lengths[ocp_lead_start:] - total_length,
-            arc_lengths,
-            arc_lengths[:M_pts] + total_length,
-        ]
-    ).tolist()
-    extended["w_left"] = np.concatenate([w_left[ocp_lead_start:], w_left, w_left[:M_pts]]).tolist()
-    extended["w_right"] = np.concatenate(
-        [w_right[ocp_lead_start:], w_right, w_right[:M_pts]]
-    ).tolist()
-    extended["num_points"] = N_orig + M_pts + J_pts
-    extended["total_length_m"] = float(arc_lengths[-1] + ds_m * M_pts + ds_m)
-    extended["autox_base_length_m"] = float(total_length)
-    extended["autox_idx_ref"] = int(idx_ref)
-    extended["autox_start_snap_m"] = float(start_snap_m)
-
-    if K_pts > 0:
-        extended["autox_lead_in"] = {
-            "positions": positions[lead_in_start:ocp_lead_start].tolist(),
-            "headings": headings[lead_in_start:ocp_lead_start].tolist(),
-            "curvatures": curvatures[lead_in_start:ocp_lead_start].tolist(),
-            "arc_lengths": (arc_lengths[lead_in_start:ocp_lead_start] - total_length).tolist(),
-            "w_left": w_left[lead_in_start:ocp_lead_start].tolist(),
-            "w_right": w_right[lead_in_start:ocp_lead_start].tolist(),
-        }
-
-    if terminal_pad_m > 0.0:
-        P_pts = max(1, round(terminal_pad_m / ds_m))
-        # Continue past the run-off (index M_pts in the *original* closed
-        # loop), wrapping around again if the pad is long enough to need it.
-        pad_idx = (M_pts + np.arange(P_pts)) % N_orig
-        last_arc = extended["arc_lengths"][-1]
-        extended["autox_terminal_pad"] = {
-            "positions": positions[pad_idx].tolist(),
-            "headings": headings[pad_idx].tolist(),
-            "curvatures": curvatures[pad_idx].tolist(),
-            "arc_lengths": [last_arc + ds_m * (i + 1) for i in range(P_pts)],
-            "w_left": w_left[pad_idx].tolist(),
-            "w_right": w_right[pad_idx].tolist(),
-        }
-
-    return extended
-
-
 def _splice_segment(
     sol_dict: Dict,
     segment: Dict,
@@ -677,74 +467,6 @@ def _splice_segment(
             sol_dict[mask_name] = splice(sol_dict[mask_name], [mask_value] * n)
 
     return sol_dict
-
-
-def _build_skidpad_lead_in(track_data: Dict, lead_in_m: float) -> Optional[Dict]:
-    """Geometry for a straight, prescribed run-in before the skidpad OCP's s=0.
-
-    Unlike autox (a closed loop, so the run-in has to be borrowed from the tail
-    of the lap), the skidpad centerline already starts on a straight (see
-    ``tracks/skidpad.py``), so the lead-in is just that same straight
-    extrapolated backward from node 0 by ``lead_in_m``. Requires curvature[0]
-    to be exactly 0 -- true as long as ``skidpad_start_x/y`` (if set) still
-    leaves the node before the corner's kappa-blend zone.
-    """
-    if lead_in_m <= 0.0:
-        return None
-
-    ds_m = float(track_data["ds_m"])
-    K = max(1, int(round(lead_in_m / ds_m)))
-
-    kappa0 = float(track_data["curvatures"][0])
-    if abs(kappa0) > 1e-6:
-        raise ValueError(
-            f"skidpad_lead_in_m requires the track to start on a straight "
-            f"(curvature[0]={kappa0:.4f} != 0); move skidpad_start_x/y "
-            "further from the gate or shorten the lead-in."
-        )
-
-    x0, y0 = track_data["positions"][0]
-    heading0 = float(track_data["headings"][0])
-    dir_x, dir_y = float(np.cos(heading0)), float(np.sin(heading0))
-    w_left0 = float(track_data["w_left"][0])
-    w_right0 = float(track_data["w_right"][0])
-
-    offsets = ds_m * np.arange(K, 0, -1)
-    return {
-        "positions": [[x0 - dir_x * off, y0 - dir_y * off] for off in offsets],
-        "headings": [heading0] * K,
-        "curvatures": [0.0] * K,
-        "arc_lengths": (-offsets).tolist(),
-        "w_left": [w_left0] * K,
-        "w_right": [w_right0] * K,
-    }
-
-
-def _autox_time_weights(
-    arc_lengths,
-    base_length_m: float,
-    timing_offset_m: float,
-    eps_time: float,
-    decel_hold_m: float,
-) -> np.ndarray:
-    """Per-node objective time weights for autox: full weight through the
-    timed lap, ``eps_time`` after the finish line.
-
-    Mirrors skidpad's timed/untimed masking (``step_solve_ocp``'s
-    ``mode == "skidpad"`` branch), but the "finish line" here is the timing
-    gate's second crossing, ``gate2 = base_length_m + timing_offset_m`` (see
-    ``_extend_track_for_autox``), not a track-provided mask. ``decel_hold_m``
-    keeps the heavy timed weight for that many extra metres past the gate,
-    so the terminal brake starts after crossing rather than bleeding back
-    onto the timed lap.
-    """
-    arc = np.asarray(arc_lengths, dtype=float)
-    gate2 = float(base_length_m) + float(timing_offset_m)
-    weights = np.where(arc < gate2, 1.0, float(eps_time))
-    if decel_hold_m > 0.0:
-        hold_end = gate2 + float(decel_hold_m)
-        weights = np.where((arc >= gate2) & (arc < hold_end), 1.0, weights)
-    return weights
 
 
 def _resolve_path(root: Optional[Path], p: str | Path) -> Path:
@@ -827,6 +549,7 @@ def _seed_signature_for(
     track_data: Dict,
     model: VehicleModel,
     boundary_margin: float,
+    mode: EventMode,
 ) -> Dict:
     from fast_lto.optimization.warm_start import seed_signature
 
@@ -843,19 +566,9 @@ def _seed_signature_for(
         reg_u=config.reg_u,
         reg_u_l2=config.reg_u_l2,
         initial_speed=config.initial_speed,
-        terminal_speed=config.terminal_speed,
         eps_time=config.eps_time,
         decel_hold_m=config.decel_hold_m,
-        terminal_straight_m=(
-            config.skidpad_terminal_straight_m if config.mode == "skidpad" else None
-        ),
-        terminal_state_constraint=(
-            config.autox_terminal_state_constraint if config.mode == "autox" else False
-        ),
-        terminal_window_nodes=(
-            config.autox_terminal_window_nodes if config.mode == "autox" else None
-        ),
-        D_safe_braking=(config.D_safe_braking if config.mode == "autox" else None),
+        **mode.seed_kwargs(config),
     )
 
 
@@ -908,6 +621,7 @@ def _solve_once(
     solution_path: Path,
     run_config: Optional[Dict],
     boundary_margin: float,
+    mode: EventMode,
     initial_guess: Optional[Dict] = None,
 ) -> Dict:
     return solve_ocp_and_save(
@@ -924,17 +638,8 @@ def _solve_once(
         boundary_margin=boundary_margin,
         mode=config.mode,
         time_weights=time_weights,
-        terminal_speed=(config.terminal_speed if config.mode in ("skidpad", "autox") else None),
-        autox_timing_offset_m=(config.autox_timing_offset_m if config.mode == "autox" else None),
-        terminal_straight_m=(
-            config.skidpad_terminal_straight_m if config.mode == "skidpad" else None
-        ),
-        terminal_state_constraint=(
-            config.autox_terminal_state_constraint if config.mode == "autox" else False
-        ),
-        terminal_window_nodes=config.autox_terminal_window_nodes,
-        D_safe_braking=(config.D_safe_braking if config.mode == "autox" else None),
         initial_guess=initial_guess,
+        **mode.solver_kwargs(config),
     )
 
 
@@ -956,6 +661,7 @@ def _solve_with_warm_start(
     time_weights,
     solution_path: Path,
     run_config: Dict,
+    mode: EventMode,
 ) -> Dict:
     """Solve the target problem, seeded from the store when that helps.
 
@@ -994,11 +700,12 @@ def _solve_with_warm_start(
                 solution_path,
                 run_config,
                 config.boundary_margin,
+                mode,
             )
         )
 
     seeds_root = config.solutions_dir / ws.SEEDS_DIRNAME
-    signature = _seed_signature_for(config, track_data, model, config.boundary_margin)
+    signature = _seed_signature_for(config, track_data, model, config.boundary_margin, mode)
 
     def guess_from(solution: Dict, source: str) -> Optional[Dict]:
         try:
@@ -1064,6 +771,7 @@ def _solve_with_warm_start(
                             rung_path,
                             None,
                             rung,
+                            mode,
                             initial_guess=guess,
                         )
                     except Exception as exc:  # noqa: BLE001
@@ -1080,7 +788,7 @@ def _solve_with_warm_start(
                     _save_seed_quietly(
                         ws,
                         seeds_root,
-                        _seed_signature_for(config, track_data, model, rung),
+                        _seed_signature_for(config, track_data, model, rung, mode),
                         rung_sol,
                         int(config.warm_start_max_seeds),
                     )
@@ -1100,11 +808,22 @@ def _solve_with_warm_start(
             solution_path,
             run_config,
             config.boundary_margin,
+            mode,
             initial_guess=guess,
         )
     )
     _save_seed_quietly(ws, seeds_root, signature, sol, int(config.warm_start_max_seeds))
     return sol
+
+
+def _print_mode_summary(
+    config: PipelineConfig,
+    track_data: Dict,
+    time_weights,
+) -> None:
+    """Print what the mode did to the problem, if it had anything to say."""
+    for line in get_mode(config.mode).summary(config, track_data, time_weights):
+        print(line)
 
 
 def step_solve_ocp(
@@ -1119,70 +838,10 @@ def step_solve_ocp(
 
     track_data: Dict = load_track_with_widths(track_with_widths_path)
 
-    time_weights = None
-    if config.mode == "skidpad":
-        mask = np.asarray(track_data["timed_mask"], dtype=float)
-        decel = np.asarray(track_data.get("decel_mask", np.zeros_like(mask)), dtype=float)
-        time_weights = np.where(mask > 0.5, 1.0, float(config.eps_time))
-        time_weights = np.where(decel > 0.5, 0.0, time_weights)
-        # Keep the heavy timed weight for the first `decel_hold_m` metres of the exit
-        # (from the finish gate), so the terminal brake starts after the finish line
-        # rather than bleeding back onto the last timed circle.
-        n_hold = 0
-        if config.decel_hold_m > 0.0:
-            ds_hold = float(track_data.get("ds_m", config.ds_m))
-            decel_idx = np.where(decel > 0.5)[0]
-            n_hold = min(int(round(config.decel_hold_m / ds_hold)), decel_idx.size)
-            if n_hold > 0:
-                time_weights[decel_idx[:n_hold]] = 1.0
-        print(
-            f"  Skidpad: {int(mask.sum())}/{len(mask)} timed nodes, "
-            f"{int(decel.sum())} exit (decel) nodes, "
-            f"un-timed weight eps_time={config.eps_time}, "
-            f"decel_hold={config.decel_hold_m} m ({n_hold} exit nodes held), "
-            f"terminal_speed={config.terminal_speed}"
-        )
-    elif config.mode == "autox":
-        track_data = _extend_track_for_autox(
-            track_data,
-            config.autox_extension_m,
-            config.autox_lead_in_m,
-            config.autox_ocp_lead_m,
-            timing_offset_m=config.autox_timing_offset_m,
-            terminal_pad_m=config.autox_terminal_pad_m,
-            start_x=config.autox_start_x,
-            start_y=config.autox_start_y,
-            start_node_offset=config.autox_start_node_offset,
-        )
-        print(
-            f"  Autox: extended track by {config.autox_timing_offset_m + config.autox_extension_m:.0f} m "
-            f"({track_data['num_points']} points total, OCP horizon, "
-            f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in, "
-            f"{config.autox_extension_m:.0f} m of which is post-finish run-off)"
-        )
-        print(
-            f"  Autox: start anchored at idx_ref={track_data['autox_idx_ref']} "
-            f"(snapped {track_data['autox_start_snap_m']:.2f} m from "
-            f"requested ({config.autox_start_x:.2f}, {config.autox_start_y:.2f}))"
-        )
-        time_weights = _autox_time_weights(
-            track_data["arc_lengths"],
-            track_data["autox_base_length_m"],
-            config.autox_timing_offset_m,
-            config.eps_time,
-            config.decel_hold_m,
-        )
-        n_timed = int(np.sum(time_weights >= 1.0 - 1e-9))
-        # Flows through to the solution JSON via the generic
-        # `track.get("timed_mask")` in solve_ocp_and_save (same field skidpad
-        # uses), so visualization can shade the post-finish untimed zone.
-        track_data["timed_mask"] = (time_weights >= 1.0 - 1e-9).astype(int).tolist()
-        print(
-            f"  Autox: {n_timed}/{len(time_weights)} timed nodes, "
-            f"un-timed weight eps_time={config.eps_time}, "
-            f"decel_hold={config.decel_hold_m} m, "
-            f"terminal_speed={config.terminal_speed}"
-        )
+    mode = get_mode(config.mode)
+    track_data = mode.prepare_track(track_data, config)
+    time_weights = mode.time_weights(track_data, config)
+    _print_mode_summary(config, track_data, time_weights)
 
     model = _make_model(config.model_name, vehicle_config=config.vehicle_config)
     integrator = _make_integrator(config.integrator_name)
@@ -1247,52 +906,19 @@ def step_solve_ocp(
         track_data=track_data,
         model=model,
         integrator=integrator,
+        mode=mode,
         time_weights=time_weights,
         solution_path=solution_path,
         run_config=run_config,
     )
 
-    autox_lead_in = track_data.get("autox_lead_in") if config.mode == "autox" else None
-    if autox_lead_in:
+    for plan in mode.splices(config, track_data, sol_dict):
         sol_dict = _splice_segment(
-            sol_dict, autox_lead_in, config.initial_speed, side="before", timed=1
+            sol_dict, plan.segment, plan.speed, side=plan.side, timed=plan.timed
         )
         with solution_path.open("w") as f:
             json.dump(sol_dict, f, indent=2)
-        print(
-            f"  Autox: prepended {config.autox_lead_in_m:.0f} m constant-speed "
-            f"lead-in ({len(autox_lead_in['arc_lengths'])} points, not part of the OCP solve)"
-        )
-
-    autox_terminal_pad = track_data.get("autox_terminal_pad") if config.mode == "autox" else None
-    if autox_terminal_pad:
-        v_name = "v" if "v" in sol_dict["state_names"] else "v_long"
-        pad_speed = float(sol_dict[v_name][-1])
-        sol_dict = _splice_segment(sol_dict, autox_terminal_pad, pad_speed, side="after", timed=0)
-        with solution_path.open("w") as f:
-            json.dump(sol_dict, f, indent=2)
-        print(
-            f"  Autox: appended {config.autox_terminal_pad_m:.0f} m constant-speed "
-            f"({pad_speed:.2f} m/s) terminal pad "
-            f"({len(autox_terminal_pad['arc_lengths'])} points, not part of the OCP solve)"
-        )
-
-    skidpad_lead_in = (
-        _build_skidpad_lead_in(track_data, config.skidpad_lead_in_m)
-        if config.mode == "skidpad"
-        else None
-    )
-    if skidpad_lead_in:
-        sol_dict = _splice_segment(
-            sol_dict, skidpad_lead_in, config.initial_speed, side="before", timed=0
-        )
-        with solution_path.open("w") as f:
-            json.dump(sol_dict, f, indent=2)
-        print(
-            f"  Skidpad: prepended {config.skidpad_lead_in_m:.1f} m constant-speed "
-            f"({config.initial_speed:.1f} m/s) lead-in "
-            f"({len(skidpad_lead_in['arc_lengths'])} points, not part of the OCP solve)"
-        )
+        print(plan.message)
 
     # Optional concise profiling summary (single line)
     profiling = sol_dict.get("profiling", {})

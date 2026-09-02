@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from fast_lto.modes import get_mode
 from fast_lto.optimization import warm_start as ws
 from fast_lto.utils.corridor import corridor_at, corridor_widths, critical_margin
 from fast_lto.vehicle_models import FourWheelModel
@@ -314,6 +315,7 @@ def test_warm_start_off_does_no_store_io(tmp_path, track, model, monkeypatch):
         solution_path,
         run_config,
         boundary_margin,
+        mode,
         initial_guess=None,
     ):
         solved["initial_guess"] = initial_guess
@@ -329,6 +331,7 @@ def test_warm_start_off_does_no_store_io(tmp_path, track, model, monkeypatch):
         track_data=track,
         model=model,
         integrator=None,
+        mode=get_mode(config.mode),
         time_weights=None,
         solution_path=tmp_path / "sol.json",
         run_config={},
