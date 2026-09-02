@@ -69,7 +69,7 @@ def _check_track(track_id: str, config_path: Path) -> bool:
     """Returns True if every check passed (or the track was skipped cleanly)."""
     print(f"\n=== {track_id} ===")
     rc = RunConfig.from_yaml(config_path)
-    rc.track_id = track_id
+    rc.pipeline.track_id = track_id
     try:
         rc.validate_for_model()
     except ValueError as exc:

@@ -88,7 +88,7 @@ def main():
     args = ap.parse_args()
 
     run_config = RunConfig.from_yaml(REPO / args.config)
-    run_config.track_id = args.track_id
+    run_config.pipeline.track_id = args.track_id
     run_config.validate_for_model()
     config = run_config.to_pipeline_config()
     config.__post_init__()
