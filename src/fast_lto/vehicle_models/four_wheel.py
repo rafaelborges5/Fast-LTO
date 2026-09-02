@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import casadi as ca
 
@@ -598,3 +598,87 @@ class FourWheelModel(VehicleModel):
         lb = [-1.0, -1.0, -1.0, -1.0, -1.0]
         ub = [1.0, 1.0, 1.0, 1.0, 1.0]
         return lb, ub
+
+    # ------------------------------------------------------------------ #
+    #  Diagnostics
+    # ------------------------------------------------------------------ #
+
+    def diagnostics(self, x_red: ca.MX, u: ca.MX) -> Dict[str, ca.MX]:
+        """Per-wheel loads, slip angles, forces and friction usage.
+
+        Built from the same helpers the dynamics and constraints use, so a
+        plot of these is a plot of what the solver actually saw. In particular
+        the slip angles carry the same low-speed guard: showing the unguarded
+        ones would draw a curve the optimiser never optimised.
+        """
+        del u  # this model carries every diagnostic input as a state
+        p = self.params
+        v_long = x_red[2]
+        v_lat = x_red[3]
+        yaw_rate = x_red[4]
+        Fx_fl = x_red[5]
+        Fx_fr = x_red[6]
+        Fx_rr = x_red[7]
+        Fx_rl = x_red[8]
+        delta = x_red[9]
+
+        _, F_drag, F_roll = self._aero_forces(v_long)
+
+        alpha_fl, alpha_fr, alpha_rr, alpha_rl = self._slip_angles(v_long, v_lat, yaw_rate, delta)
+        f_fl, f_fr, f_rr, f_rl = self._all_pacejka_coeffs(alpha_fl, alpha_fr, alpha_rr, alpha_rl)
+        Fz_fl, Fz_fr, Fz_rr, Fz_rl = self._compute_vertical_loads(
+            v_long, v_lat, yaw_rate, Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta
+        )
+
+        Fy_fl = -Fz_fl * f_fl
+        Fy_fr = -Fz_fr * f_fr
+        Fy_rr = -Fz_rr * f_rr
+        Fy_rl = -Fz_rl * f_rl
+
+        def _utilisation(Fx, Fy, Fz, D_key: str) -> ca.MX:
+            # Percent of the friction ellipse in use. The floor keeps the ratio
+            # finite where a wheel is momentarily unloaded.
+            cap = ca.fmax(float(p[D_key]) * Fz, 1.0)
+            return ca.sqrt(Fx**2 + Fy**2) / cap * 100.0
+
+        Fx_total, Fy_total, Mz = self._body_forces_and_moment(
+            Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta, Fy_fl, Fy_fr, Fy_rr, Fy_rl, F_drag, F_roll
+        )
+
+        # The longitudinal-force share of the yaw moment, split out so the plot
+        # can show how much of the moment is torque vectoring rather than tires.
+        l_f = float(p["lf"])
+        a_l, a_r = float(p["a_l"]), float(p["a_r"])
+        cd, sd = ca.cos(delta), ca.sin(delta)
+        Mz_Fx = (
+            Fx_fl * (-a_l * cd + l_f * sd)
+            + Fx_fr * (a_r * cd + l_f * sd)
+            + Fx_rr * a_r
+            - Fx_rl * a_l
+        )
+
+        m = float(p["m"])
+        return {
+            "alpha_fl": alpha_fl,
+            "alpha_fr": alpha_fr,
+            "alpha_rr": alpha_rr,
+            "alpha_rl": alpha_rl,
+            "Fz_fl": Fz_fl,
+            "Fz_fr": Fz_fr,
+            "Fz_rr": Fz_rr,
+            "Fz_rl": Fz_rl,
+            "Fy_fl": Fy_fl,
+            "Fy_fr": Fy_fr,
+            "Fy_rr": Fy_rr,
+            "Fy_rl": Fy_rl,
+            "util_fl": _utilisation(Fx_fl, Fy_fl, Fz_fl, "D_fl"),
+            "util_fr": _utilisation(Fx_fr, Fy_fr, Fz_fr, "D_fr"),
+            "util_rr": _utilisation(Fx_rr, Fy_rr, Fz_rr, "D_rr"),
+            "util_rl": _utilisation(Fx_rl, Fy_rl, Fz_rl, "D_rl"),
+            "F_drag": F_drag,
+            "F_roll": F_roll,
+            "Mz_Fx": Mz_Fx,
+            "Mz_total": Mz,
+            "a_long_body": Fx_total / m,
+            "a_lat_body": Fy_total / m,
+        }

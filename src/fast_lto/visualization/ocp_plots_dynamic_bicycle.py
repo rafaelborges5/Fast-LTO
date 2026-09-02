@@ -24,74 +24,6 @@ from fast_lto.visualization.ocp_plots import (
 from fast_lto.visualization.summary_panel import plot_profiling_panel
 
 
-def _pacejka_lat(alpha: np.ndarray, Fz: float, B: float, C: float, Dmf: float) -> np.ndarray:
-    # Simplified Magic Formula consistent with DynamicBicycleModel
-    return -Fz * Dmf * np.sin(C * np.arctan(B * alpha))
-
-
-def _compute_slip_and_forces(
-    *,
-    v: np.ndarray,
-    v_lat: np.ndarray,
-    yaw_rate: np.ndarray,
-    delta: np.ndarray,
-    params: Dict,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Compute (alpha_f, alpha_r, Fy_f, Fy_r) using the same formulas as the model.
-    """
-    m = float(params.get("m", 180.0))
-    g = float(params.get("g", 9.81))
-    lf = float(params.get("lf", params.get("l_f", 0.78)))
-    lr = float(params.get("lr", params.get("l_r", 0.74)))
-
-    Bf = float(params.get("Bf", params.get("B_tire_lat", 10.0)))
-    Cf = float(params.get("Cf", params.get("C_tire_lat", 1.3)))
-    Dmf_f = float(params.get("Dmf_f", params.get("D_tire_lat", 1.0)))
-    Br = float(params.get("Br", params.get("B_tire_lat", 10.0)))
-    Cr = float(params.get("Cr", params.get("C_tire_lat", 1.3)))
-    Dmf_r = float(params.get("Dmf_r", params.get("D_tire_lat", 1.0)))
-
-    v_eps = float(params.get("v_eps", 0.5))
-    v_safe = np.maximum(v, v_eps)
-
-    L = lf + lr
-    Fz_f = m * g * (lr / L)
-    Fz_r = m * g * (lf / L)
-
-    alpha_f = np.arctan((v_lat + lf * yaw_rate) / v_safe) - delta
-    alpha_r = np.arctan((v_lat - lr * yaw_rate) / v_safe)
-
-    Fy_f = _pacejka_lat(alpha_f, Fz_f, Bf, Cf, Dmf_f)
-    Fy_r = _pacejka_lat(alpha_r, Fz_r, Br, Cr, Dmf_r)
-
-    return alpha_f, alpha_r, Fy_f, Fy_r
-
-
-def _compute_a_lat_from_tires(
-    *,
-    v: np.ndarray,
-    v_lat: np.ndarray,
-    yaw_rate: np.ndarray,
-    delta: np.ndarray,
-    params: Dict,
-) -> np.ndarray:
-    """
-    Compute lateral acceleration at CG from tire forces:
-      a_lat = (Fy_f*cos(delta) + Fy_r) / m
-    using the same slip-angle + Pacejka structure as DynamicBicycleModel.
-    """
-    m = float(params.get("m", 180.0))
-    _, _, Fy_f, Fy_r = _compute_slip_and_forces(
-        v=v,
-        v_lat=v_lat,
-        yaw_rate=yaw_rate,
-        delta=delta,
-        params=params,
-    )
-    return (Fy_f * np.cos(delta) + Fy_r) / m
-
-
 def plot_tire_and_yaw_diagnostics(
     *,
     s: np.ndarray,
@@ -100,6 +32,7 @@ def plot_tire_and_yaw_diagnostics(
     yaw_rate: np.ndarray,
     delta: np.ndarray,
     params: Dict,
+    diagnostics: Dict[str, np.ndarray],
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
@@ -108,14 +41,14 @@ def plot_tire_and_yaw_diagnostics(
     1) slip angles alpha_f, alpha_r
     2) lateral tire forces Fy_f, Fy_r
     3) yaw_rate
+
+    Slip angles and tire forces come from the model (VehicleModel.diagnostics),
+    not from a second implementation of the Magic Formula living here.
     """
-    alpha_f, alpha_r, Fy_f, Fy_r = _compute_slip_and_forces(
-        v=v,
-        v_lat=v_lat,
-        yaw_rate=yaw_rate,
-        delta=delta,
-        params=params,
-    )
+    alpha_f = diagnostics["alpha_f"]
+    alpha_r = diagnostics["alpha_r"]
+    Fy_f = diagnostics["Fy_f"]
+    Fy_r = diagnostics["Fy_r"]
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 7), sharex=True)
 
@@ -314,14 +247,13 @@ def plot_all_panels_dynamic_bicycle(
     v_lat: np.ndarray,
     yaw_rate: np.ndarray,
     params: Dict,
+    diagnostics: Dict[str, np.ndarray],
     profiling: Optional[Dict] = None,
     timed_mask: Optional[np.ndarray] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
-    a_lat = _compute_a_lat_from_tires(
-        v=v, v_lat=v_lat, yaw_rate=yaw_rate, delta=delta, params=params
-    )
+    a_lat = diagnostics["a_lat_tires"]
     mu = float(params.get("mu", 1.2))
     g_val = float(params.get("g", 9.81))
     gamma = float(params.get("gamma_ellipse", 1.0))
@@ -377,6 +309,7 @@ def plot_all_panels_dynamic_bicycle(
             yaw_rate=yaw_rate,
             delta=delta,
             params=params,
+            diagnostics=diagnostics,
             out_path=out_path.parent / "tire_yaw_diagnostics.png",
             show=show,
         )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import casadi as ca
 
@@ -234,3 +234,47 @@ class DynamicBicycleModel(VehicleModel):
         lb = [float(p["a_long_min"]), -float(p["delta_max"])]
         ub = [float(p["a_long_max"]), float(p["delta_max"])]
         return lb, ub
+
+    # ------------------------------------------------------------------ #
+    #  Diagnostics
+    # ------------------------------------------------------------------ #
+
+    def diagnostics(self, x_red: ca.MX, u: ca.MX) -> Dict[str, ca.MX]:
+        """Axle slip angles, lateral forces and the resulting lateral accel.
+
+        Same guard, loads and Magic-Formula coefficients as ``get_dynamics``,
+        so the plotted tire state is the one the solver worked with. Steering
+        is an input for this model, hence it is read from ``u``.
+        """
+        p = self.params
+        v = x_red[2]
+        v_lat = x_red[3]
+        yaw_rate = x_red[4]
+        delta = u[1]
+
+        lf = float(p["lf"])
+        lr = float(p["lr"])
+        m = float(p["m"])
+
+        v_safe = _smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
+
+        alpha_f = ca.atan((v_lat + lf * yaw_rate) / v_safe) - delta
+        alpha_r = ca.atan((v_lat - lr * yaw_rate) / v_safe)
+
+        Fz_f, Fz_r = self._normal_loads()
+        Fy_f = self._pacejka_lateral_force(
+            alpha_f, Fz_f, float(p["Bf"]), float(p["Cf"]), float(p["Dmf_f"])
+        )
+        Fy_r = self._pacejka_lateral_force(
+            alpha_r, Fz_r, float(p["Br"]), float(p["Cr"]), float(p["Dmf_r"])
+        )
+
+        return {
+            "alpha_f": alpha_f,
+            "alpha_r": alpha_r,
+            "Fy_f": Fy_f,
+            "Fy_r": Fy_r,
+            "Fz_f": Fz_f + 0 * v,  # keep every entry node-shaped
+            "Fz_r": Fz_r + 0 * v,
+            "a_lat_tires": (Fy_f * ca.cos(delta) + Fy_r) / m,
+        }

@@ -11,7 +11,7 @@ state[2:] = ...  model-specific (e.g. psi_err, v, yaw_rate, ...)
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, NamedTuple, Optional, Sequence, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import casadi as ca
 import numpy as np
@@ -110,6 +110,27 @@ class VehicleModel(ABC):
         raise NotImplementedError
 
     def get_default_params(self) -> dict:
+        return {}
+
+    def diagnostics(self, x_red: ca.MX, u: ca.MX) -> Dict[str, ca.MX]:
+        """Named per-node quantities derived from the reduced state and inputs.
+
+        These are the internals a plot wants to show — tire loads, slip angles,
+        friction usage — expressed symbolically, from the same parameters and
+        the same formulae the solver used. Evaluate them over a solved
+        trajectory with
+        :func:`fast_lto.vehicle_models.diagnostics.evaluate_diagnostics`.
+
+        Exists so plotting code never has to re-derive the physics in NumPy:
+        a second implementation drifts from the first, and then the plot you
+        would use to catch the drift is the thing that drifted.
+
+        Takes the inputs as well as the state because models disagree about
+        where a quantity lives: the four-wheel model carries steering as a
+        state, the dynamic bicycle as an input.
+
+        Default: nothing. A model reports whatever it can.
+        """
         return {}
 
     def get_corner_offsets(self) -> List[CornerOffset]:

@@ -84,7 +84,11 @@ def _render_point_mass(p: PanelInputs) -> None:
 
 
 def _render_dynamic_bicycle(p: PanelInputs) -> None:
+    from fast_lto.vehicle_models.diagnostics import evaluate_diagnostics
+    from fast_lto.vehicle_models.dynamic_bicycle import DynamicBicycleModel
     from fast_lto.visualization.ocp_plots_dynamic_bicycle import plot_all_panels_dynamic_bicycle
+
+    diagnostics = evaluate_diagnostics(DynamicBicycleModel(params=dict(p.params)), p.data)
 
     plot_all_panels_dynamic_bicycle(
         p.cones_left,
@@ -100,6 +104,7 @@ def _render_dynamic_bicycle(p: PanelInputs) -> None:
         p.array("v_lat"),
         p.array("yaw_rate"),
         params=p.params,
+        diagnostics=diagnostics,
         profiling=p.profiling,
         timed_mask=p.timed_mask,
         out_path=p.out_path,
@@ -108,10 +113,16 @@ def _render_dynamic_bicycle(p: PanelInputs) -> None:
 
 
 def _render_four_wheel(p: PanelInputs) -> None:
+    from fast_lto.vehicle_models.diagnostics import evaluate_diagnostics
+    from fast_lto.vehicle_models.four_wheel import FourWheelModel
     from fast_lto.visualization.ocp_plots_four_wheel import plot_all_panels_four_wheel
 
     input_names = p.data.get("input_names", [])
     input_data = {name: p.data[name] for name in input_names if name in p.data}
+
+    # Rebuild the model from the parameters the solution was produced with, so
+    # the tire loads and slip angles plotted are the ones the solver used.
+    diagnostics = evaluate_diagnostics(FourWheelModel(params=dict(p.params)), p.data)
 
     plot_all_panels_four_wheel(
         p.cones_left,
@@ -130,6 +141,7 @@ def _render_four_wheel(p: PanelInputs) -> None:
         p.array("v_lat"),
         p.array("yaw_rate"),
         params=p.params,
+        diagnostics=diagnostics,
         profiling=p.profiling,
         input_data=input_data,
         timed_mask=p.timed_mask,
