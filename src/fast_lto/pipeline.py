@@ -26,9 +26,9 @@ from typing import Dict, List, Literal, Optional
 
 import numpy as np
 
+from fast_lto.modes import EventMode, get_mode
 from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
-from fast_lto.modes import EventMode, get_mode
 from fast_lto.splines.discretized_track import DiscretizedTrack
 from fast_lto.splines.spline_fitter import ContinuityType, fit_and_discretize
 from fast_lto.tracks.bean import generate_bean_track
@@ -47,6 +47,7 @@ from fast_lto.vehicle_models import (
     PointMassModel,
     VehicleModel,
 )
+from fast_lto.visualization.panels import render_panels
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
 WarmStartPolicy = Literal["off", "auto", "ladder"]
@@ -998,130 +999,18 @@ def step_visualize(
         return timestamp_dir
 
     boundaries = load_boundaries(csv_path)
-    cones_left = boundaries["left"]
-    cones_right = boundaries["right"]
-
-    path_xy = np.array(data["path_xy"], dtype=np.float64)
-    v = np.array(data.get("v", data.get("v_long")), dtype=np.float64)
-    s = np.array(data["arc_lengths"], dtype=np.float64)
-    d = np.array(data["d"], dtype=np.float64)
-    w_left = np.array(data["w_left"], dtype=np.float64)
-    w_right = np.array(data["w_right"], dtype=np.float64)
-    params = data.get("model_params", {})
-    profiling = data.get("profiling")
-    timed_mask = data.get("timed_mask")
 
     timestamp_dir = config.plots_dir / datetime.now().strftime("%Y%m%d-%H%M%S")
     timestamp_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_path = timestamp_dir / "panels.png"
-    if config.model_name == "point_mass":
-        from fast_lto.visualization.ocp_plots import _compute_constraint_activity, plot_all_panels
-
-        a_long = np.array(data["a_long"], dtype=np.float64)
-        a_lat = np.array(data["a_lat"], dtype=np.float64)
-
-        mu = params.get("mu", 1.2)
-        g_val = params.get("g", 9.81)
-        mu_g = mu * g_val
-
-        constraint_activity = _compute_constraint_activity(
-            d=d,
-            w_left=w_left,
-            w_right=w_right,
-            a_long=a_long,
-            a_lat=a_lat,
-            v=v,
-            params=params,
-        )
-
-        plot_all_panels(
-            cones_left,
-            cones_right,
-            path_xy,
-            v,
-            s,
-            d,
-            w_left,
-            w_right,
-            a_long,
-            a_lat,
-            mu_g,
-            profiling=profiling,
-            constraint_activity=constraint_activity,
-            timed_mask=timed_mask,
-            out_path=plot_path,
-            show=config.show_plots,
-        )
-    elif config.model_name == "dynamic_bicycle":
-        from fast_lto.visualization.ocp_plots_dynamic_bicycle import plot_all_panels_dynamic_bicycle
-
-        a_long = np.array(data["a_long"], dtype=np.float64)
-        delta = np.array(data["delta"], dtype=np.float64)
-        v_lat = np.array(data["v_lat"], dtype=np.float64)
-        yaw_rate = np.array(data["yaw_rate"], dtype=np.float64)
-
-        plot_all_panels_dynamic_bicycle(
-            cones_left,
-            cones_right,
-            path_xy,
-            v,
-            s,
-            d,
-            w_left,
-            w_right,
-            a_long,
-            delta,
-            v_lat,
-            yaw_rate,
-            params=params,
-            profiling=profiling,
-            timed_mask=timed_mask,
-            out_path=plot_path,
-            show=config.show_plots,
-        )
-    elif config.model_name == "four_wheel":
-        from fast_lto.visualization.ocp_plots_four_wheel import plot_all_panels_four_wheel
-
-        Fx_fl = np.array(data["Fx_fl"], dtype=np.float64)
-        Fx_fr = np.array(data["Fx_fr"], dtype=np.float64)
-        Fx_rr = np.array(data["Fx_rr"], dtype=np.float64)
-        Fx_rl = np.array(data["Fx_rl"], dtype=np.float64)
-        delta = np.array(data["delta"], dtype=np.float64)
-        v_lat = np.array(data["v_lat"], dtype=np.float64)
-        yaw_rate = np.array(data["yaw_rate"], dtype=np.float64)
-
-        input_names = data.get("input_names", [])
-        input_data = {name: data[name] for name in input_names if name in data}
-
-        plot_all_panels_four_wheel(
-            cones_left,
-            cones_right,
-            path_xy,
-            v,
-            s,
-            d,
-            w_left,
-            w_right,
-            Fx_fl,
-            Fx_fr,
-            Fx_rr,
-            Fx_rl,
-            delta,
-            v_lat,
-            yaw_rate,
-            params=params,
-            profiling=profiling,
-            input_data=input_data,
-            timed_mask=timed_mask,
-            out_path=plot_path,
-            show=config.show_plots,
-        )
-    else:
-        raise ValueError(
-            f"No visualization available for model_name={config.model_name!r}. "
-            "Supported: 'point_mass', 'dynamic_bicycle', 'four_wheel'."
-        )
+    render_panels(
+        config.model_name,
+        data,
+        boundaries["left"],
+        boundaries["right"],
+        out_path=timestamp_dir / "panels.png",
+        show=config.show_plots,
+    )
 
     print(f"  Saved plots to: {timestamp_dir}")
     return timestamp_dir
