@@ -482,7 +482,7 @@ def plot_bounds(
 
 def _demo() -> None:
     """Minimal runnable example for computing and visualizing bounds."""
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     track_path = repo_root / "data" / "discretized" / "fsg_random.json"
     csv_path = repo_root / "data" / "tracks" / "fsg_random.csv"
 

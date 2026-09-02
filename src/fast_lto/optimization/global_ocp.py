@@ -964,7 +964,7 @@ def solve_ocp_and_save(
 
 
 def _demo() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     track_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
     solution_out = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
     track = load_track_with_widths(track_path)

@@ -207,7 +207,7 @@ class PipelineConfig:
             )
 
         if self.repo_root is None:
-            self.repo_root = Path(__file__).resolve().parent.parent
+            self.repo_root = Path(__file__).resolve().parents[2]
         else:
             self.repo_root = Path(self.repo_root)
 

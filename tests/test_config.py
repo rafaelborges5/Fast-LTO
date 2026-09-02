@@ -15,6 +15,7 @@ from typing import List
 import pytest
 
 from fast_lto.config import RunConfig
+from fast_lto.pipeline import PipelineConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = REPO_ROOT / "configs"
@@ -25,6 +26,37 @@ def _shipped_configs() -> List[Path]:
     if not CONFIGS_DIR.is_dir():
         return []
     return sorted(CONFIGS_DIR.glob("*.yaml"))
+
+
+# ---------------------------------------------------------------------------
+# Default paths
+# ---------------------------------------------------------------------------
+
+
+def test_default_repo_root_is_the_repository_not_the_package() -> None:
+    """The repo root is derived by counting parents up from ``pipeline.py``.
+
+    That count is silently wrong the moment the module moves to a different
+    nesting depth, and every other test passes an explicit ``repo_root``, so
+    nothing else would notice. Asserted against a marker that only the real
+    repository root has.
+    """
+    root = PipelineConfig().repo_root
+
+    assert (root / "src" / "fast_lto").is_dir(), (
+        f"default repo_root {root} does not contain src/fast_lto; the parents[] "
+        "depth in PipelineConfig.__post_init__ is out of step with the layout"
+    )
+    assert (root / "pyproject.toml").is_file()
+
+
+def test_default_data_paths_hang_off_the_repo_root() -> None:
+    config = PipelineConfig(track_id="some_track")
+    root = config.repo_root
+
+    assert config.track_csv_path == root / "data" / "tracks" / "some_track.csv"
+    assert config.solutions_dir == root / "data" / "solutions"
+    assert config.discretized_dir == root / "data" / "discretized"
 
 
 # ---------------------------------------------------------------------------

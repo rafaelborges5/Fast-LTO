@@ -465,7 +465,7 @@ def debug_frenet_singularities(
 def _demo() -> None:
     import json
 
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
 
     track_with_widths_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
     csv_path = repo_root / "data" / "tracks" / "fsg_random.csv"

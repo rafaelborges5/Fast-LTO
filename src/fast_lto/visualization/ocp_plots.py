@@ -427,7 +427,7 @@ def plot_all_panels(
 
 
 def _demo() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     solution_path = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
     cones_csv = repo_root / "data" / "tracks" / "fsg_random.csv"
     timestamp_dir = repo_root / "ocp_plots" / datetime.now().strftime("%Y%m%d-%H%M%S")

@@ -60,7 +60,7 @@ DEFAULT_D_MAX = 1.50
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def d_sequence(

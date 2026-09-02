@@ -21,7 +21,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.transforms import Affine2D
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 
 # ── Racecar shape ────────────────────────────────────────────────────

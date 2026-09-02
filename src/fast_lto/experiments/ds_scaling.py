@@ -28,7 +28,7 @@ from fast_lto.pipeline import PipelineConfig, run_pipeline
 
 def _get_repo_root() -> Path:
     """Infer repository root from this file location."""
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _scaled_reg_u_l2(

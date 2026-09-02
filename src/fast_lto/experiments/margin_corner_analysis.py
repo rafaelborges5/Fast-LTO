@@ -19,7 +19,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 SOL_DIR = REPO / "data" / "experiments" / "margin_sweep_corner_v27"
 REF_SOLUTION = REPO / "data" / "solutions" / "track_boundary_maisach_four_wheel_euler.json"

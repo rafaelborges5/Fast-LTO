@@ -61,7 +61,7 @@ from fast_lto.pipeline import (  # noqa: E402
 )
 from fast_lto.vehicle_models.four_wheel import FourWheelModel  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 OUT_DIR = REPO / "data" / "experiments" / "warm_start"
 
 

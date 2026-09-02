@@ -20,7 +20,7 @@ from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_a
 from fast_lto.optimization.integrators import EulerIntegrator
 from fast_lto.vehicle_models import DynamicBicycleModel, FourWheelModel, PointMassModel
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 TRACK_PATH = REPO / "data" / "discretized" / "track_boundary_maisach_with_widths.json"
 SOLUTIONS_DIR = REPO / "data" / "experiments"
 
