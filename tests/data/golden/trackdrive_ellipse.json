@@ -1,0 +1,47 @@
+{
+  "models": {
+    "dynamic_bicycle": {
+      "N": 50,
+      "abs_d_max": 1.025067732943266,
+      "abs_d_mean": 0.6428821845274755,
+      "lap_time_s": 15.14560288404243,
+      "obj_val": 17.4623018719693,
+      "reg_term": 2.316698987926868,
+      "return_status": "Solve_Succeeded",
+      "track_length_m": 73.4836395116505,
+      "v_max": 6.102960826805136,
+      "v_min": 3.8820327977865503
+    },
+    "four_wheel": {
+      "N": 50,
+      "abs_d_max": 1.1484751429023088,
+      "abs_d_mean": 0.720843815049747,
+      "lap_time_s": 7.355049897458587,
+      "obj_val": 9.545223878292402,
+      "reg_term": 2.1901739808338156,
+      "return_status": "Solve_Succeeded",
+      "track_length_m": 73.4836395116505,
+      "v_max": 10.26108080203654,
+      "v_min": 9.554296687605044
+    },
+    "point_mass": {
+      "N": 50,
+      "abs_d_max": 1.1256891436381171,
+      "abs_d_mean": 0.6709539448841995,
+      "lap_time_s": 13.165608331108935,
+      "obj_val": 16.45701034980206,
+      "reg_term": 3.2914020186931268,
+      "return_status": "Solve_Succeeded",
+      "track_length_m": 73.4836395116505,
+      "v_max": 7.271114508373868,
+      "v_min": 4.433554171930425
+    }
+  },
+  "track": {
+    "continuity": "C2",
+    "ds_m": 1.5,
+    "integrator_name": "euler",
+    "mode": "trackdrive",
+    "track_type": "ellipse"
+  }
+}
