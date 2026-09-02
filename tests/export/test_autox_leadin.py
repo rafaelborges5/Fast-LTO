@@ -1,12 +1,12 @@
 """Regression test for the autox lead-in curvature export (four_wheel).
 
-Guards the fix in ``_prepend_autox_lead_in``: the prescribed constant-speed
+Guards the autox lead-in fill in ``_splice_segment``: the prescribed constant-speed
 lead-in is borrowed from the (curved) tail of the closed loop, so its exported
 reference curvature must reflect that geometry instead of being zeroed out. The
 exporter derives ``kappa = yaw_rate / v_path``, so the fill sets
 ``yaw_rate = kappa * initial_speed`` over the lead-in.
 
-``_prepend_autox_lead_in`` lives in ``pipeline`` whose import chain pulls in the
+``_splice_segment`` lives in ``pipeline`` whose import chain pulls in the
 OCP solver (casadi); this test only needs the pure stitching function, so it is
 skipped where casadi is unavailable. The exporter itself has no such dependency.
 """
@@ -98,11 +98,11 @@ def _four_wheel_solution(tail_xy, tail_heading, ds: float, v0: float, n: int):
 
 
 def test_leadin_kappa_matches_path_geometry(tmp_path):
-    # ``_prepend_autox_lead_in`` lives in ``pipeline`` whose import chain pulls in
+    # ``_splice_segment`` lives in ``pipeline`` whose import chain pulls in
     # the OCP solver (casadi). Import lazily so this module still collects where
     # casadi is unavailable; the exporter itself has no such dependency.
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
-    from fast_lto.pipeline import _prepend_autox_lead_in
+    from fast_lto.pipeline import _splice_segment
 
     k0, ds, v0, K, N = 0.12, 0.5, 3.0, 10, 4
 
@@ -111,7 +111,7 @@ def test_leadin_kappa_matches_path_geometry(tmp_path):
     tail_heading = lead_in["headings"][-1]
     sol = _four_wheel_solution(tail_xy, tail_heading, ds, v0, N)
 
-    sol = _prepend_autox_lead_in(sol, lead_in, v0)
+    sol = _splice_segment(sol, lead_in, v0, side="before", timed=1)
 
     json_path = tmp_path / "solution.json"
     csv_path = tmp_path / "reference.csv"

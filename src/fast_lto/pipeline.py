@@ -476,7 +476,7 @@ def _extend_track_for_autox(
     the (possibly moved-back) OCP horizon start is also computed, from the
     same tail-of-the-loop wraparound, and returned under
     ``"autox_lead_in"``. It is not part of the optimization: see
-    ``_prepend_autox_lead_in``, which stitches it onto the solved trajectory
+    ``_splice_segment``, which stitches it onto the solved trajectory
     afterwards as a prescribed, constant-velocity segment. Solving for it
     jointly with the OCP would force models with rate-limited actuator states
     (e.g. four_wheel's tire forces/steering) to hit an exact speed target
@@ -494,7 +494,7 @@ def _extend_track_for_autox(
     *after* the OCP horizon is also computed (from the same wraparound,
     continuing past the run-off) and returned under
     ``"autox_terminal_pad"``. Like ``autox_lead_in``, it is not part of the
-    optimization: see ``_append_autox_terminal_pad``, which stitches it onto
+    optimization: see ``_splice_segment``, which stitches it onto
     the solved trajectory at the solved terminal speed, purely as reference
     margin in case the controller tracks a little past the solved end.
     """
@@ -603,100 +603,78 @@ def _extend_track_for_autox(
     return extended
 
 
-def _prepend_autox_lead_in(sol_dict: Dict, lead_in: Dict, initial_speed: float) -> Dict:
-    """Stitch a prescribed, constant-velocity lead-in onto a solved autox trajectory.
+def _splice_segment(
+    sol_dict: Dict,
+    segment: Dict,
+    speed: float,
+    *,
+    side: Literal["before", "after"],
+    timed: int,
+) -> Dict:
+    """Stitch a prescribed, constant-speed segment onto a solved trajectory.
 
-    The lead-in is not part of the OCP: it's a constant-speed run along the
-    centerline at exactly ``initial_speed``, giving the physical car a
-    stretch of track before the true start/finish line.
+    Used for all three pieces that sit outside the OCP horizon: the autox
+    lead-in, the autox terminal pad and the skidpad lead-in. None of them is
+    optimized -- each is a constant-speed run along the centerline that gives
+    the physical car track before the start line, or reference margin past the
+    solved end in case the controller tracks a little further than planned.
 
-    The lead-in geometry is borrowed from the tail of the closed loop, so it
-    genuinely curves. The exporter derives the reference curvature from the
-    ``yaw_rate`` state (``kappa = yaw_rate / v_path``), so we set
-    ``yaw_rate = kappa * initial_speed`` from the borrowed centerline
-    curvature rather than zero-filling it -- otherwise the first few metres
-    would export as straight while the path bends (up to ~0.26 1/m), feeding
-    the tracker a wrong curvature reference at launch. Speed is held at
-    ``initial_speed``; the remaining dynamic states (tire forces, steering,
-    ...) stay at rest -- the tracker consumes speed, lateral deviation and
-    curvature, none of which depend on them.
+    ``yaw_rate`` is filled as ``kappa * speed`` from the segment's own
+    curvature rather than zero-filled: the exporter derives the reference
+    curvature back out of it (``kappa = yaw_rate / v_path``), so zeros would
+    export a curving lead-in as straight (up to ~0.26 1/m on a real track) and
+    hand the tracker a wrong curvature reference at launch. On a straight
+    segment the same rule gives exactly zero, so the skidpad lead-in needs no
+    special case. Speed is held at ``speed``; the remaining dynamic states
+    (tire forces, steering, ...) stay at rest -- the tracker consumes speed,
+    lateral deviation and curvature, none of which depend on them.
+
+    Parameters
+    ----------
+    side:
+        ``"before"`` prepends the segment (a lead-in), ``"after"`` appends it
+        (a terminal pad).
+    timed:
+        Value to extend ``timed_mask`` with. The autox lead-in is ``1``: it
+        sits before the timing gate, and under ``_autox_time_weights`` only the
+        post-finish tail is untimed. The autox pad and the skidpad lead-in are
+        ``0``. ``decel_mask``, where present, is always extended with ``0`` --
+        no prescribed segment is a braking zone.
     """
-    K = len(lead_in["arc_lengths"])
-    positions = lead_in["positions"]
-    curvatures = lead_in["curvatures"]
+    n = len(segment["arc_lengths"])
 
-    sol_dict["path_xy"] = positions + list(sol_dict["path_xy"])
-    sol_dict["arc_lengths"] = lead_in["arc_lengths"] + list(sol_dict["arc_lengths"])
-    sol_dict["w_left"] = lead_in["w_left"] + list(sol_dict["w_left"])
-    sol_dict["w_right"] = lead_in["w_right"] + list(sol_dict["w_right"])
-    sol_dict["kappa"] = curvatures + list(sol_dict["kappa"])
-    sol_dict["headings"] = lead_in["headings"] + list(sol_dict["headings"])
+    def splice(existing, addition):
+        if side == "before":
+            return list(addition) + list(existing)
+        return list(existing) + list(addition)
 
-    # yaw_rate = kappa * v so the exporter recovers the true lead-in curvature.
-    yaw_rate_lead_in = [float(k) * float(initial_speed) for k in curvatures]
+    for sol_key, segment_key in (
+        ("path_xy", "positions"),
+        ("arc_lengths", "arc_lengths"),
+        ("w_left", "w_left"),
+        ("w_right", "w_right"),
+        ("kappa", "curvatures"),
+        ("headings", "headings"),
+    ):
+        sol_dict[sol_key] = splice(sol_dict[sol_key], segment[segment_key])
+
+    yaw_rate_fill = [float(k) * float(speed) for k in segment["curvatures"]]
 
     for name in sol_dict["state_names"]:
         if name in ("v", "v_long"):
-            fill = [float(initial_speed)] * K
+            fill = [float(speed)] * n
         elif name == "yaw_rate":
-            fill = yaw_rate_lead_in
+            fill = yaw_rate_fill
         else:
-            fill = [0.0] * K
-        sol_dict[name] = fill + list(sol_dict[name])
+            fill = [0.0] * n
+        sol_dict[name] = splice(sol_dict[name], fill)
 
     for name in sol_dict["input_names"]:
-        sol_dict[name] = [0.0] * K + list(sol_dict[name])
+        sol_dict[name] = splice(sol_dict[name], [0.0] * n)
 
-    if sol_dict.get("timed_mask") is not None:
-        # Lead-in sits before the timing gate, so it counts as "timed" under
-        # the same convention as the rest of the run-up (see
-        # _autox_time_weights): only the post-finish tail is untimed.
-        sol_dict["timed_mask"] = [1] * K + list(sol_dict["timed_mask"])
-
-    return sol_dict
-
-
-def _append_autox_terminal_pad(sol_dict: Dict, pad: Dict, speed: float) -> Dict:
-    """Stitch a prescribed, constant-speed pad onto the tail of a solved autox
-    trajectory (mirrors ``_prepend_autox_lead_in``, appended instead of
-    prepended). Not part of the OCP -- pure reference margin in case the
-    controller tracks a little past the solved horizon. Held on the
-    centerline at ``speed`` (the actual solved terminal speed, not the
-    ``terminal_speed`` target), with yaw_rate set from the borrowed
-    centerline curvature so the exported reference curvature is consistent,
-    same as the lead-in.
-    """
-    P = len(pad["arc_lengths"])
-    curvatures = pad["curvatures"]
-
-    sol_dict["path_xy"] = list(sol_dict["path_xy"]) + pad["positions"]
-    sol_dict["arc_lengths"] = list(sol_dict["arc_lengths"]) + pad["arc_lengths"]
-    sol_dict["w_left"] = list(sol_dict["w_left"]) + pad["w_left"]
-    sol_dict["w_right"] = list(sol_dict["w_right"]) + pad["w_right"]
-    sol_dict["kappa"] = list(sol_dict["kappa"]) + curvatures
-    sol_dict["headings"] = list(sol_dict["headings"]) + pad["headings"]
-
-    # yaw_rate = kappa * v so the exporter recovers the true pad curvature.
-    yaw_rate_pad = [float(k) * float(speed) for k in curvatures]
-
-    for name in sol_dict["state_names"]:
-        if name in ("v", "v_long"):
-            fill = [float(speed)] * P
-        elif name == "yaw_rate":
-            fill = yaw_rate_pad
-        else:
-            fill = [0.0] * P
-        sol_dict[name] = list(sol_dict[name]) + fill
-
-    for name in sol_dict["input_names"]:
-        sol_dict[name] = list(sol_dict[name]) + [0.0] * P
-
-    # Pad sits after the finish, same as the rest of the untimed tail it
-    # extends, so it stays untimed under the existing mask.
-    if sol_dict.get("timed_mask") is not None:
-        sol_dict["timed_mask"] = list(sol_dict["timed_mask"]) + [0] * P
-    if sol_dict.get("decel_mask") is not None:
-        sol_dict["decel_mask"] = list(sol_dict["decel_mask"]) + [0] * P
+    for mask_name, mask_value in (("timed_mask", timed), ("decel_mask", 0)):
+        if sol_dict.get(mask_name) is not None:
+            sol_dict[mask_name] = splice(sol_dict[mask_name], [mask_value] * n)
 
     return sol_dict
 
@@ -740,38 +718,6 @@ def _build_skidpad_lead_in(track_data: Dict, lead_in_m: float) -> Optional[Dict]
         "w_left": [w_left0] * K,
         "w_right": [w_right0] * K,
     }
-
-
-def _prepend_skidpad_lead_in(sol_dict: Dict, lead_in: Dict, speed: float) -> Dict:
-    """Stitch a prescribed, constant-speed straight lead-in onto a solved
-    skidpad trajectory (mirrors ``_prepend_autox_lead_in``). Simpler than the
-    autox version since the lead-in is a straight line: curvature and
-    yaw_rate are exactly zero throughout, not just held at launch.
-    """
-    K = len(lead_in["arc_lengths"])
-
-    sol_dict["path_xy"] = lead_in["positions"] + list(sol_dict["path_xy"])
-    sol_dict["arc_lengths"] = lead_in["arc_lengths"] + list(sol_dict["arc_lengths"])
-    sol_dict["w_left"] = lead_in["w_left"] + list(sol_dict["w_left"])
-    sol_dict["w_right"] = lead_in["w_right"] + list(sol_dict["w_right"])
-    sol_dict["kappa"] = lead_in["curvatures"] + list(sol_dict["kappa"])
-    sol_dict["headings"] = lead_in["headings"] + list(sol_dict["headings"])
-
-    for name in sol_dict["state_names"]:
-        fill = [float(speed)] * K if name in ("v", "v_long") else [0.0] * K
-        sol_dict[name] = fill + list(sol_dict[name])
-
-    for name in sol_dict["input_names"]:
-        sol_dict[name] = [0.0] * K + list(sol_dict[name])
-
-    # Lead-in sits before the gate, same as the rest of the entry straight it
-    # extends, so it stays untimed/decel-free under the existing masks.
-    if sol_dict.get("timed_mask") is not None:
-        sol_dict["timed_mask"] = [0] * K + list(sol_dict["timed_mask"])
-    if sol_dict.get("decel_mask") is not None:
-        sol_dict["decel_mask"] = [0] * K + list(sol_dict["decel_mask"])
-
-    return sol_dict
 
 
 def _autox_time_weights(
@@ -1308,7 +1254,9 @@ def step_solve_ocp(
 
     autox_lead_in = track_data.get("autox_lead_in") if config.mode == "autox" else None
     if autox_lead_in:
-        sol_dict = _prepend_autox_lead_in(sol_dict, autox_lead_in, config.initial_speed)
+        sol_dict = _splice_segment(
+            sol_dict, autox_lead_in, config.initial_speed, side="before", timed=1
+        )
         with solution_path.open("w") as f:
             json.dump(sol_dict, f, indent=2)
         print(
@@ -1320,7 +1268,7 @@ def step_solve_ocp(
     if autox_terminal_pad:
         v_name = "v" if "v" in sol_dict["state_names"] else "v_long"
         pad_speed = float(sol_dict[v_name][-1])
-        sol_dict = _append_autox_terminal_pad(sol_dict, autox_terminal_pad, pad_speed)
+        sol_dict = _splice_segment(sol_dict, autox_terminal_pad, pad_speed, side="after", timed=0)
         with solution_path.open("w") as f:
             json.dump(sol_dict, f, indent=2)
         print(
@@ -1335,7 +1283,9 @@ def step_solve_ocp(
         else None
     )
     if skidpad_lead_in:
-        sol_dict = _prepend_skidpad_lead_in(sol_dict, skidpad_lead_in, config.initial_speed)
+        sol_dict = _splice_segment(
+            sol_dict, skidpad_lead_in, config.initial_speed, side="before", timed=0
+        )
         with solution_path.open("w") as f:
             json.dump(sol_dict, f, indent=2)
         print(
