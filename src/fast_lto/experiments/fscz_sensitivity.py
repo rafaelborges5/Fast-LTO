@@ -316,8 +316,8 @@ def _tornado_plot(
     y = np.arange(len(labels))
 
     fig, ax = plt.subplots(figsize=(10, 0.7 * len(labels) + 2))
-    for yi, l, h in zip(y, lo, hi):
-        ax.plot([l, h], [yi, yi], color="0.7", lw=2, zorder=1)
+    for yi, lo_i, hi_i in zip(y, lo, hi):
+        ax.plot([lo_i, hi_i], [yi, yi], color="0.7", lw=2, zorder=1)
     ax.scatter(lo, y, color="tab:blue", zorder=3, label=f"-{delta*100:.0f}%")
     ax.scatter(hi, y, color="tab:red", zorder=3, label=f"+{delta*100:.0f}%")
     for yi, d in zip(y, summary):

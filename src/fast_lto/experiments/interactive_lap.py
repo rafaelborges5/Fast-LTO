@@ -25,7 +25,6 @@ def _compute_derived(sol, params):
     s = np.array(sol["arc_lengths"])
     path_xy = np.array(sol["path_xy"])
     v = np.array(sol.get("v", sol.get("v_long")))
-    headings = np.array(sol["headings"])
     psi_err = np.array(sol["psi_err"])
     d = np.array(sol["d"])
     kappa = np.array(sol["kappa"])
@@ -500,11 +499,6 @@ def build_interactive(solution_path, output_path, track_csv=None):
     cursor_traces = []
     strip_positions = [(2, 1), (2, 2), (3, 1), (3, 2), (4, 1), (4, 2), (5, 1), (5, 2)]
     for r, c in strip_positions:
-        yaxis_range = (
-            fig.get_subplot(r, c).yaxis.range
-            if hasattr(fig.get_subplot(r, c).yaxis, "range")
-            else None
-        )
         trace = go.Scatter(
             x=[D["s"][0], D["s"][0]],
             y=[-1e6, 1e6],
@@ -532,9 +526,6 @@ def build_interactive(solution_path, output_path, track_csv=None):
     steps = []
     for i in slider_indices:
         # Build update args: move car marker + cursor lines
-        updates_x = [[D["x"][i]]]
-        updates_y = [[D["y"][i]]]
-
         args = {
             "x": [[D["x"][i]]] + [[D["s"][i], D["s"][i]]] * len(cursor_traces),
             "y": [[D["y"][i]]] + [[-1e6, 1e6]] * len(cursor_traces),

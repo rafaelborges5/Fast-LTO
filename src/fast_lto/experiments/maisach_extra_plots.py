@@ -111,15 +111,6 @@ def plot_steering_rate():
 
 def plot_trajectory_comparison_clean():
     """Plot 4: Clean trajectory-only comparison (no boundary scatter)."""
-    from fast_lto.utils.track_bounds import load_boundaries
-
-    csv_path = REPO / "data" / "tracks" / "track_boundary_maisach.csv"
-    bd = load_boundaries(csv_path)
-
-    # Build boundary polygons as smooth lines
-    left_xy = bd["left"]
-    right_xy = bd["right"]
-
     fig, axes = plt.subplots(1, 2, figsize=(16, 7))
 
     # Load all solutions

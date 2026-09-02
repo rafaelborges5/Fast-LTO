@@ -109,7 +109,6 @@ def main():
                 fontsize=9,
                 color="tab:orange",
             )
-    base = warm[0] if warm else cold[0]
     a.set_xlabel("boundary_margin [m]")
     a.set_ylabel("autox lap time [s]")
     a.set_title("lap time vs margin")

@@ -163,7 +163,6 @@ def _compute_lateral_bounds_rays(
     misses_left = 0
     misses_right = 0
 
-    tangents = np.column_stack((np.cos(track.headings), np.sin(track.headings)))
     normals = np.column_stack((-np.sin(track.headings), np.cos(track.headings)))
 
     for i in range(n_samples):

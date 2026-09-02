@@ -63,7 +63,7 @@ class PointMassModel(VehicleModel):
         """
         x_dot = f(x, u, kappa)
         """
-        s = states[0]
+        _s = states[0]
         d = states[1]
         psi_err = states[2]
         v = states[3]
@@ -99,7 +99,6 @@ class PointMassModel(VehicleModel):
         """
         a_long = inputs[0]
         a_lat = inputs[1]
-        v = states[3]
 
         p = self.params
         mu_g = p["mu"] * p["g"]

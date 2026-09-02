@@ -35,7 +35,7 @@ def plot_path_with_speed(
     sc = ax.scatter(
         path_xy[:, 0], path_xy[:, 1], c=v, cmap="viridis", s=8, label="path (v-colored)"
     )
-    cbar = plt.colorbar(sc, ax=ax, label="speed [m/s]")
+    plt.colorbar(sc, ax=ax, label="speed [m/s]")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, linestyle="--", alpha=0.4)
     # Place legend below the plot to avoid overlap with path or colorbar.
@@ -453,8 +453,6 @@ def _demo() -> None:
     mu = params.get("mu", 1.2)
     g_val = params.get("g", 9.81)
     mu_g = mu * g_val
-    a_long_bounds = (params.get("a_long_min", -np.inf), params.get("a_long_max", np.inf))
-    a_lat_bounds = (params.get("a_lat_min", -np.inf), params.get("a_lat_max", np.inf))
 
     profiling = data.get("profiling")
     constraint_activity = _compute_constraint_activity(

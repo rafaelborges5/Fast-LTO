@@ -61,9 +61,6 @@ def _compute_four_wheel_forces(
     C_r = float(params.get("C_r", 0.15))
     A_f = float(params.get("A_f", 1.2))
 
-    slip_eps = float(params.get("slip_vx_eps", 0.2))
-    v_safe = np.maximum(np.abs(v), 0.5)
-
     # Static loads
     Fw_fl = m * g * (l_r / L) * (a_r / W)
     Fw_fr = m * g * (l_r / L) * (a_l / W)
