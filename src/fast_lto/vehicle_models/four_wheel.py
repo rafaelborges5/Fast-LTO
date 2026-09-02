@@ -47,10 +47,18 @@ class FourWheelModel(VehicleModel):
             "C_r": 0.15,
             "A_f": 1.2,
             # Per-wheel Pacejka tire params
-            "B_fl": 9.0, "C_fl": 1.3, "D_fl": 1.4,
-            "B_fr": 9.0, "C_fr": 1.3, "D_fr": 1.4,
-            "B_rr": 9.0, "C_rr": 1.3, "D_rr": 1.4,
-            "B_rl": 9.0, "C_rl": 1.3, "D_rl": 1.4,
+            "B_fl": 9.0,
+            "C_fl": 1.3,
+            "D_fl": 1.4,
+            "B_fr": 9.0,
+            "C_fr": 1.3,
+            "D_fr": 1.4,
+            "B_rr": 9.0,
+            "C_rr": 1.3,
+            "D_rr": 1.4,
+            "B_rl": 9.0,
+            "C_rl": 1.3,
+            "D_rl": 1.4,
             # Actuator rate limits (physical)
             "dFxmax": 1000.0,
             "ddeltamax": 1.3,
@@ -88,14 +96,25 @@ class FourWheelModel(VehicleModel):
 
     def get_state_names(self) -> List[str]:
         return [
-            "s", "d", "psi_err", "v_long", "v_lat", "yaw_rate",
-            "Fx_fl", "Fx_fr", "Fx_rr", "Fx_rl", "delta",
+            "s",
+            "d",
+            "psi_err",
+            "v_long",
+            "v_lat",
+            "yaw_rate",
+            "Fx_fl",
+            "Fx_fr",
+            "Fx_rr",
+            "Fx_rl",
+            "delta",
         ]
 
     def get_input_names(self) -> List[str]:
         return [
-            "Fx_fl_dot_norm", "Fx_fr_dot_norm",
-            "Fx_rr_dot_norm", "Fx_rl_dot_norm",
+            "Fx_fl_dot_norm",
+            "Fx_fr_dot_norm",
+            "Fx_rr_dot_norm",
+            "Fx_rl_dot_norm",
             "delta_dot_norm",
         ]
 
@@ -176,8 +195,15 @@ class FourWheelModel(VehicleModel):
         return Fw_fl, Fw_fr, Fw_rr, Fw_rl
 
     def _compute_vertical_loads(
-        self, v_long, v_lat, yaw_rate,
-        Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
+        self,
+        v_long,
+        v_lat,
+        yaw_rate,
+        Fx_fl,
+        Fx_fr,
+        Fx_rr,
+        Fx_rl,
+        delta,
     ):
         mode = self.params.get("load_transfer_mode", "static")
 
@@ -208,10 +234,16 @@ class FourWheelModel(VehicleModel):
         h2 = 0.5 * h / W
 
         alpha_fl, alpha_fr, alpha_rr, alpha_rl = self._slip_angles(
-            v_long, v_lat, yaw_rate, delta,
+            v_long,
+            v_lat,
+            yaw_rate,
+            delta,
         )
         f_fl, f_fr, f_rr, f_rl = self._all_pacejka_coeffs(
-            alpha_fl, alpha_fr, alpha_rr, alpha_rl,
+            alpha_fl,
+            alpha_fr,
+            alpha_rr,
+            alpha_rl,
         )
 
         _, F_drag, F_roll = self._aero_forces(v_long)
@@ -267,9 +299,17 @@ class FourWheelModel(VehicleModel):
 
     def _body_forces_and_moment(
         self,
-        Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
-        Fy_fl, Fy_fr, Fy_rr, Fy_rl,
-        F_drag, F_roll,
+        Fx_fl,
+        Fx_fr,
+        Fx_rr,
+        Fx_rl,
+        delta,
+        Fy_fl,
+        Fy_fr,
+        Fy_rr,
+        Fy_rl,
+        F_drag,
+        F_roll,
     ):
         p = self.params
         l_f = float(p["lf"])
@@ -280,26 +320,19 @@ class FourWheelModel(VehicleModel):
         cd = ca.cos(delta)
         sd = ca.sin(delta)
 
-        Fx_total = (
-            (Fx_fl + Fx_fr) * cd
-            - (Fy_fl + Fy_fr) * sd
-            + Fx_rr + Fx_rl
-            - F_roll - F_drag
-        )
+        Fx_total = (Fx_fl + Fx_fr) * cd - (Fy_fl + Fy_fr) * sd + Fx_rr + Fx_rl - F_roll - F_drag
 
-        Fy_total = (
-            (Fx_fl + Fx_fr) * sd
-            + (Fy_fl + Fy_fr) * cd
-            + Fy_rr + Fy_rl
-        )
+        Fy_total = (Fx_fl + Fx_fr) * sd + (Fy_fl + Fy_fr) * cd + Fy_rr + Fy_rl
 
         Mz = (
             Fx_fl * (-a_l * cd + l_f * sd)
             + Fy_fl * (l_f * cd + a_l * sd)
             + Fx_fr * (a_r * cd + l_f * sd)
             + Fy_fr * (l_f * cd - a_r * sd)
-            + Fx_rr * a_r - Fy_rr * l_r
-            - Fx_rl * a_l - Fy_rl * l_r
+            + Fx_rr * a_r
+            - Fy_rr * l_r
+            - Fx_rl * a_l
+            - Fy_rl * l_r
         )
 
         return Fx_total, Fy_total, Mz
@@ -345,16 +378,28 @@ class FourWheelModel(VehicleModel):
 
         # Vertical loads
         Fz_fl, Fz_fr, Fz_rr, Fz_rl = self._compute_vertical_loads(
-            v_long, v_lat, yaw_rate,
-            Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
+            v_long,
+            v_lat,
+            yaw_rate,
+            Fx_fl,
+            Fx_fr,
+            Fx_rr,
+            Fx_rl,
+            delta,
         )
 
         # Slip angles & lateral forces
         alpha_fl, alpha_fr, alpha_rr, alpha_rl = self._slip_angles(
-            v_long, v_lat, yaw_rate, delta,
+            v_long,
+            v_lat,
+            yaw_rate,
+            delta,
         )
         f_fl, f_fr, f_rr, f_rl = self._all_pacejka_coeffs(
-            alpha_fl, alpha_fr, alpha_rr, alpha_rl,
+            alpha_fl,
+            alpha_fr,
+            alpha_rr,
+            alpha_rl,
         )
         Fy_fl = -Fz_fl * f_fl
         Fy_fr = -Fz_fr * f_fr
@@ -366,9 +411,17 @@ class FourWheelModel(VehicleModel):
 
         # Body forces and moment
         Fx_total, Fy_total, Mz = self._body_forces_and_moment(
-            Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
-            Fy_fl, Fy_fr, Fy_rr, Fy_rl,
-            F_drag, F_roll,
+            Fx_fl,
+            Fx_fr,
+            Fx_rr,
+            Fx_rl,
+            delta,
+            Fy_fl,
+            Fy_fr,
+            Fy_rr,
+            Fy_rl,
+            F_drag,
+            F_roll,
         )
 
         # Vehicle dynamics
@@ -387,9 +440,16 @@ class FourWheelModel(VehicleModel):
         delta_dot = delta_dot_n * ddeltamax
 
         return ca.vertcat(
-            s_dot, d_dot, psi_err_dot,
-            v_long_dot, v_lat_dot, yaw_rate_dot,
-            Fx_fl_dot, Fx_fr_dot, Fx_rr_dot, Fx_rl_dot,
+            s_dot,
+            d_dot,
+            psi_err_dot,
+            v_long_dot,
+            v_lat_dot,
+            yaw_rate_dot,
+            Fx_fl_dot,
+            Fx_fr_dot,
+            Fx_rr_dot,
+            Fx_rl_dot,
             delta_dot,
         )
 
@@ -428,15 +488,27 @@ class FourWheelModel(VehicleModel):
 
         # Per-wheel friction circles
         Fz_fl, Fz_fr, Fz_rr, Fz_rl = self._compute_vertical_loads(
-            v_long, v_lat, yaw_rate,
-            Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
+            v_long,
+            v_lat,
+            yaw_rate,
+            Fx_fl,
+            Fx_fr,
+            Fx_rr,
+            Fx_rl,
+            delta,
         )
 
         alpha_fl, alpha_fr, alpha_rr, alpha_rl = self._slip_angles(
-            v_long, v_lat, yaw_rate, delta,
+            v_long,
+            v_lat,
+            yaw_rate,
+            delta,
         )
         f_fl, f_fr, f_rr, f_rl = self._all_pacejka_coeffs(
-            alpha_fl, alpha_fr, alpha_rr, alpha_rl,
+            alpha_fl,
+            alpha_fr,
+            alpha_rr,
+            alpha_rl,
         )
         Fy_fl = -Fz_fl * f_fl
         Fy_fr = -Fz_fr * f_fr
@@ -460,9 +532,17 @@ class FourWheelModel(VehicleModel):
         if a_long_max is not None or a_lat_max is not None:
             _, F_drag, F_roll = self._aero_forces(v_long)
             Fx_total, Fy_total, _ = self._body_forces_and_moment(
-                Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
-                Fy_fl, Fy_fr, Fy_rr, Fy_rl,
-                F_drag, F_roll,
+                Fx_fl,
+                Fx_fr,
+                Fx_rr,
+                Fx_rl,
+                delta,
+                Fy_fl,
+                Fy_fr,
+                Fy_rr,
+                Fy_rl,
+                F_drag,
+                F_roll,
             )
             m = float(p["m"])
             if a_long_max is not None and a_lat_max is not None:
@@ -472,13 +552,9 @@ class FourWheelModel(VehicleModel):
                     - 1
                 )
             elif a_long_max is not None:
-                g_list.append(
-                    (Fx_total / (m * float(a_long_max))) ** 2 - 1
-                )
+                g_list.append((Fx_total / (m * float(a_long_max))) ** 2 - 1)
             else:
-                g_list.append(
-                    (Fy_total / (m * float(a_lat_max))) ** 2 - 1
-                )
+                g_list.append((Fy_total / (m * float(a_lat_max))) ** 2 - 1)
 
         return g_list
 
@@ -497,7 +573,10 @@ class FourWheelModel(VehicleModel):
             float(p["v_min"]),
             -float(p["v_lat_max"]),
             -float(p["yaw_rate_max"]),
-            -Fx_max, -Fx_max, -Fx_max, -Fx_max,
+            -Fx_max,
+            -Fx_max,
+            -Fx_max,
+            -Fx_max,
             -delta_max,
         ]
         ub = [
@@ -507,7 +586,10 @@ class FourWheelModel(VehicleModel):
             float(p["v_max"]),
             float(p["v_lat_max"]),
             float(p["yaw_rate_max"]),
-            Fx_max, Fx_max, Fx_max, Fx_max,
+            Fx_max,
+            Fx_max,
+            Fx_max,
+            Fx_max,
             delta_max,
         ]
         return lb, ub

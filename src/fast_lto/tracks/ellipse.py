@@ -31,7 +31,6 @@ from typing import Dict, Literal, Tuple
 
 import numpy as np
 
-
 BoundaryName = Literal["left", "middle", "right"]
 
 
@@ -41,7 +40,9 @@ class EllipseTrackConfig:
     track_width_m: float = 3.5  # cone-to-cone width; widen to loosen the optimal line (m)
     nominal_spacing_m: float = 4.0  # target point spacing along midline for discretisation (m)
     aspect_ratio: float = 0.6  # a/b ratio (<1 squashes in x, >1 stretches in x)
-    integration_points: int = 5000  # resolution for arc-length integration; higher = smoother, slower
+    integration_points: int = (
+        5000  # resolution for arc-length integration; higher = smoother, slower
+    )
     rotation_rad: float = np.pi / 2.0  # pre-rotation so the long axis roughly aligns with +y (rad)
 
 
@@ -143,7 +144,9 @@ def _arc_length_parameterisation(
     return theta, s
 
 
-def _generate_theta_samples(theta: np.ndarray, s: np.ndarray, config: EllipseTrackConfig) -> np.ndarray:
+def _generate_theta_samples(
+    theta: np.ndarray, s: np.ndarray, config: EllipseTrackConfig
+) -> np.ndarray:
     """
     Generate parameter values theta_i such that the corresponding points
     along the midline are approximately evenly spaced in arc length.

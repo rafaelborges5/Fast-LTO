@@ -43,6 +43,17 @@ target-version = ["py310"]
 profile = "black"
 line_length = 100
 
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint.per-file-ignores]
+# Analysis entry points must select a headless matplotlib backend, or set
+# thread-count env vars for the solver, before importing anything that reads
+# them -- so imports legitimately follow a statement here.
+"src/fast_lto/experiments/*" = ["E402"]
+"scripts/*" = ["E402"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

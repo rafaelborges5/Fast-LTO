@@ -38,7 +38,6 @@ class DynamicBicycleModel(VehicleModel):
             "lf": 0.689,
             "lr": 0.842,
             "g": 9.81,
-
             "Bf": 9.0,
             "Cf": 1.3,
             "Dmf_f": 1.4,
@@ -97,7 +96,9 @@ class DynamicBicycleModel(VehicleModel):
         Fz_r = m * g * (lf / L)
         return ca.MX(Fz_f), ca.MX(Fz_r)
 
-    def _pacejka_lateral_force(self, alpha: ca.MX, Fz: ca.MX, B: float, C: float, Dmf: float) -> ca.MX:
+    def _pacejka_lateral_force(
+        self, alpha: ca.MX, Fz: ca.MX, B: float, C: float, Dmf: float
+    ) -> ca.MX:
         # Simplified Magic Formula; peak force = Fz * Dmf
         return -Fz * Dmf * ca.sin(C * ca.atan(B * alpha))
 
@@ -137,8 +138,12 @@ class DynamicBicycleModel(VehicleModel):
         alpha_r = ca.atan((v_lat - lr * yaw_rate) / v_safe)
 
         Fz_f, Fz_r = self._normal_loads()
-        Fy_f = self._pacejka_lateral_force(alpha_f, Fz_f, float(p["Bf"]), float(p["Cf"]), float(p["Dmf_f"]))
-        Fy_r = self._pacejka_lateral_force(alpha_r, Fz_r, float(p["Br"]), float(p["Cr"]), float(p["Dmf_r"]))
+        Fy_f = self._pacejka_lateral_force(
+            alpha_f, Fz_f, float(p["Bf"]), float(p["Cf"]), float(p["Dmf_f"])
+        )
+        Fy_r = self._pacejka_lateral_force(
+            alpha_r, Fz_r, float(p["Br"]), float(p["Cr"]), float(p["Dmf_r"])
+        )
 
         v_dot = a_long + yaw_rate * v_lat
         v_lat_dot = (Fy_f * ca.cos(delta) + Fy_r) / m - yaw_rate * v
@@ -185,8 +190,12 @@ class DynamicBicycleModel(VehicleModel):
             alpha_f = ca.atan((v_lat + lf * yaw_rate) / v_safe) - delta
             alpha_r = ca.atan((v_lat - lr * yaw_rate) / v_safe)
             Fz_f, Fz_r = self._normal_loads()
-            Fy_f = self._pacejka_lateral_force(alpha_f, Fz_f, float(p["Bf"]), float(p["Cf"]), float(p["Dmf_f"]))
-            Fy_r = self._pacejka_lateral_force(alpha_r, Fz_r, float(p["Br"]), float(p["Cr"]), float(p["Dmf_r"]))
+            Fy_f = self._pacejka_lateral_force(
+                alpha_f, Fz_f, float(p["Bf"]), float(p["Cf"]), float(p["Dmf_f"])
+            )
+            Fy_r = self._pacejka_lateral_force(
+                alpha_r, Fz_r, float(p["Br"]), float(p["Cr"]), float(p["Dmf_r"])
+            )
             a_lat = (Fy_f * ca.cos(delta) + Fy_r) / m
 
             mu_g = float(p["mu"]) * float(p["g"])
@@ -220,4 +229,3 @@ class DynamicBicycleModel(VehicleModel):
         lb = [float(p["a_long_min"]), -float(p["delta_max"])]
         ub = [float(p["a_long_max"]), float(p["delta_max"])]
         return lb, ub
-

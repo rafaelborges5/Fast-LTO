@@ -284,9 +284,15 @@ def _elasticity(score_lo: float, score_hi: float, score_base: float, delta: floa
 def _write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     cols = [
-        "knob", "tag", "multiplier", "param_value",
-        "score_s", "full_time_s",
-        "status", "solve_time_s", "iters",
+        "knob",
+        "tag",
+        "multiplier",
+        "param_value",
+        "score_s",
+        "full_time_s",
+        "status",
+        "solve_time_s",
+        "iters",
     ]
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
@@ -351,9 +357,7 @@ def _response_curves(
     n = len(summary)
     ncols = min(3, n)
     nrows = int(np.ceil(n / ncols))
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows), squeeze=False
-    )
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows), squeeze=False)
     for idx, d in enumerate(summary):
         ax = axes[idx // ncols][idx % ncols]
         base_val = d["base_value"]
@@ -498,7 +502,9 @@ def run(config_path: Path, track_id: str, delta: float, jobs: int, out_dir: Path
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--config", type=Path, default=_repo_root() / "configs" / "trackdrive.yaml")
     ap.add_argument(
         "--track-id",

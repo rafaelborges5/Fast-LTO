@@ -18,9 +18,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from fast_lto.tracks.ellipse import EllipseTrackConfig, generate_ellipse_track
-from fast_lto.tracks.bean import BeanTrackConfig, generate_bean_track
 from fast_lto.splines.spline_fitter import fit_and_discretize
+from fast_lto.tracks.bean import BeanTrackConfig, generate_bean_track
+from fast_lto.tracks.ellipse import EllipseTrackConfig, generate_ellipse_track
 from fast_lto.utils.track_bounds import compute_lateral_bounds, load_boundaries
 
 
@@ -37,9 +37,7 @@ def test_widths_uniform_on_ellipse(tmp_path):
     config = EllipseTrackConfig()
     half_width = 0.5 * config.track_width_m
 
-    _, result = _widths_for_track(
-        generate_ellipse_track, config, tmp_path / "ellipse.csv"
-    )
+    _, result = _widths_for_track(generate_ellipse_track, config, tmp_path / "ellipse.csv")
 
     assert result.misses_left == 0
     assert result.misses_right == 0

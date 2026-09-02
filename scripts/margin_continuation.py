@@ -22,7 +22,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 from fast_lto.config import RunConfig  # noqa: E402
-from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save  # noqa: E402
+from fast_lto.optimization.global_ocp import (  # noqa: E402
+    load_track_with_widths,
+    solve_ocp_and_save,
+)
 from fast_lto.optimization.warm_start import resample_guess  # noqa: E402
 from fast_lto.pipeline import (  # noqa: E402
     _autox_time_weights,
@@ -71,12 +74,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/autox.yaml")
     ap.add_argument("--track-id", default="ipz_august_3")
-    ap.add_argument("--margins", type=float, nargs="+",
-                    default=[0.30, 0.35, 0.40, 0.45])
-    ap.add_argument("--seed-solution", default=None,
-                    help="JSON to warm-start the first margin from")
-    ap.add_argument("--cold", action="store_true",
-                    help="no continuation: every margin starts from the default guess")
+    ap.add_argument("--margins", type=float, nargs="+", default=[0.30, 0.35, 0.40, 0.45])
+    ap.add_argument(
+        "--seed-solution", default=None, help="JSON to warm-start the first margin from"
+    )
+    ap.add_argument(
+        "--cold",
+        action="store_true",
+        help="no continuation: every margin starts from the default guess",
+    )
     ap.add_argument("--out-dir", default="data/experiments/ipz_margin")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
@@ -102,16 +108,18 @@ def main():
     guess = None
     if args.seed_solution:
         seed = json.loads(Path(args.seed_solution).read_text())
-        guess = guess_from_solution(seed, model, track,
-                                    config.normalize_states_and_inputs)
+        guess = guess_from_solution(seed, model, track, config.normalize_states_and_inputs)
         print(f"seeded from {args.seed_solution}")
 
     results = []
     for margin in args.margins:
         tag = f"m{int(round(margin * 100)):03d}"
         path = out_dir / f"{args.track_id}_{tag}.json"
-        print(f"\n=== margin {margin:.2f} "
-              f"({'cold' if (args.cold or guess is None) else 'warm'}) ===", flush=True)
+        print(
+            f"\n=== margin {margin:.2f} "
+            f"({'cold' if (args.cold or guess is None) else 'warm'}) ===",
+            flush=True,
+        )
         t0 = time.perf_counter()
         try:
             sol = solve_ocp_and_save(
@@ -122,43 +130,57 @@ def main():
                 initial_speed=config.initial_speed,
                 reg_du=config.reg_u,
                 reg_u_l2=config.reg_u_l2,
-                run_config={"track_id": args.track_id, "boundary_margin": float(margin),
-                            "mode": config.mode, "model_name": config.model_name,
-                            "ds_m": float(track["ds_m"])},
+                run_config={
+                    "track_id": args.track_id,
+                    "boundary_margin": float(margin),
+                    "mode": config.mode,
+                    "model_name": config.model_name,
+                    "ds_m": float(track["ds_m"]),
+                },
                 use_normalization=config.normalize_states_and_inputs,
                 solver_verbose=args.verbose,
                 boundary_margin=margin,
                 mode=config.mode,
                 time_weights=time_weights,
                 terminal_speed=config.terminal_speed,
-                autox_timing_offset_m=(config.autox_timing_offset_m
-                                       if config.mode == "autox" else None),
+                autox_timing_offset_m=(
+                    config.autox_timing_offset_m if config.mode == "autox" else None
+                ),
                 initial_guess=None if args.cold else guess,
             )
             dt = time.perf_counter() - t0
             prof = sol["profiling"]
-            results.append(dict(margin=margin, status=prof["return_status"],
-                                iters=prof["iter_count"], time_s=dt,
-                                obj=sol["obj_val"],
-                                lap=sol.get("autox_lap_time_s")))
+            results.append(
+                dict(
+                    margin=margin,
+                    status=prof["return_status"],
+                    iters=prof["iter_count"],
+                    time_s=dt,
+                    obj=sol["obj_val"],
+                    lap=sol.get("autox_lap_time_s"),
+                )
+            )
             if not args.cold:
-                guess = guess_from_solution(sol, model, track,
-                                            config.normalize_states_and_inputs)
+                guess = guess_from_solution(sol, model, track, config.normalize_states_and_inputs)
         except Exception as exc:  # noqa: BLE001 - report and carry on
             dt = time.perf_counter() - t0
             print(f"  FAILED after {dt:.1f} s: {type(exc).__name__}: {exc}")
-            results.append(dict(margin=margin, status="FAILED", iters=None,
-                                time_s=dt, obj=None, lap=None))
+            results.append(
+                dict(margin=margin, status="FAILED", iters=None, time_s=dt, obj=None, lap=None)
+            )
 
     print("\n=== summary ===")
-    print(f"{'margin':>7} {'status':>28} {'iters':>7} {'time [s]':>9} "
-          f"{'obj':>8} {'lap [s]':>8}")
+    print(
+        f"{'margin':>7} {'status':>28} {'iters':>7} {'time [s]':>9} " f"{'obj':>8} {'lap [s]':>8}"
+    )
     for r in results:
         lap = f"{r['lap']:.3f}" if r["lap"] is not None else "   -  "
         obj = f"{r['obj']:.3f}" if r["obj"] is not None else "   -  "
         it = r["iters"] if r["iters"] is not None else "-"
-        print(f"{r['margin']:7.2f} {str(r['status']):>28} {str(it):>7} "
-              f"{r['time_s']:9.1f} {obj:>8} {lap:>8}")
+        print(
+            f"{r['margin']:7.2f} {str(r['status']):>28} {str(it):>7} "
+            f"{r['time_s']:9.1f} {obj:>8} {lap:>8}"
+        )
     (out_dir / "summary.json").write_text(json.dumps(results, indent=2))
 
 

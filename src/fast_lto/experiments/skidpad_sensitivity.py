@@ -51,7 +51,7 @@ import numpy as np
 from fast_lto.config import RunConfig
 from fast_lto.optimization.global_ocp import solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator
-from fast_lto.pipeline import _resolve_path, PipelineConfig
+from fast_lto.pipeline import PipelineConfig, _resolve_path
 from fast_lto.vehicle_models.four_wheel import FourWheelModel
 
 
@@ -312,9 +312,16 @@ def _elasticity(score_lo: float, score_hi: float, score_base: float, delta: floa
 def _write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     cols = [
-        "knob", "tag", "multiplier", "param_value",
-        "score_s", "timed_time_s", "full_time_s",
-        "status", "solve_time_s", "iters",
+        "knob",
+        "tag",
+        "multiplier",
+        "param_value",
+        "score_s",
+        "timed_time_s",
+        "full_time_s",
+        "status",
+        "solve_time_s",
+        "iters",
     ]
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
@@ -480,7 +487,9 @@ def run(config_path: Path, delta: float, jobs: int, out_dir: Path) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--config", type=Path, default=_repo_root() / "configs" / "skidpad.yaml")
     ap.add_argument(
         "--delta",

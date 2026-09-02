@@ -121,13 +121,22 @@ class SpaceIntegrator(ABC):
 
 class EulerIntegrator(SpaceIntegrator):
 
-    def step(self, f_space, x, u, kappa, ds,
-             kappa_half=None, kappa_next=None):
+    def step(self, f_space, x, u, kappa, ds, kappa_half=None, kappa_next=None):
         return x + ds * f_space(x, u, kappa)
 
-    def time_step(self, f_space, eval_at_point, x, u, kappa, ds,
-                  kappa_half=None, kappa_next=None, eps=1e-3,
-                  smooth_eps=None):
+    def time_step(
+        self,
+        f_space,
+        eval_at_point,
+        x,
+        u,
+        kappa,
+        ds,
+        kappa_half=None,
+        kappa_next=None,
+        eps=1e-3,
+        smooth_eps=None,
+    ):
         _, s_dot = eval_at_point(x, u, kappa)
         smooth_eps = eps if smooth_eps is None else smooth_eps
         s_dot_safe = _smoothmax(s_dot, ca.MX(eps), smooth_eps)
@@ -136,31 +145,40 @@ class EulerIntegrator(SpaceIntegrator):
 
 class RK4Integrator(SpaceIntegrator):
 
-    def step(self, f_space, x, u, kappa, ds,
-             kappa_half=None, kappa_next=None):
+    def step(self, f_space, x, u, kappa, ds, kappa_half=None, kappa_next=None):
         kh = kappa_half if kappa_half is not None else kappa
         kn = kappa_next if kappa_next is not None else kappa
-        k1 = f_space(x,              u, kappa)
+        k1 = f_space(x, u, kappa)
         k2 = f_space(x + ds / 2 * k1, u, kh)
         k3 = f_space(x + ds / 2 * k2, u, kh)
-        k4 = f_space(x + ds * k3,     u, kn)
+        k4 = f_space(x + ds * k3, u, kn)
         return x + (ds / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
 
-    def time_step(self, f_space, eval_at_point, x, u, kappa, ds,
-                  kappa_half=None, kappa_next=None, eps=1e-3,
-                  smooth_eps=None):
+    def time_step(
+        self,
+        f_space,
+        eval_at_point,
+        x,
+        u,
+        kappa,
+        ds,
+        kappa_half=None,
+        kappa_next=None,
+        eps=1e-3,
+        smooth_eps=None,
+    ):
         kh = kappa_half if kappa_half is not None else kappa
         kn = kappa_next if kappa_next is not None else kappa
         smooth_eps = eps if smooth_eps is None else smooth_eps
 
-        k1 = f_space(x,               u, kappa)
+        k1 = f_space(x, u, kappa)
         x2 = x + ds / 2 * k1
-        k2 = f_space(x2,              u, kh)
+        k2 = f_space(x2, u, kh)
         x3 = x + ds / 2 * k2
-        k3 = f_space(x3,              u, kh)
+        k3 = f_space(x3, u, kh)
         x4 = x + ds * k3
 
-        _, sd1 = eval_at_point(x,  u, kappa)
+        _, sd1 = eval_at_point(x, u, kappa)
         _, sd2 = eval_at_point(x2, u, kh)
         _, sd3 = eval_at_point(x3, u, kh)
         _, sd4 = eval_at_point(x4, u, kn)
@@ -171,9 +189,4 @@ class RK4Integrator(SpaceIntegrator):
         sd4_safe = _smoothmax(sd4, ca.MX(eps), smooth_eps)
 
         # Simpson-3/8 weighted time integral (RK4-consistent quadrature).
-        return (ds / 6) * (
-            1 / sd1_safe
-            + 2 / sd2_safe
-            + 2 / sd3_safe
-            + 1 / sd4_safe
-        )
+        return (ds / 6) * (1 / sd1_safe + 2 / sd2_safe + 2 / sd3_safe + 1 / sd4_safe)

@@ -51,7 +51,6 @@ def _load_reference_xy(ref_csv: str | Path) -> np.ndarray:
     return np.array([[float(r["x"]), float(r["y"])] for r in rows], dtype=np.float64)
 
 
-
 def _circle_fit(P: np.ndarray) -> Tuple[np.ndarray, float]:
     """Least-squares circle fit. Returns (center[2], radius)."""
     x, y = P[:, 0], P[:, 1]
@@ -162,8 +161,9 @@ class _Straight(_Segment):
 
 
 class _Arc(_Segment):
-    def __init__(self, center: np.ndarray, R: float, theta0: float,
-                 d_theta: float, timed: bool = False):
+    def __init__(
+        self, center: np.ndarray, R: float, theta0: float, d_theta: float, timed: bool = False
+    ):
         length = R * abs(d_theta)
         super().__init__(length, np.sign(d_theta) / R, timed)
         self.center = center
@@ -186,18 +186,21 @@ def _build_segments(geo: Dict, n_laps: int, timed_lap_index: int) -> List[_Segme
     segs: List[_Segment] = []
 
     segs.append(_Straight(geo["P0"], gate))
-    for center, sign in ((geo["c_first"], geo["sign_first"]),
-                         (geo["c_second"], -geo["sign_first"])):
+    for center, sign in (
+        (geo["c_first"], geo["sign_first"]),
+        (geo["c_second"], -geo["sign_first"]),
+    ):
         theta0 = float(np.arctan2(gate[1] - center[1], gate[0] - center[0]))
         for lap in range(1, n_laps + 1):
-            timed = (lap == timed_lap_index)
+            timed = lap == timed_lap_index
             segs.append(_Arc(center, R_c, theta0, sign * 2 * np.pi, timed=timed))
     segs.append(_Straight(gate, geo["P1"]))
     return segs
 
 
-def _linear_blend(s: np.ndarray, kappa_node: np.ndarray,
-                  joints: List[Tuple[float, float, float]], half: float) -> np.ndarray:
+def _linear_blend(
+    s: np.ndarray, kappa_node: np.ndarray, joints: List[Tuple[float, float, float]], half: float
+) -> np.ndarray:
     """Apply linear ramps to a piecewise-constant signal across joints.
 
     joints: list of (s_joint, value_left, value_right). Within +/- half of each
@@ -259,7 +262,7 @@ def build_skidpad_track(
 
     R_c = geo["R_c"]
     w_out = geo["R_out"] - R_c
-    w_in  = R_c - geo["R_in"]
+    w_in = R_c - geo["R_in"]
     if entry_exit_halfwidth is None:
         entry_exit_halfwidth = w_out
 
@@ -304,21 +307,31 @@ def build_skidpad_track(
         kl, _ = _locate(s_j - 1e-6)
         kr, _ = _locate(s_j + 1e-6)
         kappa_joints.append((s_j, segs[kl].kappa, segs[kr].kappa))
-        wl_left = entry_exit_halfwidth if isinstance(segs[kl], _Straight) else (
-            w_out if segs[kl].kappa < 0 else w_in)
-        wl_right = entry_exit_halfwidth if isinstance(segs[kr], _Straight) else (
-            w_out if segs[kr].kappa < 0 else w_in)
-        wr_left = entry_exit_halfwidth if isinstance(segs[kl], _Straight) else (
-            w_in if segs[kl].kappa < 0 else w_out)
-        wr_right = entry_exit_halfwidth if isinstance(segs[kr], _Straight) else (
-            w_in if segs[kr].kappa < 0 else w_out)
+        wl_left = (
+            entry_exit_halfwidth
+            if isinstance(segs[kl], _Straight)
+            else (w_out if segs[kl].kappa < 0 else w_in)
+        )
+        wl_right = (
+            entry_exit_halfwidth
+            if isinstance(segs[kr], _Straight)
+            else (w_out if segs[kr].kappa < 0 else w_in)
+        )
+        wr_left = (
+            entry_exit_halfwidth
+            if isinstance(segs[kl], _Straight)
+            else (w_in if segs[kl].kappa < 0 else w_out)
+        )
+        wr_right = (
+            entry_exit_halfwidth
+            if isinstance(segs[kr], _Straight)
+            else (w_in if segs[kr].kappa < 0 else w_out)
+        )
         wl_joints.append((s_j, wl_left, wl_right))
         wr_joints.append((s_j, wr_left, wr_right))
 
     curvatures = _linear_blend(s_nodes, kappa_raw, kappa_joints, half)
-    curvatures_half = _linear_blend(
-        s_nodes + ds_actual / 2.0, kappa_raw, kappa_joints, half
-    )
+    curvatures_half = _linear_blend(s_nodes + ds_actual / 2.0, kappa_raw, kappa_joints, half)
     w_left = _linear_blend(s_nodes, wl_raw, wl_joints, half)
     w_right = _linear_blend(s_nodes, wr_raw, wr_joints, half)
 

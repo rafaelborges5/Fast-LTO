@@ -27,7 +27,7 @@ def corner_slacks(d, psi, kappa, w_left, w_right, corners):
     out = {}
     for name, dx, dy in corners:
         long_proj = dx * cos_p - dy * sin_p
-        d_corner = d + dx * sin_p + dy * cos_p - 0.5 * kappa / D_kappa * long_proj ** 2
+        d_corner = d + dx * sin_p + dy * cos_p - 0.5 * kappa / D_kappa * long_proj**2
         out[name] = (w_left - d_corner) if dy >= 0 else (d_corner + w_right)
     return out
 
@@ -36,8 +36,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("solution")
     ap.add_argument("--config", default="configs/autox.yaml")
-    ap.add_argument("--margin", type=float, default=None,
-                    help="margin used for the solve (default: read from run_config)")
+    ap.add_argument(
+        "--margin",
+        type=float,
+        default=None,
+        help="margin used for the solve (default: read from run_config)",
+    )
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()
 
@@ -65,8 +69,10 @@ def main():
 
     print(f"solution : {Path(args.solution).name}")
     prof = sol.get("profiling", {})
-    print(f"status   : {prof.get('return_status')}  iters={prof.get('iter_count')} "
-          f"time={prof.get('solve_time_s'):.1f}s  obj={sol['obj_val']:.3f}")
+    print(
+        f"status   : {prof.get('return_status')}  iters={prof.get('iter_count')} "
+        f"time={prof.get('solve_time_s'):.1f}s  obj={sol['obj_val']:.3f}"
+    )
     print(f"margin   : {margin:.3f} m   N={len(s)}   v {v.min():.2f}..{v.max():.2f} m/s")
 
     # steering activity
@@ -81,35 +87,49 @@ def main():
 
     # wheel force activity
     fx_sat = np.abs(fx) > 0.999 * fx_max
-    print(f"\nwheel force |Fx| max {np.abs(fx).max():.1f} / limit {fx_max:.0f} N; "
-          f"nodes with any wheel saturated: {int(fx_sat.any(axis=1).sum())} / {len(s)}")
+    print(
+        f"\nwheel force |Fx| max {np.abs(fx).max():.1f} / limit {fx_max:.0f} N; "
+        f"nodes with any wheel saturated: {int(fx_sat.any(axis=1).sum())} / {len(s)}"
+    )
 
     # corridor activity
     slack = corner_slacks(d, psi, kappa, wl, wr, corners)
     worst = np.min(np.column_stack(list(slack.values())), axis=1)
-    print(f"\ncorner clearance (min over 4 corners): min {worst.min():+.4f} m, "
-          f"nodes < 1 cm : {int((worst < 0.01).sum())}, < 5 cm : {int((worst < 0.05).sum())}")
+    print(
+        f"\ncorner clearance (min over 4 corners): min {worst.min():+.4f} m, "
+        f"nodes < 1 cm : {int((worst < 0.01).sum())}, < 5 cm : {int((worst < 0.05).sum())}"
+    )
     for name, sl in slack.items():
-        print(f"  {name}: min {sl.min():+.4f} m at s={s[int(np.argmin(sl))]:6.1f} m, "
-              f"active(<1cm) at {int((sl < 0.01).sum()):4d} nodes")
+        print(
+            f"  {name}: min {sl.min():+.4f} m at s={s[int(np.argmin(sl))]:6.1f} m, "
+            f"active(<1cm) at {int((sl < 0.01).sum()):4d} nodes"
+        )
 
     # the tightest places
     idx = np.argsort(worst)[: args.top]
     print(f"\ntightest {args.top} nodes")
-    print(f"{'s [m]':>8} {'kappa':>8} {'d':>7} {'psi':>7} {'v':>6} {'delta':>7} "
-          f"{'clear':>7} {'w_l':>6} {'w_r':>6}")
+    print(
+        f"{'s [m]':>8} {'kappa':>8} {'d':>7} {'psi':>7} {'v':>6} {'delta':>7} "
+        f"{'clear':>7} {'w_l':>6} {'w_r':>6}"
+    )
     for i in sorted(idx, key=lambda j: s[j]):
-        print(f"{s[i]:8.1f} {kappa[i]:8.3f} {d[i]:7.3f} {psi[i]:7.3f} {v[i]:6.2f} "
-              f"{delta[i]:7.3f} {worst[i]:7.3f} {wl[i]+margin:6.2f} {wr[i]+margin:6.2f}")
+        print(
+            f"{s[i]:8.1f} {kappa[i]:8.3f} {d[i]:7.3f} {psi[i]:7.3f} {v[i]:6.2f} "
+            f"{delta[i]:7.3f} {worst[i]:7.3f} {wl[i]+margin:6.2f} {wr[i]+margin:6.2f}"
+        )
 
     # steering demand vs achievable, around the tightest corner
     lf, lr = float(cfg["vehicle"]["lf"]), float(cfg["vehicle"]["lr"])
     kappa_path_max = np.tan(delta_max) / (lf + lr)
-    print(f"\nkinematic path-curvature ceiling at delta_max: "
-          f"{kappa_path_max:.3f} 1/m  (radius {1/kappa_path_max:.2f} m)")
+    print(
+        f"\nkinematic path-curvature ceiling at delta_max: "
+        f"{kappa_path_max:.3f} 1/m  (radius {1/kappa_path_max:.2f} m)"
+    )
     over = np.abs(kappa) > kappa_path_max
-    print(f"centreline stations above that ceiling: {int(over.sum())} / {len(s)}"
-          + (f", s = {s[over].min():.1f} .. {s[over].max():.1f} m" if over.any() else ""))
+    print(
+        f"centreline stations above that ceiling: {int(over.sum())} / {len(s)}"
+        + (f", s = {s[over].min():.1f} .. {s[over].max():.1f} m" if over.any() else "")
+    )
 
 
 if __name__ == "__main__":

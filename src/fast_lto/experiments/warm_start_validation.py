@@ -35,15 +35,22 @@ from typing import Any, Dict, List, Optional, Tuple
 # each worker spawns its own thread pool, the pool oversubscribes the machine,
 # and the wall-clock numbers this experiment exists to compare become a measure
 # of core contention rather than of the solver.
-for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-             "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+for _var in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
     os.environ.setdefault(_var, "1")
 
 import numpy as np
 
-
 from fast_lto.config import RunConfig  # noqa: E402
-from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save  # noqa: E402
+from fast_lto.optimization.global_ocp import (  # noqa: E402
+    load_track_with_widths,
+    solve_ocp_and_save,
+)
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator  # noqa: E402
 from fast_lto.optimization.warm_start import resample_guess  # noqa: E402
 from fast_lto.pipeline import (  # noqa: E402
@@ -154,9 +161,7 @@ def build_baseline(case: Case) -> Baseline:
         reg_du=pc.reg_u,
         reg_u_l2=pc.reg_u_l2,
         terminal_speed=pc.terminal_speed if pc.mode in ("autox", "skidpad") else None,
-        autox_timing_offset_m=(
-            pc.autox_timing_offset_m if pc.mode == "autox" else None
-        ),
+        autox_timing_offset_m=(pc.autox_timing_offset_m if pc.mode == "autox" else None),
         boundary_margin=float(case.baseline_margin),
         normalize=bool(pc.normalize_states_and_inputs),
     )
@@ -182,8 +187,7 @@ def _worst_corner_violation(sol: Dict[str, Any], margin: float, params: Dict) ->
     from fast_lto.vehicle_models.vehicle_base import CornerOffset
 
     corners = [
-        c if isinstance(c, CornerOffset) else CornerOffset(*c)
-        for c in params.get("corners", [])
+        c if isinstance(c, CornerOffset) else CornerOffset(*c) for c in params.get("corners", [])
     ]
     if not corners or "d" not in sol:
         return float("nan")
@@ -200,9 +204,7 @@ def _worst_corner_violation(sol: Dict[str, Any], margin: float, params: Dict) ->
     worst = 0.0
     for c in corners:
         long_proj = c.dx * cos_p - c.dy * sin_p
-        d_corner = (
-            d + c.dx * sin_p + c.dy * cos_p - 0.5 * kappa / d_kappa * long_proj**2
-        )
+        d_corner = d + c.dx * sin_p + c.dy * cos_p - 0.5 * kappa / d_kappa * long_proj**2
         slack = (w_left - d_corner) if c.dy >= 0 else (d_corner + w_right)
         worst = max(worst, float(-slack.min()))
     return worst
@@ -435,8 +437,11 @@ def plot(rows: List[Dict[str, Any]], path: Path) -> None:
     ):
         for p in pairs:
             ax.scatter(
-                p["cold"][key], p["warm"][key], s=34,
-                color=colors[p["cold"]["case"]], alpha=0.85,
+                p["cold"][key],
+                p["warm"][key],
+                s=34,
+                color=colors[p["cold"]["case"]],
+                alpha=0.85,
                 label=p["cold"]["case"],
             )
         if log:
@@ -469,8 +474,7 @@ def plot(rows: List[Dict[str, Any]], path: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cases", nargs="*", default=[c.key for c in CASES])
-    ap.add_argument("--axes", nargs="*",
-                    default=sorted({v[0] for v in VARIANTS}))
+    ap.add_argument("--axes", nargs="*", default=sorted({v[0] for v in VARIANTS}))
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--out-dir", default=str(OUT_DIR))
     ap.add_argument("--dry-run", action="store_true")
@@ -486,10 +490,14 @@ def main() -> None:
         for case in cases:
             print(f"{case.key}: baseline margin {case.baseline_margin}")
             for axis, label, _mults, margin in variants:
-                print(f"    {axis:8s} {label:16s} margin "
-                      f"{margin if margin is not None else case.baseline_margin}")
-        print(f"\n{len(cases)} cases x ({len(variants)} variants x 2 + 1 baseline) "
-              f"= {len(cases) * (len(variants) * 2 + 1)} solves")
+                print(
+                    f"    {axis:8s} {label:16s} margin "
+                    f"{margin if margin is not None else case.baseline_margin}"
+                )
+        print(
+            f"\n{len(cases)} cases x ({len(variants)} variants x 2 + 1 baseline) "
+            f"= {len(cases) * (len(variants) * 2 + 1)} solves"
+        )
         return
 
     rows: List[Dict[str, Any]] = []
@@ -506,9 +514,14 @@ def main() -> None:
         baselines[case.key] = base
         baseline_jobs.append(
             {
-                "baseline": base, "axis": "baseline", "label": "baseline",
-                "tag": "baseline", "start": "cold", "model_multipliers": {},
-                "boundary_margin": case.baseline_margin, "out_dir": str(out_dir),
+                "baseline": base,
+                "axis": "baseline",
+                "label": "baseline",
+                "tag": "baseline",
+                "start": "cold",
+                "model_multipliers": {},
+                "boundary_margin": case.baseline_margin,
+                "out_dir": str(out_dir),
             }
         )
 
@@ -517,9 +530,12 @@ def main() -> None:
         for row in pool.imap_unordered(solve_job, baseline_jobs):
             rows.append(row)
             append_row(progress_csv, row)
-            print(f"  {row['case']}: {row['status']} in "
-                  f"{_fmt(row['solve_time_s'])} s"
-                  f"{' (resumed)' if row.get('resumed') else ''}", flush=True)
+            print(
+                f"  {row['case']}: {row['status']} in "
+                f"{_fmt(row['solve_time_s'])} s"
+                f"{' (resumed)' if row.get('resumed') else ''}",
+                flush=True,
+            )
             if row["solution"] is None:
                 print(f"  {row['case']}: baseline failed, skipping this case")
                 continue
@@ -536,11 +552,13 @@ def main() -> None:
             for start in ("cold", "warm"):
                 jobs.append(
                     {
-                        "baseline": base, "axis": axis, "label": label, "tag": tag,
-                        "start": start, "model_multipliers": mults,
-                        "boundary_margin": (
-                            margin if margin is not None else case.baseline_margin
-                        ),
+                        "baseline": base,
+                        "axis": axis,
+                        "label": label,
+                        "tag": tag,
+                        "start": start,
+                        "model_multipliers": mults,
+                        "boundary_margin": (margin if margin is not None else case.baseline_margin),
                         "seed_path": str(seeds[case.key]),
                         "out_dir": str(out_dir),
                     }

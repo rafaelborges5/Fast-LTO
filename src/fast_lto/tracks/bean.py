@@ -23,11 +23,15 @@ class BeanTrackConfig:
     target_midline_length_m: float = 175.0  # desired midline length after scaling (m)
     track_width_m: float = 3.5  # cone-to-cone width; widen to loosen the optimal line (m)
     nominal_spacing_m: float = 4.0  # target point spacing along midline for discretisation (m)
-    integration_points: int = 6000  # resolution for arc-length integration; higher = smoother, slower
+    integration_points: int = (
+        6000  # resolution for arc-length integration; higher = smoother, slower
+    )
     base_radius_m: float = 12.0  # unscaled base radius before perimeter matching (m)
     asymmetry: float = 0.65  # pushes one side outward; increase for a bigger outer bulge
     pinch: float = 0.4  # pulls the opposite side inward; increase for a tighter inner pinch
-    double_lobe: float = 0.12  # adds secondary curvature; increase to round transitions / soften corners
+    double_lobe: float = (
+        0.12  # adds secondary curvature; increase to round transitions / soften corners
+    )
     rotation_rad: float = 0.0  # pre-rotation applied before reference pose alignment (rad)
 
 
@@ -105,7 +109,9 @@ def _arc_length_parameterisation(
     return theta, s
 
 
-def _generate_theta_samples(theta: np.ndarray, s: np.ndarray, config: BeanTrackConfig) -> np.ndarray:
+def _generate_theta_samples(
+    theta: np.ndarray, s: np.ndarray, config: BeanTrackConfig
+) -> np.ndarray:
     """
     Generate theta samples with approximately even arc-length spacing.
     """
@@ -273,4 +279,3 @@ __all__ = [
 
 if __name__ == "__main__":
     generate_bean_track(output_csv="data/tracks/bean.csv")
-

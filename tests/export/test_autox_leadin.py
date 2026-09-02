@@ -22,12 +22,23 @@ from fast_lto.export.trajectory import export_reference_trajectory
 
 # four_wheel reduced state / input names (see FourWheelModel).
 _STATE_NAMES = [
-    "d", "psi_err", "v_long", "v_lat", "yaw_rate",
-    "Fx_fl", "Fx_fr", "Fx_rr", "Fx_rl", "delta",
+    "d",
+    "psi_err",
+    "v_long",
+    "v_lat",
+    "yaw_rate",
+    "Fx_fl",
+    "Fx_fr",
+    "Fx_rr",
+    "Fx_rl",
+    "delta",
 ]
 _INPUT_NAMES = [
-    "Fx_fl_dot_norm", "Fx_fr_dot_norm", "Fx_rr_dot_norm",
-    "Fx_rl_dot_norm", "delta_dot_norm",
+    "Fx_fl_dot_norm",
+    "Fx_fr_dot_norm",
+    "Fx_rr_dot_norm",
+    "Fx_rl_dot_norm",
+    "delta_dot_norm",
 ]
 
 
@@ -125,8 +136,8 @@ def test_leadin_kappa_matches_path_geometry(tmp_path):
     # the lead-in (away from the arc<->body junction at index K).
     interior = slice(1, K - 1)
     assert np.allclose(kappa[interior], k0, atol=1e-3)
-    assert np.allclose(kappa_geo[:K - 2], k0, atol=1e-3)
-    assert np.allclose(kappa[1:K - 1], kappa_geo[:K - 2], atol=1e-3)
+    assert np.allclose(kappa_geo[: K - 2], k0, atol=1e-3)
+    assert np.allclose(kappa[1 : K - 1], kappa_geo[: K - 2], atol=1e-3)
 
 
 if __name__ == "__main__":  # pragma: no cover

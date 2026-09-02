@@ -197,8 +197,12 @@ def vehicle_distance(a: Dict, b: Dict) -> float:
     worst = 0.0
     for key in set(pa) | set(pb):
         va, vb = pa.get(key), pb.get(key)
-        if isinstance(va, (int, float)) and isinstance(vb, (int, float)) \
-                and not isinstance(va, bool) and not isinstance(vb, bool):
+        if (
+            isinstance(va, (int, float))
+            and isinstance(vb, (int, float))
+            and not isinstance(va, bool)
+            and not isinstance(vb, bool)
+        ):
             scale = max(abs(float(va)), abs(float(vb)), 1e-9)
             worst = max(worst, abs(float(va) - float(vb)) / scale)
         elif va != vb:
@@ -381,12 +385,10 @@ def resample_guess(
         )
 
     x_phys = np.column_stack(
-        [np.interp(s_new, s_old, np.asarray(solution[n], dtype=float))
-         for n in state_names]
+        [np.interp(s_new, s_old, np.asarray(solution[n], dtype=float)) for n in state_names]
     )
     u_phys = np.column_stack(
-        [np.interp(s_new, s_old, np.asarray(solution[n], dtype=float))
-         for n in input_names]
+        [np.interp(s_new, s_old, np.asarray(solution[n], dtype=float)) for n in input_names]
     )
 
     if not use_normalization:
@@ -437,9 +439,9 @@ def validate_guess(
     x = np.asarray(guess["X"], dtype=float)
     x_scale, x_shift = model.get_reduced_state_scaling()
     if x_scale is not None and x_shift is not None:
-        x = x * np.asarray(x_scale, float).reshape(1, -1) + np.asarray(
-            x_shift, float
-        ).reshape(1, -1)
+        x = x * np.asarray(x_scale, float).reshape(1, -1) + np.asarray(x_shift, float).reshape(
+            1, -1
+        )
     d = x[:, 0]
     psi = x[:, 1]
 
@@ -453,12 +455,7 @@ def validate_guess(
     worst = 0.0
     for corner in corners:
         long_proj = corner.dx * cos_p - corner.dy * sin_p
-        d_corner = (
-            d
-            + corner.dx * sin_p
-            + corner.dy * cos_p
-            - 0.5 * kappa / d_kappa * long_proj**2
-        )
+        d_corner = d + corner.dx * sin_p + corner.dy * cos_p - 0.5 * kappa / d_kappa * long_proj**2
         slack = (w_left - d_corner) if corner.dy >= 0 else (d_corner + w_right)
         worst = max(worst, float(-slack.min()))
 

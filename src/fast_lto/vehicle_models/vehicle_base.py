@@ -114,10 +114,7 @@ class VehicleModel(ABC):
 
     def get_corner_offsets(self) -> List[CornerOffset]:
         corners_raw = self.params.get("corners", [])
-        return [
-            c if isinstance(c, CornerOffset) else CornerOffset(*c)
-            for c in corners_raw
-        ]
+        return [c if isinstance(c, CornerOffset) else CornerOffset(*c) for c in corners_raw]
 
     def get_corner_constraints(
         self,
@@ -139,10 +136,7 @@ class VehicleModel(ABC):
         for c in corners:
             long_proj = c.dx * cos_psi - c.dy * sin_psi
             d_corner = (
-                d_phys
-                + c.dx * sin_psi
-                + c.dy * cos_psi
-                - 0.5 * kappa / D_kappa * long_proj**2
+                d_phys + c.dx * sin_psi + c.dy * cos_psi - 0.5 * kappa / D_kappa * long_proj**2
             )
 
             if c.dy >= 0:
@@ -226,7 +220,6 @@ class VehicleModel(ABC):
             self._u_scale_dm = ca.DM(scale_u)
             self._u_shift_dm = ca.DM(shift_u)
 
-
     def get_reduced_state_scaling(self) -> Tuple[Optional[ca.DM], Optional[ca.DM]]:
         """
         Return (scale, shift) for the reduced state in CasADi DM form.
@@ -238,7 +231,6 @@ class VehicleModel(ABC):
         Return (scale, shift) for the inputs in CasADi DM form.
         """
         return self._u_scale_dm, self._u_shift_dm
-
 
     @staticmethod
     def _smoothmax(a: ca.MX, b: ca.MX, eps: float) -> ca.MX:
@@ -254,7 +246,6 @@ class VehicleModel(ABC):
     def norm_to_physical(val_norm: ca.MX, scale: ca.DM, shift: ca.DM) -> ca.MX:
         """Generic affine map from normalised space back to physical."""
         return val_norm * scale + shift
-
 
     def reduced_state_phys_to_norm(self, x_red_phys: ca.MX) -> ca.MX:
         """Map reduced physical state [d, ...] -> normalised coordinates."""
@@ -279,7 +270,6 @@ class VehicleModel(ABC):
         if self._u_scale_dm is None or self._u_shift_dm is None:
             return u_norm
         return self.norm_to_physical(u_norm, self._u_scale_dm, self._u_shift_dm)
-
 
     def reduced_state_bounds_normalized(self) -> Optional[Tuple[List[float], List[float]]]:
         """
@@ -313,8 +303,6 @@ class VehicleModel(ABC):
         ub_n_u = (ub_arr_u - shift_u) / scale_u
         return lb_n_u.tolist(), ub_n_u.tolist()
 
-
-
     def get_dynamics_normalized(
         self,
         x_red_norm: ca.MX,
@@ -328,9 +316,7 @@ class VehicleModel(ABC):
         x_scale, x_shift = self.get_reduced_state_scaling()
         u_scale, u_shift = self.get_input_scaling()
         if x_scale is None or x_shift is None or u_scale is None or u_shift is None:
-            raise RuntimeError(
-                "Normalisation scales/shifts are not defined. "
-            )
+            raise RuntimeError("Normalisation scales/shifts are not defined. ")
 
         x_red_phys = self.norm_to_physical(x_red_norm, x_scale, x_shift)
         u_phys = self.norm_to_physical(u_norm, u_scale, u_shift)
@@ -361,9 +347,7 @@ class VehicleModel(ABC):
         x_scale, x_shift = self.get_reduced_state_scaling()
         u_scale, u_shift = self.get_input_scaling()
         if x_scale is None or x_shift is None or u_scale is None or u_shift is None:
-            raise RuntimeError(
-                "Normalisation scales/shifts are not defined."
-            )
+            raise RuntimeError("Normalisation scales/shifts are not defined.")
 
         x_red_phys = self.norm_to_physical(x_red_norm, x_scale, x_shift)
         u_phys = self.norm_to_physical(u_norm, u_scale, u_shift)

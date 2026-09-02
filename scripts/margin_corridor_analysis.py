@@ -37,7 +37,7 @@ def corridor_at(psi, kappa, w_left, w_right, corners, iters=3):
         lo = -np.inf
         for _name, dx, dy in corners:
             long_proj = dx * cos_p - dy * sin_p
-            shift = dx * sin_p + dy * cos_p - 0.5 * kappa / D_kappa * long_proj ** 2
+            shift = dx * sin_p + dy * cos_p - 0.5 * kappa / D_kappa * long_proj**2
             if dy >= 0.0:
                 hi = min(hi, w_left - shift)
             else:
@@ -73,8 +73,9 @@ def analyse(track, cfg, margins, psi_max, psi_grid=61):
             width_best[i] = best_w
             psi_best[i] = best_psi
             d_best[i] = best_d
-        out[m] = dict(width_aligned=width_aligned, width_best=width_best,
-                      psi_best=psi_best, d_best=d_best)
+        out[m] = dict(
+            width_aligned=width_aligned, width_best=width_best, psi_best=psi_best, d_best=d_best
+        )
     return s, kappa, wl, wr, out
 
 
@@ -82,8 +83,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--track", default="data/discretized/ipz_august_3_with_widths.json")
     ap.add_argument("--config", default="configs/autox.yaml")
-    ap.add_argument("--margins", type=float, nargs="*",
-                    default=[0.20, 0.30, 0.35, 0.40, 0.45])
+    ap.add_argument("--margins", type=float, nargs="*", default=[0.20, 0.30, 0.35, 0.40, 0.45])
     ap.add_argument("--json-out", default=None)
     args = ap.parse_args()
 
@@ -97,34 +97,46 @@ def main():
     wr = np.asarray(track["w_right"], dtype=float)
     width = wl + wr
 
-    print(f"track: {track['source_file'].split('/')[-1]}  "
-          f"N={track['num_points']}  ds={track['ds_m']:.3f}  L={track['total_length_m']:.1f} m")
+    print(
+        f"track: {track['source_file'].split('/')[-1]}  "
+        f"N={track['num_points']}  ds={track['ds_m']:.3f}  L={track['total_length_m']:.1f} m"
+    )
     print(f"corners (dx, dy): {corners}")
-    print(f"\ncone-line width : min {width.min():.3f}  p05 {np.percentile(width,5):.3f}  "
-          f"med {np.median(width):.3f}  max {width.max():.3f} m")
-    print(f"|kappa|         : med {np.median(np.abs(kappa)):.3f}  "
-          f"p95 {np.percentile(np.abs(kappa),95):.3f}  max {np.abs(kappa).max():.3f} 1/m"
-          f"   (min radius {1/np.abs(kappa).max():.2f} m)")
+    print(
+        f"\ncone-line width : min {width.min():.3f}  p05 {np.percentile(width,5):.3f}  "
+        f"med {np.median(width):.3f}  max {width.max():.3f} m"
+    )
+    print(
+        f"|kappa|         : med {np.median(np.abs(kappa)):.3f}  "
+        f"p95 {np.percentile(np.abs(kappa),95):.3f}  max {np.abs(kappa).max():.3f} 1/m"
+        f"   (min radius {1/np.abs(kappa).max():.2f} m)"
+    )
 
     s, kappa, wl, wr, res = analyse(track, cfg, args.margins, psi_max)
 
     print("\ncorridor in d after all four corner constraints")
-    print(f"{'margin':>7} | {'psi=0: min':>10} {'med':>7} {'#<0':>5} | "
-          f"{'best psi: min':>13} {'med':>7} {'#<0':>5} | worst station")
+    print(
+        f"{'margin':>7} | {'psi=0: min':>10} {'med':>7} {'#<0':>5} | "
+        f"{'best psi: min':>13} {'med':>7} {'#<0':>5} | worst station"
+    )
     summary = {}
     for m in args.margins:
         wa = res[m]["width_aligned"]
         wb = res[m]["width_best"]
         i_worst = int(np.argmin(wb))
-        print(f"{m:7.2f} | {wa.min():10.3f} {np.median(wa):7.3f} {int((wa<0).sum()):5d} | "
-              f"{wb.min():13.3f} {np.median(wb):7.3f} {int((wb<0).sum()):5d} | "
-              f"s={s[i_worst]:6.1f} m  kappa={kappa[i_worst]:+.3f}  "
-              f"w={wl[i_worst]+wr[i_worst]:.2f} m  psi*={res[m]['psi_best'][i_worst]:+.2f}")
-        summary[m] = dict(width_aligned_min=float(wa.min()),
-                          width_best_min=float(wb.min()),
-                          n_infeasible_aligned=int((wa < 0).sum()),
-                          n_infeasible_best=int((wb < 0).sum()),
-                          worst_s=float(s[i_worst]))
+        print(
+            f"{m:7.2f} | {wa.min():10.3f} {np.median(wa):7.3f} {int((wa<0).sum()):5d} | "
+            f"{wb.min():13.3f} {np.median(wb):7.3f} {int((wb<0).sum()):5d} | "
+            f"s={s[i_worst]:6.1f} m  kappa={kappa[i_worst]:+.3f}  "
+            f"w={wl[i_worst]+wr[i_worst]:.2f} m  psi*={res[m]['psi_best'][i_worst]:+.2f}"
+        )
+        summary[m] = dict(
+            width_aligned_min=float(wa.min()),
+            width_best_min=float(wb.min()),
+            n_infeasible_aligned=int((wa < 0).sum()),
+            n_infeasible_best=int((wb < 0).sum()),
+            worst_s=float(s[i_worst]),
+        )
 
     # where does it get tight first
     ref = args.margins[-1]
@@ -133,8 +145,10 @@ def main():
     print(f"\ntightest 12 stations at margin {ref} (best-psi corridor):")
     print(f"{'s [m]':>8} {'kappa':>8} {'w_l':>7} {'w_r':>7} {'corridor':>9} {'psi*':>7}")
     for i in sorted(order, key=lambda j: s[j]):
-        print(f"{s[i]:8.1f} {kappa[i]:8.3f} {wl[i]:7.3f} {wr[i]:7.3f} "
-              f"{wb[i]:9.3f} {res[ref]['psi_best'][i]:7.2f}")
+        print(
+            f"{s[i]:8.1f} {kappa[i]:8.3f} {wl[i]:7.3f} {wr[i]:7.3f} "
+            f"{wb[i]:9.3f} {res[ref]['psi_best'][i]:7.2f}"
+        )
 
     # margin at which each station becomes infeasible
     fine = np.arange(0.0, 0.81, 0.01)
@@ -145,18 +159,26 @@ def main():
         newly = np.isnan(crit) & (wb_m < 0.0)
         crit[newly] = m
     finite = crit[~np.isnan(crit)]
-    print(f"\ncritical margin (corridor closes, best psi): "
-          f"min {np.nanmin(crit):.2f} m at s={s[int(np.nanargmin(crit))]:.1f} m; "
-          f"{len(finite)} / {len(s)} stations close below 0.80 m")
+    print(
+        f"\ncritical margin (corridor closes, best psi): "
+        f"min {np.nanmin(crit):.2f} m at s={s[int(np.nanargmin(crit))]:.1f} m; "
+        f"{len(finite)} / {len(s)} stations close below 0.80 m"
+    )
     for thr in (0.30, 0.35, 0.40, 0.45, 0.50):
         n = int(np.nansum(crit <= thr))
         print(f"  stations infeasible at margin {thr:.2f}: {n}")
 
     if args.json_out:
-        Path(args.json_out).write_text(json.dumps(
-            dict(summary={str(k): v for k, v in summary.items()},
-                 critical_margin=[None if np.isnan(c) else float(c) for c in crit],
-                 s=[float(v) for v in s]), indent=2))
+        Path(args.json_out).write_text(
+            json.dumps(
+                dict(
+                    summary={str(k): v for k, v in summary.items()},
+                    critical_margin=[None if np.isnan(c) else float(c) for c in crit],
+                    s=[float(v) for v in s],
+                ),
+                indent=2,
+            )
+        )
         print(f"wrote {args.json_out}")
 
 

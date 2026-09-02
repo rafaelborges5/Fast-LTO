@@ -82,7 +82,9 @@ def _legacy_spline_kappa(path_xy: np.ndarray, periodic: bool, smooth: bool) -> n
 
     if smooth and len(curvatures) > 17:
         curvatures = savgol_filter(
-            curvatures, window_length=17, polyorder=2,
+            curvatures,
+            window_length=17,
+            polyorder=2,
             mode="wrap" if periodic else "interp",
         )
     return curvatures
@@ -281,10 +283,22 @@ def plot_comparisons(orig: dict, exported: dict, out_dir: Path, legacy: dict | N
     ax = axes[0, 0]
     ax.plot(s_orig, orig["kappa"], label="centerline κ", alpha=0.5, color="gray")
     if legacy is not None:
-        ax.plot(s_new, legacy["legacy_raw"], label="legacy spline-diff (unfiltered)",
-                alpha=0.5, color="tab:red", lw=0.8)
-        ax.plot(s_new, legacy["legacy_savgol"], label="legacy + savgol (old hotfix)",
-                alpha=0.8, color="tab:orange", lw=1.2)
+        ax.plot(
+            s_new,
+            legacy["legacy_raw"],
+            label="legacy spline-diff (unfiltered)",
+            alpha=0.5,
+            color="tab:red",
+            lw=0.8,
+        )
+        ax.plot(
+            s_new,
+            legacy["legacy_savgol"],
+            label="legacy + savgol (old hotfix)",
+            alpha=0.8,
+            color="tab:orange",
+            lw=1.2,
+        )
     ax.plot(s_new, exported["kappa"], label="analytic κ (new fix)", alpha=0.9, color="tab:blue")
     ax.set_xlabel("arc length [m]")
     ax.set_ylabel("curvature [1/m]")
@@ -335,7 +349,9 @@ def plot_comparisons(orig: dict, exported: dict, out_dir: Path, legacy: dict | N
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: python scripts/validate_renormalization.py <solution_json> [solution_json2 ...]")
+        print(
+            "Usage: python scripts/validate_renormalization.py <solution_json> [solution_json2 ...]"
+        )
         sys.exit(1)
 
     for solution_arg in sys.argv[1:]:
@@ -358,7 +374,8 @@ def main() -> None:
         legacy = report_chatter_comparison(orig, exported)
 
         plot_comparisons(
-            orig, exported,
+            orig,
+            exported,
             out_dir=REPO_ROOT / "data" / "validation",
             legacy=legacy,
         )

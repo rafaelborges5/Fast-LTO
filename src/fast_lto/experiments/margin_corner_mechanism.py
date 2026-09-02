@@ -47,8 +47,13 @@ def main():
     # Panel 1: speed profiles (all margins) — show the invariant peak
     ax = axes[0]
     for m in MARGINS:
-        ax.plot(arc[sel], np.array(S[m]["v_long"])[sel], lw=2.0, color=COL[m],
-                label=f"{int(m*100)} cm  ({S[m]['profiling']['lap_time_s']:.2f}s)")
+        ax.plot(
+            arc[sel],
+            np.array(S[m]["v_long"])[sel],
+            lw=2.0,
+            color=COL[m],
+            label=f"{int(m*100)} cm  ({S[m]['profiling']['lap_time_s']:.2f}s)",
+        )
     ax.axhline(vmax, color="gray", ls="--", lw=0.8, label=f"v_max={vmax:.0f}")
     ax.axvspan(113, 124, color="gold", alpha=0.18, label="margin-invariant peak")
     ax.set_ylabel("speed [m/s]")
@@ -65,8 +70,15 @@ def main():
     ax.plot(arc[sel], util[sel], color="tab:purple", lw=2.0)
     ax.axhline(100, color="red", ls="--", lw=0.8, label="grip limit")
     ax.axvspan(113, 124, color="gold", alpha=0.18)
-    ax.fill_between(arc[sel], 0, util[sel], where=util[sel] > 85, color="red", alpha=0.2,
-                    label="grip-limited (margin bites here)")
+    ax.fill_between(
+        arc[sel],
+        0,
+        util[sel],
+        where=util[sel] > 85,
+        color="red",
+        alpha=0.2,
+        label="grip-limited (margin bites here)",
+    )
     ax.set_ylabel("lateral grip used [%]")
     ax.set_xlabel("arc length s [m]")
     ax.set_title("Grip utilization: the gold bend uses only ~20–65% — it has speed to spare")

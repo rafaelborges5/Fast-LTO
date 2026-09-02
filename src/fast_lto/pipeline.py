@@ -40,8 +40,12 @@ from fast_lto.utils.track_bounds import (
     load_boundaries,
     save_track_with_widths,
 )
-from fast_lto.vehicle_models import DynamicBicycleModel, FourWheelModel, PointMassModel, VehicleModel
-
+from fast_lto.vehicle_models import (
+    DynamicBicycleModel,
+    FourWheelModel,
+    PointMassModel,
+    VehicleModel,
+)
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
 WarmStartPolicy = Literal["off", "auto", "ladder"]
@@ -208,9 +212,7 @@ class PipelineConfig:
             self.repo_root = Path(self.repo_root)
 
         if self.track_csv_path is None:
-            self.track_csv_path = (
-                self.repo_root / "data" / "tracks" / f"{self.track_id}.csv"
-            )
+            self.track_csv_path = self.repo_root / "data" / "tracks" / f"{self.track_id}.csv"
         else:
             self.track_csv_path = Path(self.track_csv_path)
 
@@ -229,20 +231,27 @@ class PipelineConfig:
 
     @property
     def solution_path(self) -> Path:
-        return self.solutions_dir / f"{self.track_id}_{self.model_name}_{self.integrator_name}_{self.mode}.json"
+        return (
+            self.solutions_dir
+            / f"{self.track_id}_{self.model_name}_{self.integrator_name}_{self.mode}.json"
+        )
 
     @property
     def export_trajectory_path(self) -> Path:
         from datetime import datetime
+
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        return self.output_trajectories_dir / f"{self.track_id}_{self.model_name}_{self.integrator_name}_{ts}.csv"
+        return (
+            self.output_trajectories_dir
+            / f"{self.track_id}_{self.model_name}_{self.integrator_name}_{ts}.csv"
+        )
 
 
 def step_generate_track(config: PipelineConfig) -> Path:
     csv_path = config.track_csv_path
     assert csv_path is not None  # for type checkers
 
-    print(f"[Step 1] Track generation")
+    print("[Step 1] Track generation")
     print(f"  Track type: {config.track_type}")
     print(f"  Output CSV: {csv_path}")
 
@@ -269,7 +278,7 @@ def step_fit_spline(
         csv_path = config.track_csv_path
     assert csv_path is not None
 
-    print(f"[Step 2] Spline fitting and discretization")
+    print("[Step 2] Spline fitting and discretization")
     print(f"  Input CSV: {csv_path}")
     print(f"  ds: {config.ds_m} m, continuity: {config.continuity}")
 
@@ -321,10 +330,7 @@ def step_compute_bounds(
         result.w_left = w_left_s
         result.w_right = w_right_s
 
-    print(
-        f"  Computed widths: misses left/right: "
-        f"{result.misses_left}/{result.misses_right}"
-    )
+    print(f"  Computed widths: misses left/right: " f"{result.misses_left}/{result.misses_right}")
 
     config.discretized_dir.mkdir(parents=True, exist_ok=True)
     bounds_config = {
@@ -533,14 +539,14 @@ def _extend_track_for_autox(
     extended["curvatures_half"] = np.concatenate(
         [curvatures_half[ocp_lead_start:], curvatures_half, curvatures_half[:M_pts]]
     ).tolist()
-    extended["arc_lengths"] = np.concatenate([
-        arc_lengths[ocp_lead_start:] - total_length,
-        arc_lengths,
-        arc_lengths[:M_pts] + total_length,
-    ]).tolist()
-    extended["w_left"] = np.concatenate(
-        [w_left[ocp_lead_start:], w_left, w_left[:M_pts]]
+    extended["arc_lengths"] = np.concatenate(
+        [
+            arc_lengths[ocp_lead_start:] - total_length,
+            arc_lengths,
+            arc_lengths[:M_pts] + total_length,
+        ]
     ).tolist()
+    extended["w_left"] = np.concatenate([w_left[ocp_lead_start:], w_left, w_left[:M_pts]]).tolist()
     extended["w_right"] = np.concatenate(
         [w_right[ocp_lead_start:], w_right, w_right[:M_pts]]
     ).tolist()
@@ -789,9 +795,7 @@ def step_build_skidpad_track(config: PipelineConfig) -> Path:
     from fast_lto.tracks.skidpad import build_skidpad_track
 
     if config.skidpad_map_csv is None or config.skidpad_reference_csv is None:
-        raise ValueError(
-            "mode='skidpad' requires skidpad_map_csv and skidpad_reference_csv."
-        )
+        raise ValueError("mode='skidpad' requires skidpad_map_csv and skidpad_reference_csv.")
 
     map_csv = _resolve_path(config.repo_root, config.skidpad_map_csv)
     ref_csv = _resolve_path(config.repo_root, config.skidpad_reference_csv)
@@ -828,9 +832,7 @@ def step_build_skidpad_track(config: PipelineConfig) -> Path:
     return config.track_with_widths_path
 
 
-def _run_skidpad_pipeline(
-    config: PipelineConfig, end_at: Optional[StepName]
-) -> Dict[str, Path]:
+def _run_skidpad_pipeline(config: PipelineConfig, end_at: Optional[StepName]) -> Dict[str, Path]:
     """Dedicated skidpad flow: build track -> OCP -> export -> visualize."""
     results: Dict[str, Path] = {}
 
@@ -850,9 +852,7 @@ def _run_skidpad_pipeline(
 
     if config.plot_results:
         map_csv = _resolve_path(config.repo_root, config.skidpad_map_csv)
-        results["plot"] = step_visualize(
-            config, solution_path=solution_path, csv_path=map_csv
-        )
+        results["plot"] = step_visualize(config, solution_path=solution_path, csv_path=map_csv)
 
     return results
 
@@ -890,9 +890,7 @@ def _seed_signature_for(
         terminal_window_nodes=(
             config.autox_terminal_window_nodes if config.mode == "autox" else None
         ),
-        D_safe_braking=(
-            config.D_safe_braking if config.mode == "autox" else None
-        ),
+        D_safe_braking=(config.D_safe_braking if config.mode == "autox" else None),
     )
 
 
@@ -961,12 +959,8 @@ def _solve_once(
         boundary_margin=boundary_margin,
         mode=config.mode,
         time_weights=time_weights,
-        terminal_speed=(
-            config.terminal_speed if config.mode in ("skidpad", "autox") else None
-        ),
-        autox_timing_offset_m=(
-            config.autox_timing_offset_m if config.mode == "autox" else None
-        ),
+        terminal_speed=(config.terminal_speed if config.mode in ("skidpad", "autox") else None),
+        autox_timing_offset_m=(config.autox_timing_offset_m if config.mode == "autox" else None),
         terminal_straight_m=(
             config.skidpad_terminal_straight_m if config.mode == "skidpad" else None
         ),
@@ -974,15 +968,14 @@ def _solve_once(
             config.autox_terminal_state_constraint if config.mode == "autox" else False
         ),
         terminal_window_nodes=config.autox_terminal_window_nodes,
-        D_safe_braking=(
-            config.D_safe_braking if config.mode == "autox" else None
-        ),
+        D_safe_braking=(config.D_safe_braking if config.mode == "autox" else None),
         initial_guess=initial_guess,
     )
 
 
-def _save_seed_quietly(ws, seeds_root: Path, signature: Dict, solution: Dict,
-                       max_seeds: int) -> None:
+def _save_seed_quietly(
+    ws, seeds_root: Path, signature: Dict, solution: Dict, max_seeds: int
+) -> None:
     """Store a seed, but never let a cache write throw away a good solve."""
     try:
         ws.save_seed(seeds_root, signature, solution, max_seeds)
@@ -1028,8 +1021,14 @@ def _solve_with_warm_start(
     if config.warm_start == "off":
         return finish(
             _solve_once(
-                config, track_data, model, integrator, time_weights,
-                solution_path, run_config, config.boundary_margin,
+                config,
+                track_data,
+                model,
+                integrator,
+                time_weights,
+                solution_path,
+                run_config,
+                config.boundary_margin,
             )
         )
 
@@ -1044,9 +1043,7 @@ def _solve_with_warm_start(
         except Exception as exc:  # noqa: BLE001 - a bad seed must never be fatal
             print(f"  Warm start: ignoring seed ({source}): {exc}")
             return None
-        ok, why = ws.validate_guess(
-            guess, track_data, model, float(config.boundary_margin)
-        )
+        ok, why = ws.validate_guess(guess, track_data, model, float(config.boundary_margin))
         if not ok:
             print(f"  Warm start: ignoring seed ({source}): {why}")
             return None
@@ -1068,9 +1065,7 @@ def _solve_with_warm_start(
 
     # 2. Otherwise take the closest compatible solve out of the store.
     if guess is None and config.warm_start != "ladder":
-        match = ws.find_seed(
-            seeds_root, signature, float(config.warm_start_max_margin_gap)
-        )
+        match = ws.find_seed(seeds_root, signature, float(config.warm_start_max_margin_gap))
         if match is not None:
             solution = json.loads(match.path.read_text())
             guess = guess_from(solution, match.path.name)
@@ -1096,8 +1091,14 @@ def _solve_with_warm_start(
                     rung_path = Path(tmp) / f"ladder_m{round(rung * 1000):04d}.json"
                     try:
                         rung_sol = _solve_once(
-                            config, track_data, model, integrator, time_weights,
-                            rung_path, None, rung,
+                            config,
+                            track_data,
+                            model,
+                            integrator,
+                            time_weights,
+                            rung_path,
+                            None,
+                            rung,
                             initial_guess=guess,
                         )
                     except Exception as exc:  # noqa: BLE001
@@ -1112,9 +1113,11 @@ def _solve_with_warm_start(
                         break
                     provenance["ladder"].append(float(rung))
                     _save_seed_quietly(
-                        ws, seeds_root,
+                        ws,
+                        seeds_root,
                         _seed_signature_for(config, track_data, model, rung),
-                        rung_sol, int(config.warm_start_max_seeds),
+                        rung_sol,
+                        int(config.warm_start_max_seeds),
                     )
                     guess = guess_from(rung_sol, f"ladder rung {rung:.2f}")
                     if guess is None:
@@ -1124,14 +1127,18 @@ def _solve_with_warm_start(
 
     sol = finish(
         _solve_once(
-            config, track_data, model, integrator, time_weights,
-            solution_path, run_config, config.boundary_margin,
+            config,
+            track_data,
+            model,
+            integrator,
+            time_weights,
+            solution_path,
+            run_config,
+            config.boundary_margin,
             initial_guess=guess,
         )
     )
-    _save_seed_quietly(
-        ws, seeds_root, signature, sol, int(config.warm_start_max_seeds)
-    )
+    _save_seed_quietly(ws, seeds_root, signature, sol, int(config.warm_start_max_seeds))
     return sol
 
 
@@ -1163,11 +1170,13 @@ def step_solve_ocp(
             n_hold = min(int(round(config.decel_hold_m / ds_hold)), decel_idx.size)
             if n_hold > 0:
                 time_weights[decel_idx[:n_hold]] = 1.0
-        print(f"  Skidpad: {int(mask.sum())}/{len(mask)} timed nodes, "
-              f"{int(decel.sum())} exit (decel) nodes, "
-              f"un-timed weight eps_time={config.eps_time}, "
-              f"decel_hold={config.decel_hold_m} m ({n_hold} exit nodes held), "
-              f"terminal_speed={config.terminal_speed}")
+        print(
+            f"  Skidpad: {int(mask.sum())}/{len(mask)} timed nodes, "
+            f"{int(decel.sum())} exit (decel) nodes, "
+            f"un-timed weight eps_time={config.eps_time}, "
+            f"decel_hold={config.decel_hold_m} m ({n_hold} exit nodes held), "
+            f"terminal_speed={config.terminal_speed}"
+        )
     elif config.mode == "autox":
         track_data = _extend_track_for_autox(
             track_data,
@@ -1180,13 +1189,17 @@ def step_solve_ocp(
             start_y=config.autox_start_y,
             start_node_offset=config.autox_start_node_offset,
         )
-        print(f"  Autox: extended track by {config.autox_timing_offset_m + config.autox_extension_m:.0f} m "
-              f"({track_data['num_points']} points total, OCP horizon, "
-              f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in, "
-              f"{config.autox_extension_m:.0f} m of which is post-finish run-off)")
-        print(f"  Autox: start anchored at idx_ref={track_data['autox_idx_ref']} "
-              f"(snapped {track_data['autox_start_snap_m']:.2f} m from "
-              f"requested ({config.autox_start_x:.2f}, {config.autox_start_y:.2f}))")
+        print(
+            f"  Autox: extended track by {config.autox_timing_offset_m + config.autox_extension_m:.0f} m "
+            f"({track_data['num_points']} points total, OCP horizon, "
+            f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in, "
+            f"{config.autox_extension_m:.0f} m of which is post-finish run-off)"
+        )
+        print(
+            f"  Autox: start anchored at idx_ref={track_data['autox_idx_ref']} "
+            f"(snapped {track_data['autox_start_snap_m']:.2f} m from "
+            f"requested ({config.autox_start_x:.2f}, {config.autox_start_y:.2f}))"
+        )
         time_weights = _autox_time_weights(
             track_data["arc_lengths"],
             track_data["autox_base_length_m"],
@@ -1199,10 +1212,12 @@ def step_solve_ocp(
         # `track.get("timed_mask")` in solve_ocp_and_save (same field skidpad
         # uses), so visualization can shade the post-finish untimed zone.
         track_data["timed_mask"] = (time_weights >= 1.0 - 1e-9).astype(int).tolist()
-        print(f"  Autox: {n_timed}/{len(time_weights)} timed nodes, "
-              f"un-timed weight eps_time={config.eps_time}, "
-              f"decel_hold={config.decel_hold_m} m, "
-              f"terminal_speed={config.terminal_speed}")
+        print(
+            f"  Autox: {n_timed}/{len(time_weights)} timed nodes, "
+            f"un-timed weight eps_time={config.eps_time}, "
+            f"decel_hold={config.decel_hold_m} m, "
+            f"terminal_speed={config.terminal_speed}"
+        )
 
     model = _make_model(config.model_name, vehicle_config=config.vehicle_config)
     integrator = _make_integrator(config.integrator_name)
@@ -1297,7 +1312,8 @@ def step_solve_ocp(
 
     skidpad_lead_in = (
         _build_skidpad_lead_in(track_data, config.skidpad_lead_in_m)
-        if config.mode == "skidpad" else None
+        if config.mode == "skidpad"
+        else None
     )
     if skidpad_lead_in:
         sol_dict = _prepend_skidpad_lead_in(sol_dict, skidpad_lead_in, config.initial_speed)
@@ -1372,6 +1388,7 @@ def step_visualize(
 
     if config.mode == "skidpad":
         from datetime import datetime
+
         from fast_lto.tracks.skidpad import load_skidpad_cones
         from fast_lto.visualization.skidpad_plots import plot_skidpad
 
@@ -1379,9 +1396,7 @@ def step_visualize(
         timestamp_dir = config.plots_dir / datetime.now().strftime("%Y%m%d-%H%M%S")
         timestamp_dir.mkdir(parents=True, exist_ok=True)
         plot_path = timestamp_dir / "panels.png"
-        summary = plot_skidpad(
-            data, cones, out_path=plot_path, show=config.show_plots
-        )
+        summary = plot_skidpad(data, cones, out_path=plot_path, show=config.show_plots)
         laps = ", ".join(f"{t:.3f}s" for t in summary["timed_lap_times"])
         print(f"  Timed laps: {laps}  |  score (avg): {summary['score']:.3f} s")
         print(f"  Saved plots to: {timestamp_dir}")
@@ -1406,7 +1421,7 @@ def step_visualize(
 
     plot_path = timestamp_dir / "panels.png"
     if config.model_name == "point_mass":
-        from fast_lto.visualization.ocp_plots import plot_all_panels, _compute_constraint_activity
+        from fast_lto.visualization.ocp_plots import _compute_constraint_activity, plot_all_panels
 
         a_long = np.array(data["a_long"], dtype=np.float64)
         a_lat = np.array(data["a_lat"], dtype=np.float64)
@@ -1485,14 +1500,27 @@ def step_visualize(
         input_data = {name: data[name] for name in input_names if name in data}
 
         plot_all_panels_four_wheel(
-            cones_left, cones_right, path_xy, v, s, d,
-            w_left, w_right,
-            Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta,
-            v_lat, yaw_rate,
-            params=params, profiling=profiling,
+            cones_left,
+            cones_right,
+            path_xy,
+            v,
+            s,
+            d,
+            w_left,
+            w_right,
+            Fx_fl,
+            Fx_fr,
+            Fx_rr,
+            Fx_rl,
+            delta,
+            v_lat,
+            yaw_rate,
+            params=params,
+            profiling=profiling,
             input_data=input_data,
             timed_mask=timed_mask,
-            out_path=plot_path, show=config.show_plots,
+            out_path=plot_path,
+            show=config.show_plots,
         )
     else:
         raise ValueError(
@@ -1539,8 +1567,7 @@ def run_pipeline(
         csv_path = config.track_csv_path
         if csv_path is None or not csv_path.exists():
             raise FileNotFoundError(
-                f"Track CSV not found at {csv_path}. "
-                f"Run with start_from='track' first."
+                f"Track CSV not found at {csv_path}. " f"Run with start_from='track' first."
             )
         results["track"] = csv_path
 
@@ -1565,10 +1592,7 @@ def run_pipeline(
         if need_refit:
             track = step_fit_spline(config, csv_path=csv_path)
         else:
-            print(
-                f"[Step 2] Using existing discretized track: "
-                f"{config.discretized_track_path}"
-            )
+            print(f"[Step 2] Using existing discretized track: " f"{config.discretized_track_path}")
             track = cached
         results["spline"] = config.discretized_track_path
     else:
@@ -1685,4 +1709,3 @@ __all__ = [
     "step_visualize",
     "run_pipeline",
 ]
-

@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from fast_lto.pipeline import PipelineConfig, StepName, run_pipeline
+from fast_lto.pipeline import PipelineConfig, run_pipeline
 
 
 def main() -> None:
@@ -410,7 +410,7 @@ Examples:
         config = PipelineConfig(**config_kwargs)
 
     # Run pipeline
-    print(f"Running Fast-LTO pipeline")
+    print("Running Fast-LTO pipeline")
     print(f"  Mode: {config.mode}")
     print(f"  Track ID: {config.track_id}")
     print(f"  Start from: {args.start_from}")

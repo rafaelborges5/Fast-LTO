@@ -46,7 +46,12 @@ from fast_lto.config import RunConfig
 from fast_lto.export.trajectory import export_reference_trajectory
 from fast_lto.optimization.global_ocp import solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator
-from fast_lto.pipeline import _build_skidpad_lead_in, _prepend_skidpad_lead_in, _resolve_path, PipelineConfig
+from fast_lto.pipeline import (
+    PipelineConfig,
+    _build_skidpad_lead_in,
+    _prepend_skidpad_lead_in,
+    _resolve_path,
+)
 from fast_lto.vehicle_models.four_wheel import FourWheelModel
 
 DEFAULT_MARGINS = (0.40, 0.50, 0.60)
@@ -58,7 +63,9 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def d_sequence(d_min: float = 1.20, d_max: float = DEFAULT_D_MAX, include_anchors: bool = True) -> List[Tuple[float, float]]:
+def d_sequence(
+    d_min: float = 1.20, d_max: float = DEFAULT_D_MAX, include_anchors: bool = True
+) -> List[Tuple[float, float]]:
     """(D_front, D_rear) pairs: rear leads each 0.05 step from d_min to d_max,
     then (if include_anchors) two uniform low-grip anchors."""
     seq: List[Tuple[float, float]] = []
@@ -212,9 +219,11 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
                 result["status"] = f"{status}; EXPORT_ERROR: {exc}"
     except Exception as exc:  # keep the sweep alive on a single failure
         result.update(
-            score_s=None, full_lap_s=None,
+            score_s=None,
+            full_lap_s=None,
             status=f"ERROR: {type(exc).__name__}: {exc}",
-            solve_time_s=None, exported=False,
+            solve_time_s=None,
+            exported=False,
         )
     finally:
         try:
@@ -232,19 +241,27 @@ def _load_table(path: Path, out_dir: Path) -> Dict[Tuple[float, float, float], D
     with path.open() as f:
         for row in csv.DictReader(f):
             try:
-                f_, r_, m_ = (round(float(row["D_front"]), 2),
-                              round(float(row["D_rear"]), 2),
-                              round(float(row["margin"]), 2))
+                f_, r_, m_ = (
+                    round(float(row["D_front"]), 2),
+                    round(float(row["D_rear"]), 2),
+                    round(float(row["margin"]), 2),
+                )
             except (KeyError, TypeError, ValueError):
                 continue
             # Only treat as done if the solve succeeded and its CSV is present.
-            if row.get("status") == "Solve_Succeeded" and row.get("csv") \
-                    and (out_dir / row["csv"]).exists():
+            if (
+                row.get("status") == "Solve_Succeeded"
+                and row.get("csv")
+                and (out_dir / row["csv"]).exists()
+            ):
                 done[(f_, r_, m_)] = {
-                    "D_front": f_, "D_rear": r_, "margin": m_,
+                    "D_front": f_,
+                    "D_rear": r_,
+                    "margin": m_,
                     "score_s": float(row["score_s"]) if row.get("score_s") else None,
                     "full_lap_s": float(row["full_lap_s"]) if row.get("full_lap_s") else None,
-                    "status": row["status"], "csv": row["csv"],
+                    "status": row["status"],
+                    "csv": row["csv"],
                     "solve_time_s": float(row["solve_time_s"]) if row.get("solve_time_s") else None,
                     "exported": True,
                 }
@@ -252,8 +269,7 @@ def _load_table(path: Path, out_dir: Path) -> Dict[Tuple[float, float, float], D
 
 
 def _write_table(path: Path, rows: List[Dict[str, Any]]) -> None:
-    cols = ["D_front", "D_rear", "margin", "score_s", "full_lap_s",
-            "status", "csv", "solve_time_s"]
+    cols = ["D_front", "D_rear", "margin", "score_s", "full_lap_s", "status", "csv", "solve_time_s"]
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -288,35 +304,47 @@ def _print_table(rows: List[Dict[str, Any]], prefix: str) -> None:
 # Plot
 # ---------------------------------------------------------------------------
 
-def _plot_margins(rows: List[Dict[str, Any]], out_dir: Path,
-                  base: Baseline, show_combos: List[Tuple[float, float]],
-                  prefix: str) -> Path:
+
+def _plot_margins(
+    rows: List[Dict[str, Any]],
+    out_dir: Path,
+    base: Baseline,
+    show_combos: List[Tuple[float, float]],
+    prefix: str,
+) -> Path:
     margins = sorted({r["margin"] for r in rows})
     by_key = {(r["D_front"], r["D_rear"], r["margin"]): r for r in rows}
 
     sk = base.track["skidpad"]
-    c1 = np.array(sk["c_first"]); c2 = np.array(sk["c_second"])
+    c1 = np.array(sk["c_first"])
+    c2 = np.array(sk["c_second"])
     R_in, R_out = sk["R_in"], sk["R_out"]
     th = np.linspace(0, 2 * np.pi, 200)
 
     colors = plt.get_cmap("viridis")(np.linspace(0.1, 0.9, len(show_combos)))
 
-    fig, axes = plt.subplots(1, len(margins), figsize=(6 * len(margins), 6.2),
-                             sharex=True, sharey=True)
+    fig, axes = plt.subplots(
+        1, len(margins), figsize=(6 * len(margins), 6.2), sharex=True, sharey=True
+    )
     if len(margins) == 1:
         axes = [axes]
 
     for ax, m in zip(axes, margins):
         for c in (c1, c2):
             for R, ls in ((R_in, "--"), (R_out, "-")):
-                ax.plot(c[0] + R * np.cos(th), c[1] + R * np.sin(th),
-                        color="0.6", lw=0.8, ls=ls, zorder=1)
+                ax.plot(
+                    c[0] + R * np.cos(th),
+                    c[1] + R * np.sin(th),
+                    color="0.6",
+                    lw=0.8,
+                    ls=ls,
+                    zorder=1,
+                )
         for (f, r), col in zip(show_combos, colors):
             res = by_key.get((f, r, m))
             if not res or not res.get("exported"):
                 continue
-            xy = np.loadtxt(out_dir / res["csv"], delimiter=",", skiprows=1,
-                            usecols=(0, 1))
+            xy = np.loadtxt(out_dir / res["csv"], delimiter=",", skiprows=1, usecols=(0, 1))
             lbl = f"F{f:.2f}/R{r:.2f} ({res['score_s']:.3f}s)"
             ax.plot(xy[:, 0], xy[:, 1], color=col, lw=1.4, label=lbl, zorder=3)
         ax.set_title(f"margin = {m:.2f} m")
@@ -325,8 +353,10 @@ def _plot_margins(rows: List[Dict[str, Any]], out_dir: Path,
         ax.legend(fontsize=7, loc="upper right")
         ax.grid(True, ls=":", alpha=0.4)
     axes[0].set_ylabel("y [m]")
-    fig.suptitle(f"{prefix} trajectories by corridor margin "
-                 "(dashed = inner cone circle, solid = outer)", fontsize=12)
+    fig.suptitle(
+        f"{prefix} trajectories by corridor margin " "(dashed = inner cone circle, solid = outer)",
+        fontsize=12,
+    )
     fig.tight_layout()
     out_png = out_dir / f"{prefix}_margin_trajectories.png"
     fig.savefig(out_png, dpi=160)
@@ -360,23 +390,32 @@ def run(
     results: List[Dict[str, Any]] = list(done.values())
 
     all_jobs: List[Dict[str, Any]] = []
-    for (f, r) in combos:
+    for f, r in combos:
         for m in margins:
             if (f, r, m) in done:
                 continue
-            all_jobs.append({
-                "baseline": base, "D_front": f, "D_rear": r, "margin": m,
-                "out_csv": str(out_dir / f"{_tag(prefix, f, r, m)}.csv"),
-                "scratch_dir": str(scratch),
-            })
+            all_jobs.append(
+                {
+                    "baseline": base,
+                    "D_front": f,
+                    "D_rear": r,
+                    "margin": m,
+                    "out_csv": str(out_dir / f"{_tag(prefix, f, r, m)}.csv"),
+                    "scratch_dir": str(scratch),
+                }
+            )
 
     total = len(combos) * len(margins)
-    print(f"{len(done)}/{total} already done; submitting {len(all_jobs)} solves "
-          f"on {jobs} worker(s) ...")
+    print(
+        f"{len(done)}/{total} already done; submitting {len(all_jobs)} solves "
+        f"on {jobs} worker(s) ..."
+    )
 
     def _record(res: Dict[str, Any]) -> None:
-        print(f"  [{_tag(prefix, res['D_front'], res['D_rear'], res['margin'])}] "
-              f"score={res['score_s']} status={res['status']}")
+        print(
+            f"  [{_tag(prefix, res['D_front'], res['D_rear'], res['margin'])}] "
+            f"score={res['score_s']} status={res['status']}"
+        )
         results.append(res)
         _write_table(table_csv, results)  # persist after every solve (resumable)
 
@@ -398,8 +437,7 @@ def run(
     png = _plot_margins(results, out_dir, base, show, prefix)
 
     print(f"\nWrote:\n  {table_csv}\n  {png}")
-    print(f"  {len([r for r in results if r.get('exported')])} trajectory CSVs "
-          f"in {out_dir}")
+    print(f"  {len([r for r in results if r.get('exported')])} trajectory CSVs " f"in {out_dir}")
 
     try:
         for p in scratch.glob("*"):
@@ -410,33 +448,51 @@ def run(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", type=Path,
-                    default=_repo_root() / "configs" / "skidpad.yaml")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--config", type=Path, default=_repo_root() / "configs" / "skidpad.yaml")
     ap.add_argument("--jobs", type=int, default=4, help="Parallel solve workers.")
-    ap.add_argument("--out-dir", type=Path,
-                    default=_repo_root() / "data" / "output_trajectories")
-    ap.add_argument("--prefix", type=str, default=DEFAULT_PREFIX,
-                    help="Output filename prefix.")
-    ap.add_argument("--margins", type=str,
-                    default=",".join(f"{m:.2f}" for m in DEFAULT_MARGINS),
-                    help="Comma-separated boundary margins, e.g. 0.40,0.50")
-    ap.add_argument("--d-min", type=float, default=1.20,
-                    help="Lower D value for the front/rear ramp (default 1.20).")
-    ap.add_argument("--d-max", type=float, default=DEFAULT_D_MAX,
-                    help="Upper D value for the front/rear ramp.")
-    ap.add_argument("--no-anchors", action="store_true",
-                    help="Skip the uniform low-grip anchors (F=R=1.10, F=R=1.00).")
-    ap.add_argument("--initial-speed", type=float, default=None,
-                    help="Override the config's initial_speed (m/s). Also sets the "
-                         "skidpad_lead_in_m constant-speed lead-in, since it must "
-                         "match the OCP's fixed starting velocity.")
+    ap.add_argument("--out-dir", type=Path, default=_repo_root() / "data" / "output_trajectories")
+    ap.add_argument("--prefix", type=str, default=DEFAULT_PREFIX, help="Output filename prefix.")
+    ap.add_argument(
+        "--margins",
+        type=str,
+        default=",".join(f"{m:.2f}" for m in DEFAULT_MARGINS),
+        help="Comma-separated boundary margins, e.g. 0.40,0.50",
+    )
+    ap.add_argument(
+        "--d-min",
+        type=float,
+        default=1.20,
+        help="Lower D value for the front/rear ramp (default 1.20).",
+    )
+    ap.add_argument(
+        "--d-max", type=float, default=DEFAULT_D_MAX, help="Upper D value for the front/rear ramp."
+    )
+    ap.add_argument(
+        "--no-anchors",
+        action="store_true",
+        help="Skip the uniform low-grip anchors (F=R=1.10, F=R=1.00).",
+    )
+    ap.add_argument(
+        "--initial-speed",
+        type=float,
+        default=None,
+        help="Override the config's initial_speed (m/s). Also sets the "
+        "skidpad_lead_in_m constant-speed lead-in, since it must "
+        "match the OCP's fixed starting velocity.",
+    )
     args = ap.parse_args()
     margins = tuple(float(x) for x in args.margins.split(","))
     run(
-        args.config, args.jobs, args.out_dir,
-        prefix=args.prefix, margins=margins, d_min=args.d_min, d_max=args.d_max,
+        args.config,
+        args.jobs,
+        args.out_dir,
+        prefix=args.prefix,
+        margins=margins,
+        d_min=args.d_min,
+        d_max=args.d_max,
         include_anchors=not args.no_anchors,
         initial_speed=args.initial_speed,
     )

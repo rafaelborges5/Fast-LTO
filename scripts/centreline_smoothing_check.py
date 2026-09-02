@@ -46,30 +46,38 @@ def main():
     boundaries = load_boundaries(csv_path)
     kappa_ceiling = np.tan(args.delta_max) / args.wheelbase
 
-    print(f"raw midline: {len(mid)} points, spacing "
-          f"{np.linalg.norm(np.roll(mid,-1,axis=0)-mid,axis=1).min():.2f} .. "
-          f"{np.linalg.norm(np.roll(mid,-1,axis=0)-mid,axis=1).max():.2f} m")
-    print(f"kinematic curvature ceiling at delta_max={args.delta_max}: "
-          f"{kappa_ceiling:.3f} 1/m (R={1/kappa_ceiling:.2f} m)\n")
+    print(
+        f"raw midline: {len(mid)} points, spacing "
+        f"{np.linalg.norm(np.roll(mid,-1,axis=0)-mid,axis=1).min():.2f} .. "
+        f"{np.linalg.norm(np.roll(mid,-1,axis=0)-mid,axis=1).max():.2f} m"
+    )
+    print(
+        f"kinematic curvature ceiling at delta_max={args.delta_max}: "
+        f"{kappa_ceiling:.3f} 1/m (R={1/kappa_ceiling:.2f} m)\n"
+    )
 
-    hdr = (f"{'ds':>5} {'smooth':>7} {'N':>5} {'len [m]':>8} {'|k|max':>7} "
-           f"{'R_min':>6} {'#>ceil':>7} {'drift p95':>10} {'w_min':>6}")
+    hdr = (
+        f"{'ds':>5} {'smooth':>7} {'N':>5} {'len [m]':>8} {'|k|max':>7} "
+        f"{'R_min':>6} {'#>ceil':>7} {'drift p95':>10} {'w_min':>6}"
+    )
     print(hdr)
     print("-" * len(hdr))
     for ds in args.ds:
         for w in args.windows:
-            track = fit_and_discretize(csv_path, ds_m=ds, continuity="C2", viz=False,
-                                       smooth_centerline=w)
+            track = fit_and_discretize(
+                csv_path, ds_m=ds, continuity="C2", viz=False, smooth_centerline=w
+            )
             k = np.abs(np.asarray(track.curvatures))
             pos = np.asarray(track.positions)
             # drift: distance from each raw midline point to the fitted line
             drift = np.array([np.min(np.linalg.norm(pos - p, axis=1)) for p in mid])
-            res = compute_lateral_bounds(track, left=boundaries["left"],
-                                         right=boundaries["right"])
+            res = compute_lateral_bounds(track, left=boundaries["left"], right=boundaries["right"])
             width = np.asarray(res.w_left) + np.asarray(res.w_right)
-            print(f"{ds:5.2f} {w:7d} {track.num_points:5d} {track.total_length_m:8.2f} "
-                  f"{k.max():7.3f} {1/k.max():6.2f} {int((k>kappa_ceiling).sum()):7d} "
-                  f"{np.percentile(drift,95):10.3f} {width.min():6.3f}")
+            print(
+                f"{ds:5.2f} {w:7d} {track.num_points:5d} {track.total_length_m:8.2f} "
+                f"{k.max():7.3f} {1/k.max():6.2f} {int((k>kappa_ceiling).sum()):7d} "
+                f"{np.percentile(drift,95):10.3f} {width.min():6.3f}"
+            )
 
 
 if __name__ == "__main__":

@@ -127,14 +127,9 @@ def _check_track(track_id: str, config_path: Path) -> bool:
         start_y=float(positions[0][1]),
         start_node_offset=0,
     )
-    base_len_ok = bool(
-        np.isclose(extended["autox_base_length_m"], legacy["autox_base_length_m"])
-    )
+    base_len_ok = bool(np.isclose(extended["autox_base_length_m"], legacy["autox_base_length_m"]))
     n_pts_ok = extended["num_points"] == legacy["num_points"]
-    print(
-        f"  anchor-invariant: base_length_m match={base_len_ok}, "
-        f"num_points match={n_pts_ok}"
-    )
+    print(f"  anchor-invariant: base_length_m match={base_len_ok}, " f"num_points match={n_pts_ok}")
     ok = ok and base_len_ok and n_pts_ok
 
     # Wrap-seam continuity: no discontinuity in consecutive-point spacing.

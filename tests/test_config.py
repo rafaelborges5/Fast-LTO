@@ -111,9 +111,7 @@ def test_unset_mode_fields_keep_their_defaults() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "config_path", _shipped_configs(), ids=lambda p: p.name
-)
+@pytest.mark.parametrize("config_path", _shipped_configs(), ids=lambda p: p.name)
 def test_shipped_config_parses_and_validates(config_path: Path) -> None:
     """Every config in configs/ must load and match its selected model.
 

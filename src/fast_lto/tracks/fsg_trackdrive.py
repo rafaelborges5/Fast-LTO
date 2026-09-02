@@ -48,6 +48,7 @@ BoundaryName = Literal["left", "middle", "right"]
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FSGTrackConfig:
     """Configuration for FSG Trackdrive track generation (D 8.1).
@@ -63,26 +64,26 @@ class FSGTrackConfig:
 
     # ── Track dimensions ────────────────────────────────────────────
     target_midline_length_m: float = 400.0  # desired midline length (200–500 m per D 8.1.2)
-    track_width_m: float = 3.8              # constant track width (m); always 3 m
-    nominal_spacing_m: float = 4.0          # target point spacing along midline for discretisation (m)
+    track_width_m: float = 3.8  # constant track width (m); always 3 m
+    nominal_spacing_m: float = 4.0  # target point spacing along midline for discretisation (m)
 
     # ── Shape control ───────────────────────────────────────────────
-    num_control_points: int = 25            # number of random control points around the loop
-    base_radius_m: float = 15.0            # mean distance of control points from centroid before scaling (m)
-    radial_variance: float = 0.3           # fractional spread of radii: r ∈ base*(1 ± variance)
-    angular_variance: float = 0.15         # fractional jitter of angular positions (0 = evenly spaced)
-    smoothing_iterations: int = 1          # Laplacian smoothing passes on control polygon (0 = none)
+    num_control_points: int = 25  # number of random control points around the loop
+    base_radius_m: float = 15.0  # mean distance of control points from centroid before scaling (m)
+    radial_variance: float = 0.3  # fractional spread of radii: r ∈ base*(1 ± variance)
+    angular_variance: float = 0.15  # fractional jitter of angular positions (0 = evenly spaced)
+    smoothing_iterations: int = 1  # Laplacian smoothing passes on control polygon (0 = none)
 
     # ── Turn complexity (chicanes / S-curves) ────────────────────────
-    num_harmonics: int = 3                 # random sinusoidal harmonics added to radii (0 = convex oval)
-    harmonic_amplitude: float = 0.45       # max amplitude of each harmonic as fraction of base_radius
+    num_harmonics: int = 3  # random sinusoidal harmonics added to radii (0 = convex oval)
+    harmonic_amplitude: float = 0.45  # max amplitude of each harmonic as fraction of base_radius
 
     # ── FSG regulatory constraints ──────────────────────────────────
-    min_turn_radius_m: float = 4.5         # D 1.1.10: minimum turning radius = diameter / 2 = 9 / 2 m
-    max_straight_length_m: float = 80.0    # D 8.1.1: straights no longer than 80 m
+    min_turn_radius_m: float = 4.5  # D 1.1.10: minimum turning radius = diameter / 2 = 9 / 2 m
+    max_straight_length_m: float = 80.0  # D 8.1.1: straights no longer than 80 m
 
     # ── Reproducibility ─────────────────────────────────────────────
-    seed: int | None = None                # random seed; None for non-deterministic generation
+    seed: int | None = None  # random seed; None for non-deterministic generation
 
     # ── Manual override ─────────────────────────────────────────────
     control_points_xy: list[tuple[float, float]] | None = None
@@ -91,13 +92,14 @@ class FSGTrackConfig:
     # The shape is still scaled to ``target_midline_length_m``.
 
     # ── Internal parameters ─────────────────────────────────────────
-    integration_points: int = 6000         # resolution for arc-length integration
-    rotation_rad: float = 0.0             # pre-rotation before reference-pose alignment (rad)
+    integration_points: int = 6000  # resolution for arc-length integration
+    rotation_rad: float = 0.0  # pre-rotation before reference-pose alignment (rad)
 
 
 # ---------------------------------------------------------------------------
 # Control-point generation
 # ---------------------------------------------------------------------------
+
 
 def _generate_control_points(config: FSGTrackConfig) -> np.ndarray:
     """Return (N, 2) control points forming a closed loop.
@@ -132,12 +134,8 @@ def _generate_control_points(config: FSGTrackConfig) -> np.ndarray:
     # Each harmonic pushes some sections inward and others outward, producing
     # curvature-sign changes and thus turns in both directions.
     for _ in range(config.num_harmonics):
-        freq = rng.integers(2, 8)                          # angular frequency
-        amp = (
-            rng.uniform(0.2, 1.0)
-            * config.harmonic_amplitude
-            * config.base_radius_m
-        )
+        freq = rng.integers(2, 8)  # angular frequency
+        amp = rng.uniform(0.2, 1.0) * config.harmonic_amplitude * config.base_radius_m
         phase = rng.uniform(0.0, 2.0 * np.pi)
         radii += amp * np.cos(freq * angles + phase)
 
@@ -162,6 +160,7 @@ def _generate_control_points(config: FSGTrackConfig) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Periodic spline fitting
 # ---------------------------------------------------------------------------
+
 
 def _fit_periodic_spline(
     points: np.ndarray,
@@ -203,6 +202,7 @@ def _fit_periodic_spline(
 # Perimeter & scale factor
 # ---------------------------------------------------------------------------
 
+
 def _compute_scale_factor(
     spline_x: CubicSpline,
     spline_y: CubicSpline,
@@ -226,6 +226,7 @@ def _compute_scale_factor(
 # ---------------------------------------------------------------------------
 # Arc-length parameterisation
 # ---------------------------------------------------------------------------
+
 
 def _arc_length_parameterisation(
     spline_x: CubicSpline,
@@ -262,6 +263,7 @@ def _arc_length_parameterisation(
 # ---------------------------------------------------------------------------
 # Even-spacing sampling
 # ---------------------------------------------------------------------------
+
 
 def _sample_evenly(
     spline_x: CubicSpline,
@@ -312,6 +314,7 @@ def _sample_evenly(
 # Boundary computation + pose alignment
 # ---------------------------------------------------------------------------
 
+
 def _compute_boundaries(
     midline: np.ndarray,
     tangents: np.ndarray,
@@ -356,6 +359,7 @@ def _compute_boundaries(
 # ---------------------------------------------------------------------------
 # FSG constraint validation
 # ---------------------------------------------------------------------------
+
 
 def _validate_fsg_constraints(
     midline: np.ndarray,
@@ -431,6 +435,7 @@ def _write_boundaries_csv(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def generate_fsg_track(
     output_csv: str | Path | None = None,
     *,
@@ -463,9 +468,7 @@ def generate_fsg_track(
     scale = _compute_scale_factor(spline_x, spline_y, t_max, config)
 
     # 4. Arc-length parameterisation
-    t_dense, s_dense = _arc_length_parameterisation(
-        spline_x, spline_y, t_max, config, scale
-    )
+    t_dense, s_dense = _arc_length_parameterisation(spline_x, spline_y, t_max, config, scale)
 
     # 5. Even-spacing samples (midline + curvature)
     midline, tangents, curvatures = _sample_evenly(

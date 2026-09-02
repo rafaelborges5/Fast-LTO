@@ -11,7 +11,6 @@ import pytest
 from fast_lto.optimization import warm_start as ws
 from fast_lto.utils.corridor import corridor_at, corridor_widths, critical_margin
 from fast_lto.vehicle_models import FourWheelModel
-from fast_lto.vehicle_models.vehicle_base import CornerOffset
 
 
 # --------------------------------------------------------------------------- #
@@ -170,15 +169,16 @@ def test_margin_gap_cutoff_rejects_distant_seeds(tmp_path, track, model):
 
 def test_same_margin_prefers_the_closer_vehicle(tmp_path, track, model):
     root = tmp_path / "_seeds"
-    ws.save_seed(root, make_signature(track, model, 0.3, v_max=25.0),
-                 make_solution(track, model))
-    ws.save_seed(root, make_signature(track, model, 0.3, v_max=16.5),
-                 make_solution(track, model))
+    ws.save_seed(root, make_signature(track, model, 0.3, v_max=25.0), make_solution(track, model))
+    ws.save_seed(root, make_signature(track, model, 0.3, v_max=16.5), make_solution(track, model))
     match = ws.find_seed(root, make_signature(track, model, 0.3, v_max=16.0))
     assert match is not None
-    assert "16" in json.loads(match.path.read_text())["seed_signature"]["soft"][
-        "model_params"
-    ]["v_max"].__str__()
+    assert (
+        "16"
+        in json.loads(match.path.read_text())["seed_signature"]["soft"]["model_params"][
+            "v_max"
+        ].__str__()
+    )
 
 
 def test_incompatible_geometry_is_never_returned(tmp_path, track, model):
@@ -192,8 +192,9 @@ def test_incompatible_geometry_is_never_returned(tmp_path, track, model):
 def test_prune_keeps_the_most_recent(tmp_path, track, model):
     root = tmp_path / "_seeds"
     for margin in (0.10, 0.20, 0.30):
-        ws.save_seed(root, make_signature(track, model, margin),
-                     make_solution(track, model), max_seeds=2)
+        ws.save_seed(
+            root, make_signature(track, model, margin), make_solution(track, model), max_seeds=2
+        )
     bucket = ws.bucket_dir(root, make_signature(track, model, 0.10))
     seeds = [p for p in bucket.glob("*.json") if p.name != ws.INDEX_FILENAME]
     assert len(seeds) == 2
@@ -304,20 +305,33 @@ def test_warm_start_off_does_no_store_io(tmp_path, track, model, monkeypatch):
 
     solved = {}
 
-    def fake_solve(config, track_data, model_, integrator, time_weights,
-                   solution_path, run_config, boundary_margin, initial_guess=None):
+    def fake_solve(
+        config,
+        track_data,
+        model_,
+        integrator,
+        time_weights,
+        solution_path,
+        run_config,
+        boundary_margin,
+        initial_guess=None,
+    ):
         solved["initial_guess"] = initial_guess
         solved["margin"] = boundary_margin
         return {"obj_val": 1.0}
 
     monkeypatch.setattr(pipeline, "_solve_once", fake_solve)
 
-    config = pipeline.PipelineConfig(mode="autox", warm_start="off",
-                                     boundary_margin=0.45)
+    config = pipeline.PipelineConfig(mode="autox", warm_start="off", boundary_margin=0.45)
     config.solutions_dir = tmp_path
     out = pipeline._solve_with_warm_start(
-        config=config, track_data=track, model=model, integrator=None,
-        time_weights=None, solution_path=tmp_path / "sol.json", run_config={},
+        config=config,
+        track_data=track,
+        model=model,
+        integrator=None,
+        time_weights=None,
+        solution_path=tmp_path / "sol.json",
+        run_config={},
     )
 
     assert calls == {"find": 0, "save": 0}
@@ -342,8 +356,7 @@ def test_run_pipeline_always_resolves(monkeypatch, tmp_path):
     widths = tmp_path / "track_with_widths.json"
     widths.write_text("{}")
 
-    config = pipeline.PipelineConfig(mode="autox", track_id="track",
-                                     track_csv_path=csv_path)
+    config = pipeline.PipelineConfig(mode="autox", track_id="track", track_csv_path=csv_path)
     config.discretized_dir = tmp_path
     (tmp_path / "track.json").write_text("{}")
 

@@ -53,7 +53,7 @@ def main():
     kappa = np.abs(np.array(sols[MARGINS[0]]["kappa"]))
 
     V = np.vstack([np.array(sols[m]["v_long"]) for m in MARGINS])  # (n_margin, N)
-    v_spread = V.max(axis=0) - V.min(axis=0)        # how much margin moves speed
+    v_spread = V.max(axis=0) - V.min(axis=0)  # how much margin moves speed
     v_mean = V.mean(axis=0)
 
     # Fraction of track pinned at v_max (within 0.1 m/s)
@@ -61,12 +61,14 @@ def main():
     print(f"v_max = {v_max:.1f} m/s")
     print(f"Fraction of track at v_max (tightest margin): {at_vmax.mean()*100:.1f}%")
     print(f"Mean speed spread across margins: {v_spread.mean():.3f} m/s")
-    print(f"Max  speed spread across margins: {v_spread.max():.3f} m/s "
-          f"at s={arc[v_spread.argmax()]:.1f} m")
+    print(
+        f"Max  speed spread across margins: {v_spread.max():.3f} m/s "
+        f"at s={arc[v_spread.argmax()]:.1f} m"
+    )
 
     # Corner of interest stats
     cm = (arc >= 108) & (arc <= 130)
-    print(f"\nFast corner plateau s∈[108,130]:")
+    print("\nFast corner plateau s∈[108,130]:")
     print(f"  mean speed   = {v_mean[cm].mean():.2f} m/s")
     print(f"  mean spread  = {v_spread[cm].mean():.3f} m/s  (≈ margin-invariant)")
     print(f"  frac at vmax = {at_vmax[cm].mean()*100:.0f}%")
@@ -76,9 +78,11 @@ def main():
     # (margin is slack → no effect)?  slack = distance from line to nearest
     # *effective* boundary (w - margin).
     print("\nBoundary slack (min distance line→effective edge), by region:")
-    regions = [("flat corner s[108,130]", 108, 130),
-               ("hi-sens corner s[295,310]", 295, 310),
-               ("whole lap", 0, 1e9)]
+    regions = [
+        ("flat corner s[108,130]", 108, 130),
+        ("hi-sens corner s[295,310]", 295, 310),
+        ("whole lap", 0, 1e9),
+    ]
     for name, lo, hi in regions:
         rm = (arc >= lo) & (arc <= hi)
         line = []
@@ -86,10 +90,12 @@ def main():
             d = np.array(sols[mgn]["d"])
             wl = np.array(sols[mgn]["w_left"]) - mgn
             wr = np.array(sols[mgn]["w_right"]) - mgn
-            slack = np.minimum(wl - d, d + wr)   # ≥0; ~0 means against an edge
+            slack = np.minimum(wl - d, d + wr)  # ≥0; ~0 means against an edge
             line.append(slack[rm].min())
-        print(f"  {name:28s}: min slack over margins = {min(line):.3f} m "
-              f"(mean {np.mean(line):.2f} m)")
+        print(
+            f"  {name:28s}: min slack over margins = {min(line):.3f} m "
+            f"(mean {np.mean(line):.2f} m)"
+        )
 
     # =====================================================================
     # Figure: 3 panels
@@ -99,8 +105,13 @@ def main():
     # --- Panel 1: full-track speed overlay ---
     ax = axes[0]
     for m in MARGINS:
-        ax.plot(arc, sols[m]["v_long"], lw=1.1, color=MARGIN_COLORS[m],
-                label=f"{int(m*100)} cm  ({sols[m]['profiling']['lap_time_s']:.2f}s)")
+        ax.plot(
+            arc,
+            sols[m]["v_long"],
+            lw=1.1,
+            color=MARGIN_COLORS[m],
+            label=f"{int(m*100)} cm  ({sols[m]['profiling']['lap_time_s']:.2f}s)",
+        )
     ax.axhline(v_max, color="gray", ls="--", lw=0.8, alpha=0.7, label=f"v_max={v_max:.0f}")
     ax.axvspan(108, 130, color="gold", alpha=0.15, label="margin-invariant corner")
     ax.set_ylabel("speed [m/s]")
@@ -120,8 +131,15 @@ def main():
     # --- Panel 3: curvature + v_max mask ---
     ax = axes[2]
     ax.plot(arc, kappa, color="tab:gray", lw=0.9, label="|curvature| [1/m]")
-    ax.fill_between(arc, 0, kappa.max()*1.05, where=at_vmax, color="tab:red",
-                    alpha=0.15, label="pinned at v_max")
+    ax.fill_between(
+        arc,
+        0,
+        kappa.max() * 1.05,
+        where=at_vmax,
+        color="tab:red",
+        alpha=0.15,
+        label="pinned at v_max",
+    )
     ax.axvspan(108, 130, color="gold", alpha=0.15)
     ax.set_ylabel("|curvature| [1/m]")
     ax.set_xlabel("arc length s [m]")
@@ -142,12 +160,14 @@ def main():
     fig2, ax = plt.subplots(figsize=(8, 6))
     sc = ax.scatter(v_mean, v_spread, c=kappa, cmap="viridis", s=12, alpha=0.7)
     ax.axvline(v_max, color="gray", ls="--", lw=0.8, alpha=0.7)
-    ax.text(v_max - 0.2, ax.get_ylim()[1]*0.9, "v_max", ha="right", color="gray")
+    ax.text(v_max - 0.2, ax.get_ylim()[1] * 0.9, "v_max", ha="right", color="gray")
     cb = fig2.colorbar(sc, ax=ax)
     cb.set_label("|curvature| [1/m]")
     ax.set_xlabel("mean speed at point [m/s]")
     ax.set_ylabel("speed spread over margins [m/s]")
-    ax.set_title("Margin sensitivity vs local speed\n(low at v_max cap AND at tight low-speed corners)")
+    ax.set_title(
+        "Margin sensitivity vs local speed\n(low at v_max cap AND at tight low-speed corners)"
+    )
     ax.grid(True, ls="--", alpha=0.3)
     fig2.tight_layout()
     out2 = OUT_DIR / "margin_sensitivity_scatter.png"

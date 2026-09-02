@@ -6,4 +6,3 @@ __all__ = [
     "fit_and_discretize",
     "ContinuityType",
 ]
-

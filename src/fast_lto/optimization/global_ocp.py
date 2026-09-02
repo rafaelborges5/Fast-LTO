@@ -9,10 +9,8 @@ from typing import Callable, Dict, Tuple
 import casadi as ca
 import numpy as np
 
-from fast_lto.vehicle_models import VehicleModel, PointMassModel
-from fast_lto.utils.track_bounds import load_boundaries
-from fast_lto.optimization.integrators import SpaceIntegrator, EulerIntegrator, RK4Integrator
-
+from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
+from fast_lto.vehicle_models import PointMassModel, VehicleModel
 
 # Tolerances for the optional terminal centering/heading constraints (see
 # `_terminal_state_bounds` in `build_ocp`): how close to centered/aligned the
@@ -127,9 +125,7 @@ def build_space_dynamics(
         s_dot = x_dot[0]
         return x_dot[1:] / _safe_s_dot(model, s_dot)
 
-    def eval_at_point(
-        x_reduced: ca.MX, u: ca.MX, kappa: ca.MX
-    ) -> Tuple[ca.MX, ca.MX]:
+    def eval_at_point(x_reduced: ca.MX, u: ca.MX, kappa: ca.MX) -> Tuple[ca.MX, ca.MX]:
         full_state = ca.vertcat(ca.MX(0), x_reduced)
         x_dot = model.get_dynamics(full_state, u, kappa)
         return full_state, x_dot[0]  # (full_state, s_dot)
@@ -247,9 +243,7 @@ def build_ocp(
         else:
             reg_du_arr = np.asarray(reg_du, dtype=float).reshape(-1)
             if reg_du_arr.size != nu:
-                raise ValueError(
-                    f"reg_du must have length {nu}, got {reg_du_arr.size}"
-                )
+                raise ValueError(f"reg_du must have length {nu}, got {reg_du_arr.size}")
 
     opti = ca.Opti()
 
@@ -323,9 +317,7 @@ def build_ocp(
             )
         timed_arr = np.asarray(timed_mask_raw, dtype=float)
         if timed_arr.size != N:
-            raise ValueError(
-                f"track['timed_mask'] has {timed_arr.size} entries, expected {N}"
-            )
+            raise ValueError(f"track['timed_mask'] has {timed_arr.size} entries, expected {N}")
         brake_zone_mask = timed_arr < 0.5  # untimed = no timing objective = braking zone
 
         d_keys = ("D_fl", "D_fr", "D_rr", "D_rl")
@@ -412,8 +404,11 @@ def build_ocp(
                 d_phys_i = x_i[0]
                 psi_phys_i = x_i[1]
             for g in model.get_corner_constraints(
-                d_phys_i, psi_phys_i, kappa_i,
-                w_left_param[i], w_right_param[i],
+                d_phys_i,
+                psi_phys_i,
+                kappa_i,
+                w_left_param[i],
+                w_right_param[i],
             ):
                 opti.subject_to(g <= 0)
         elif use_normalization:
@@ -426,7 +421,12 @@ def build_ocp(
             opti.subject_to(x_i[0] <= w_left_param[i])
 
         dt_i = integrator.time_step(
-            f_space_i, eval_at_point_i, x_i, u_i, kappa_i, ds,
+            f_space_i,
+            eval_at_point_i,
+            x_i,
+            u_i,
+            kappa_i,
+            ds,
             kappa_half=kappa_half_i,
             kappa_next=kappa_next_i,
             eps=s_dot_floor,
@@ -449,8 +449,11 @@ def build_ocp(
             d_phys_last = x_last[0]
             psi_phys_last = x_last[1]
         for g in model.get_corner_constraints(
-            d_phys_last, psi_phys_last, kappa_param[N - 1],
-            w_left_param[N - 1], w_right_param[N - 1],
+            d_phys_last,
+            psi_phys_last,
+            kappa_param[N - 1],
+            w_left_param[N - 1],
+            w_right_param[N - 1],
         ):
             opti.subject_to(g <= 0)
     elif use_normalization:
@@ -501,11 +504,7 @@ def build_ocp(
     # solve) system than just requiring "at or under" the target.
     if terminal_speed is not None:
         reduced_names = model.reduced_state_names()
-        v_idx = (
-            reduced_names.index("v")
-            if "v" in reduced_names
-            else reduced_names.index("v_long")
-        )
+        v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
         if use_normalization:
             x_scale, x_shift = model.get_reduced_state_scaling()
             v_scale = float(np.array(x_scale).reshape(-1)[v_idx])
@@ -534,7 +533,9 @@ def build_ocp(
     # at a time.
     if mode == "skidpad" and terminal_straight_m is not None and terminal_straight_m > 0.0:
         n_window = int(round(terminal_straight_m / ds))
-        _apply_terminal_window(opti, X, N, n_window, _terminal_state_bounds(model, use_normalization))
+        _apply_terminal_window(
+            opti, X, N, n_window, _terminal_state_bounds(model, use_normalization)
+        )
 
     # Optional terminal-state constraint (autox): unlike skidpad, the path
     # leading up to the finish is left free -- only the last
@@ -681,7 +682,17 @@ def solve_ocp_and_save(
     if integrator is None:
         integrator = EulerIntegrator()
 
-    opti, X, U, params, obj, total_time_expr, timed_time_expr, pure_timed_expr, cumulative_time_expr = build_ocp(
+    (
+        opti,
+        X,
+        U,
+        params,
+        obj,
+        total_time_expr,
+        timed_time_expr,
+        pure_timed_expr,
+        cumulative_time_expr,
+    ) = build_ocp(
         track,
         model,
         integrator=integrator,
@@ -703,11 +714,7 @@ def solve_ocp_and_save(
     reduced_names = model.reduced_state_names()
     N = len(track["arc_lengths"])
     x0_phys = np.zeros(model.nx_reduced)
-    v_idx = (
-        reduced_names.index("v")
-        if "v" in reduced_names
-        else reduced_names.index("v_long")
-    )
+    v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
     x0_phys[v_idx] = initial_speed
 
     if use_normalization:
@@ -741,9 +748,7 @@ def solve_ocp_and_save(
         return_status = stats.get("return_status")
         iter_count = stats.get("iter_count")
 
-        debug_solution_path = solution_path.with_name(
-            f"{solution_path.stem}_debug_failure.json"
-        )
+        debug_solution_path = solution_path.with_name(f"{solution_path.stem}_debug_failure.json")
         debug_payload = {
             "error": str(exc),
             "return_status": return_status,
@@ -831,9 +836,9 @@ def solve_ocp_and_save(
             )
         else:
             arc_arr = np.asarray(track["arc_lengths"], dtype=np.float64)
-            time_at_node_s = np.asarray(
-                sol.value(cumulative_time_expr), dtype=np.float64
-            ).reshape(-1)
+            time_at_node_s = np.asarray(sol.value(cumulative_time_expr), dtype=np.float64).reshape(
+                -1
+            )
             s_start = float(autox_timing_offset_m)
             s_end = float(base_length_m) + float(autox_timing_offset_m)
             if s_end > arc_arr[-1] + 1e-6 or s_start < arc_arr[0] - 1e-6:
@@ -885,8 +890,7 @@ def solve_ocp_and_save(
         u_scale, u_shift = model.get_input_scaling()
         if x_scale is None or x_shift is None or u_scale is None or u_shift is None:
             raise RuntimeError(
-                "Normalisation scales/shifts are not defined for solution "
-                "post-processing."
+                "Normalisation scales/shifts are not defined for solution " "post-processing."
             )
         # x_phys = x_norm * scale + shift  (broadcast over samples)
         x_scale_np = np.asarray(x_scale).astype(float).reshape(1, -1)
@@ -900,10 +904,7 @@ def solve_ocp_and_save(
         X_phys = X_sol
         U_phys = U_sol
 
-    print(
-        f"v min/max: {X_phys[:, v_idx].min():.2f} / "
-        f"{X_phys[:, v_idx].max():.2f} m/s"
-    )
+    print(f"v min/max: {X_phys[:, v_idx].min():.2f} / " f"{X_phys[:, v_idx].max():.2f} m/s")
 
     positions = np.array(track["positions"], dtype=np.float64)
     headings = np.array(track["headings"], dtype=np.float64)

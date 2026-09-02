@@ -44,8 +44,14 @@ def plot_corner_lateral_deviation():
     fig, ax = plt.subplots(figsize=(14, 5))
 
     ax.fill_between(s, w_left, -w_right, alpha=0.08, color="gray", label="track bounds")
-    ax.fill_between(s, w_left - margin, -(w_right - margin),
-                     alpha=0.06, color="orange", label=f"bounds - {margin}m margin")
+    ax.fill_between(
+        s,
+        w_left - margin,
+        -(w_right - margin),
+        alpha=0.06,
+        color="orange",
+        label=f"bounds - {margin}m margin",
+    )
 
     ax.plot(s, d, "k-", lw=1.5, label="CoG", zorder=5)
 
@@ -62,7 +68,7 @@ def plot_corner_lateral_deviation():
     ax.set_title("CoG + four corners lateral deviation (Maisach, four-wheel model)")
     fig.tight_layout()
     fig.savefig(OUT / "corner_lateral_deviation.png", dpi=200)
-    print(f"Saved: corner_lateral_deviation.png")
+    print("Saved: corner_lateral_deviation.png")
     plt.close(fig)
 
 
@@ -88,8 +94,9 @@ def plot_steering_rate():
     axes[0].set_title("Steering angle and rate (Maisach, four-wheel)")
 
     axes[1].plot(s, delta_rate, color="tab:cyan", lw=1.0)
-    axes[1].axhline(ddeltamax, color="gray", ls="--", lw=0.7, alpha=0.5,
-                     label=f"limit: +/-{ddeltamax} rad/s")
+    axes[1].axhline(
+        ddeltamax, color="gray", ls="--", lw=0.7, alpha=0.5, label=f"limit: +/-{ddeltamax} rad/s"
+    )
     axes[1].axhline(-ddeltamax, color="gray", ls="--", lw=0.7, alpha=0.5)
     axes[1].set_xlabel("s [m]")
     axes[1].set_ylabel("delta_dot [rad/s]")
@@ -98,7 +105,7 @@ def plot_steering_rate():
 
     fig.tight_layout()
     fig.savefig(OUT / "steering_rate.png", dpi=200)
-    print(f"Saved: steering_rate.png")
+    print("Saved: steering_rate.png")
     plt.close(fig)
 
 
@@ -119,19 +126,28 @@ def plot_trajectory_comparison_clean():
     models = {
         "point_mass": {
             "file": REPO / "data" / "experiments" / "maisach_fair_point_mass_ds1.0.json",
-            "label": "Point Mass (47.0s)", "color": "tab:green", "lw": 1.2,
+            "label": "Point Mass (47.0s)",
+            "color": "tab:green",
+            "lw": 1.2,
         },
         "dynamic_bicycle": {
             "file": REPO / "data" / "experiments" / "maisach_fair_dynamic_bicycle_ds1.0.json",
-            "label": "Dyn. Bicycle (49.4s)", "color": "tab:orange", "lw": 1.2,
+            "label": "Dyn. Bicycle (49.4s)",
+            "color": "tab:orange",
+            "lw": 1.2,
         },
         "four_wheel_no_aero": {
             "file": REPO / "data" / "experiments" / "maisach_fair_four_wheel_no_aero_ds1.0.json",
-            "label": "4W no aero (46.3s)", "color": "tab:blue", "lw": 1.2,
+            "label": "4W no aero (46.3s)",
+            "color": "tab:blue",
+            "lw": 1.2,
         },
         "four_wheel_full": {
             "file": REPO / "data" / "experiments" / "maisach_full_four_wheel_ds1.0.json",
-            "label": "4W full aero (42.1s)", "color": "tab:red", "lw": 1.5, "ls": "--",
+            "label": "4W full aero (42.1s)",
+            "color": "tab:red",
+            "lw": 1.5,
+            "ls": "--",
         },
     }
 
@@ -140,8 +156,14 @@ def plot_trajectory_comparison_clean():
     for cfg in models.values():
         d = json.load(cfg["file"].open())
         xy = np.array(d["path_xy"])
-        ax.plot(xy[:, 0], xy[:, 1], color=cfg["color"], ls=cfg.get("ls", "-"),
-                lw=cfg["lw"], label=cfg["label"])
+        ax.plot(
+            xy[:, 0],
+            xy[:, 1],
+            color=cfg["color"],
+            ls=cfg.get("ls", "-"),
+            lw=cfg["lw"],
+            label=cfg["label"],
+        )
     ax.set_aspect("equal")
     ax.legend(fontsize=9, loc="best")
     ax.set_title("Trajectory comparison — full track")
@@ -154,7 +176,7 @@ def plot_trajectory_comparison_clean():
     abs_kappa = np.abs(kappa)
     # Find the tightest corner region
     window = 30
-    conv = np.convolve(abs_kappa, np.ones(window)/window, mode="valid")
+    conv = np.convolve(abs_kappa, np.ones(window) / window, mode="valid")
     peak_idx = np.argmax(conv) + window // 2
     xy_4w = np.array(sol_4w["path_xy"])
     cx, cy = xy_4w[peak_idx]
@@ -163,8 +185,14 @@ def plot_trajectory_comparison_clean():
     for cfg in models.values():
         d = json.load(cfg["file"].open())
         xy = np.array(d["path_xy"])
-        ax2.plot(xy[:, 0], xy[:, 1], color=cfg["color"], ls=cfg.get("ls", "-"),
-                 lw=cfg["lw"] * 1.5, label=cfg["label"])
+        ax2.plot(
+            xy[:, 0],
+            xy[:, 1],
+            color=cfg["color"],
+            ls=cfg.get("ls", "-"),
+            lw=cfg["lw"] * 1.5,
+            label=cfg["label"],
+        )
     zoom = 12
     ax2.set_xlim(cx - zoom, cx + zoom)
     ax2.set_ylim(cy - zoom, cy + zoom)
@@ -176,7 +204,7 @@ def plot_trajectory_comparison_clean():
     fig.suptitle("Trajectory Comparison — Maisach Track", fontsize=13)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT / "trajectory_comparison_clean.png", dpi=200)
-    print(f"Saved: trajectory_comparison_clean.png")
+    print("Saved: trajectory_comparison_clean.png")
     plt.close(fig)
 
 

@@ -7,11 +7,11 @@ Run directly to plot the last saved solution (ellipse_point_mass.npz) if present
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-import json
-from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -32,7 +32,9 @@ def plot_path_with_speed(
         fig, ax = plt.subplots(figsize=(6, 8))
     ax.scatter(cones_left[:, 0], cones_left[:, 1], c="tab:blue", s=12, label="left cones")
     ax.scatter(cones_right[:, 0], cones_right[:, 1], c="tab:orange", s=12, label="right cones")
-    sc = ax.scatter(path_xy[:, 0], path_xy[:, 1], c=v, cmap="viridis", s=8, label="path (v-colored)")
+    sc = ax.scatter(
+        path_xy[:, 0], path_xy[:, 1], c=v, cmap="viridis", s=8, label="path (v-colored)"
+    )
     cbar = plt.colorbar(sc, ax=ax, label="speed [m/s]")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, linestyle="--", alpha=0.4)
@@ -121,9 +123,19 @@ def plot_gg(
     circ_y = mu_g * np.sin(theta)
     ax.plot(circ_x, circ_y, "r--", label="friction circle")
     if a_long_bounds is not None and a_lat_bounds is not None:
-        ax.plot([a_long_bounds[0], a_long_bounds[1], a_long_bounds[1], a_long_bounds[0], a_long_bounds[0]],
-                [a_lat_bounds[0], a_lat_bounds[0], a_lat_bounds[1], a_lat_bounds[1], a_lat_bounds[0]],
-                "k--", alpha=0.5, label="a box")
+        ax.plot(
+            [
+                a_long_bounds[0],
+                a_long_bounds[1],
+                a_long_bounds[1],
+                a_long_bounds[0],
+                a_long_bounds[0],
+            ],
+            [a_lat_bounds[0], a_lat_bounds[0], a_lat_bounds[1], a_lat_bounds[1], a_lat_bounds[0]],
+            "k--",
+            alpha=0.5,
+            label="a box",
+        )
     ax.set_xlabel("a_long [m/s^2]")
     ax.set_ylabel("a_lat [m/s^2]")
     ax.set_aspect("equal", adjustable="box")
@@ -226,9 +238,9 @@ def _compute_constraint_activity(
 
     # Tolerances (heuristic, not critical)
     tol_d = 0.05  # [m]
-    tol_a = 0.5   # [m/s^2]
+    tol_a = 0.5  # [m/s^2]
     tol_fc = 0.05
-    tol_v = 0.5   # [m/s]
+    tol_v = 0.5  # [m/s]
 
     # Track bounds: near left or right limits
     near_left = np.isfinite(w_left) & (np.abs(d - w_left) < tol_d)
@@ -336,6 +348,7 @@ def _plot_profiling_panel(
     lines.append("Constraint activity (fraction of lap):")
 
     if constraint_activity is not None:
+
         def pct(key: str) -> float:
             val = constraint_activity.get(key)
             return float(val * 100.0) if val is not None else 0.0
@@ -381,10 +394,14 @@ def plot_all_panels(
     fig, axes = plt.subplots(3, 2, figsize=(12, 12))
     axes = axes.flatten()
 
-    plot_path_with_speed(cones_left, cones_right, path_xy, v, out_path=None, show=False, fig=fig, ax=axes[0])
+    plot_path_with_speed(
+        cones_left, cones_right, path_xy, v, out_path=None, show=False, fig=fig, ax=axes[0]
+    )
     axes[0].set_title("Path vs cones")
 
-    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1], timed_mask=timed_mask)
+    plot_speed_profile(
+        s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1], timed_mask=timed_mask
+    )
     axes[1].set_title("Speed profile")
 
     plot_offsets(s, d, w_left, w_right, out_path=None, show=False, fig=fig, ax=axes[2])
@@ -474,4 +491,3 @@ def _demo() -> None:
 
 if __name__ == "__main__":
     _demo()
-

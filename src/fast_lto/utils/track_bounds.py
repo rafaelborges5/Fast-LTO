@@ -24,7 +24,7 @@ from typing import Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import CubicSpline, PchipInterpolator
+from scipy.interpolate import CubicSpline
 from scipy.signal import savgol_filter
 from scipy.spatial import cKDTree
 
@@ -138,7 +138,9 @@ def _ray_segment_intersection(p: np.ndarray, n_hat: np.ndarray, q0: np.ndarray, 
     return t, u
 
 
-def _compute_lateral_bounds_rays(track: DiscretizedTrack, left: np.ndarray, right: np.ndarray) -> LateralBoundsResult:
+def _compute_lateral_bounds_rays(
+    track: DiscretizedTrack, left: np.ndarray, right: np.ndarray
+) -> LateralBoundsResult:
     """
     Legacy implementation: for each center sample, intersect its normal with
     left/right boundary polylines using a ray–segment scan.
@@ -256,7 +258,7 @@ def _project_boundary_points_to_frenet(
 
     d_raw = np.einsum("ij,ij->i", v, n_i)
 
-    correction = 0.5 * k_i * (delta_s ** 2) # 2nd order taylor correctoin
+    correction = 0.5 * k_i * (delta_s**2)  # 2nd order taylor correctoin
     d_true = d_raw - np.sign(d_raw) * correction
 
     ds_max = ds_max_factor * float(s[1] - s[0]) if s.size > 1 else np.inf
@@ -265,7 +267,9 @@ def _project_boundary_points_to_frenet(
     return s_cone[mask], d_true[mask]
 
 
-def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, right: np.ndarray) -> LateralBoundsResult:
+def _compute_lateral_bounds_kdtree(
+    track: DiscretizedTrack, left: np.ndarray, right: np.ndarray
+) -> LateralBoundsResult:
     """
     KD-tree based implementation:
       1) Map boundary points to nearest centerline samples via KD-tree.
@@ -302,7 +306,9 @@ def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, ri
         right, positions, s, tangents, normals, kappa, tree
     )
 
-    def _prepare_side(s_samples: np.ndarray, d_samples: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def _prepare_side(
+        s_samples: np.ndarray, d_samples: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
         if s_samples.size == 0:
             return s_samples, d_samples
 
@@ -372,14 +378,18 @@ def _compute_lateral_bounds_kdtree(track: DiscretizedTrack, left: np.ndarray, ri
     )
 
 
-def compute_lateral_bounds(track: DiscretizedTrack, left: np.ndarray, right: np.ndarray) -> LateralBoundsResult:
+def compute_lateral_bounds(
+    track: DiscretizedTrack, left: np.ndarray, right: np.ndarray
+) -> LateralBoundsResult:
     # New KD-tree + spline implementation (default)
     return _compute_lateral_bounds_kdtree(track, left, right)
     # Legacy ray-based implementation:
     # return _compute_lateral_bounds_rays(track, left, right)
 
 
-def save_bounds_json(path: Path, track: DiscretizedTrack, csv_source: Path, result: LateralBoundsResult) -> None:
+def save_bounds_json(
+    path: Path, track: DiscretizedTrack, csv_source: Path, result: LateralBoundsResult
+) -> None:
     data = {
         "source_boundaries_csv": str(csv_source),
         "discretized_track": str(path),
@@ -495,5 +505,3 @@ def _demo() -> None:
 
 if __name__ == "__main__":
     _demo()
-
-

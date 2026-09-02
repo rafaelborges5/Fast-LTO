@@ -16,11 +16,10 @@ Columns: side,cone_id,x,y
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 
 _SIDE_TO_BOUNDARY: Dict[str, str] = {"L": "left", "M": "middle", "R": "right"}
 
@@ -147,7 +146,5 @@ def plot_track_csv(
 __all__ = ["plot_track_csv"]
 
 
-
 if __name__ == "__main__":
     plot_track_csv("data/tracks/fsg_random.csv")
-

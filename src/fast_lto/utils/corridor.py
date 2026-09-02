@@ -68,11 +68,7 @@ def corridor_at(
         hi, lo = np.inf, -np.inf
         for corner in corners:
             long_proj = corner.dx * cos_p - corner.dy * sin_p
-            shift = (
-                corner.dx * sin_p
-                + corner.dy * cos_p
-                - 0.5 * kappa / d_kappa * long_proj**2
-            )
+            shift = corner.dx * sin_p + corner.dy * cos_p - 0.5 * kappa / d_kappa * long_proj**2
             if corner.dy >= 0.0:
                 hi = min(hi, w_left - shift)
             else:
@@ -127,9 +123,7 @@ def critical_margin(
 
     if min_width(margin_max) > 0.0:
         idx = int(np.argmin(corridor_widths(track, corners, margin_max, psi_err)))
-        return CriticalMargin(
-            margin_max, idx, float(arc[idx]), float(kappa[idx]), width_0
-        )
+        return CriticalMargin(margin_max, idx, float(arc[idx]), float(kappa[idx]), width_0)
 
     lo, hi = 0.0, margin_max
     while hi - lo > tol:
@@ -152,11 +146,7 @@ def describe_critical_margin(crit: CriticalMargin, target_margin: float) -> str:
             f"(station s = {crit.arc_length_m:.1f} m, kappa = {crit.kappa:+.3f}, "
             f"corridor {crit.width_at_zero_margin:+.3f} m at margin 0)"
         )
-    verdict = (
-        "continuation will be used"
-        if target_margin > crit.margin
-        else "cold start is fine"
-    )
+    verdict = "continuation will be used" if target_margin > crit.margin else "cold start is fine"
     return (
         f"centreline initial guess feasible up to boundary_margin "
         f"{crit.margin:.2f} m (limiting station s = {crit.arc_length_m:.1f} m, "

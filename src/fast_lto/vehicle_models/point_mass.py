@@ -57,7 +57,9 @@ class PointMassModel(VehicleModel):
     def get_input_names(self) -> List[str]:
         return ["a_long", "a_lat"]
 
-    def get_dynamics(self, states: Sequence[ca.MX], inputs: Sequence[ca.MX], curvature: ca.MX) -> ca.MX:
+    def get_dynamics(
+        self, states: Sequence[ca.MX], inputs: Sequence[ca.MX], curvature: ca.MX
+    ) -> ca.MX:
         """
         x_dot = f(x, u, kappa)
         """
@@ -69,13 +71,13 @@ class PointMassModel(VehicleModel):
         a_lat = inputs[1]
         kappa = curvature
 
-        denom = (1 - kappa * d)
+        denom = 1 - kappa * d
         # Avoid divide-by-zero in psi_err_dot when v is near zero.
         v_safe = ca.fmax(v, self.params["v_eps"])
 
         s_dot = v * ca.cos(psi_err) / denom  # ds/dt
         d_dot = v * ca.sin(psi_err)  # dd/dt
-        psi_err_dot = a_lat / v_safe - kappa * s_dot  #d(psi_err)/dt
+        psi_err_dot = a_lat / v_safe - kappa * s_dot  # d(psi_err)/dt
         v_dot = a_long  # dv/dt
 
         return ca.vertcat(s_dot, d_dot, psi_err_dot, v_dot)
@@ -119,4 +121,3 @@ class PointMassModel(VehicleModel):
         lb = [p["a_long_min"], p["a_lat_min"]]
         ub = [p["a_long_max"], p["a_lat_max"]]
         return lb, ub
-

@@ -30,9 +30,7 @@ def test_start_xy_none_keeps_reference_first_point() -> None:
 def test_start_xy_override_moves_p0_and_shortens_track() -> None:
     _require_fixtures()
     baseline = build_skidpad_track(map_csv=MAP_CSV, ref_csv=REF_CSV, ds_m=0.5)
-    shifted = build_skidpad_track(
-        map_csv=MAP_CSV, ref_csv=REF_CSV, ds_m=0.5, start_xy=(4.0, 0.0)
-    )
+    shifted = build_skidpad_track(map_csv=MAP_CSV, ref_csv=REF_CSV, ds_m=0.5, start_xy=(4.0, 0.0))
 
     assert shifted["skidpad"]["P0"] == pytest.approx([4.0, 0.0], abs=1e-6)
     # Only the entry straight changes; everything downstream of the gate is

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -97,7 +97,11 @@ class TrackProcessor:
         if seg_len <= 1e-9:
             ratio = 0.0
         else:
-            ratio = (s_wrapped - s0) / seg_len if s_wrapped >= s0 else (s_wrapped + self.total_length - s0) / seg_len
+            ratio = (
+                (s_wrapped - s0) / seg_len
+                if s_wrapped >= s0
+                else (s_wrapped + self.total_length - s0) / seg_len
+            )
 
         pos = self.positions[idx] + ratio * (self.positions[idx_next] - self.positions[idx])
         heading = self._interp_heading(idx, ratio)
@@ -105,14 +109,18 @@ class TrackProcessor:
         normal = np.array([-tangent[1], tangent[0]])
         curvature = self._interp_curvature(idx, ratio)
 
-        return FrenetFrame(s=s_wrapped, position_xy=pos, tangent=tangent, normal=normal, curvature=curvature)
+        return FrenetFrame(
+            s=s_wrapped, position_xy=pos, tangent=tangent, normal=normal, curvature=curvature
+        )
 
     def frenet_to_xy(self, s: float, d: float) -> np.ndarray:
         """Convert Frenet (s, d) to Cartesian xy."""
         frame = self.sample_at_s(s)
         return frame.position_xy + d * frame.normal
 
-    def project_xy_to_frenet(self, xy: np.ndarray, heading: Optional[float] = None) -> FrenetProjection:
+    def project_xy_to_frenet(
+        self, xy: np.ndarray, heading: Optional[float] = None
+    ) -> FrenetProjection:
         """Project a Cartesian point (and optional heading) to Frenet coordinates."""
         p = np.asarray(xy, dtype=np.float64)
 
@@ -213,7 +221,13 @@ class TrackProcessor:
             if self.nominal_half_width is not None:
                 left = p + self.nominal_half_width * n_hat
                 right = p - self.nominal_half_width * n_hat
-                ax.plot([left[0], right[0]], [left[1], right[1]], color="tab:orange", alpha=0.6, linewidth=1.0)
+                ax.plot(
+                    [left[0], right[0]],
+                    [left[1], right[1]],
+                    color="tab:orange",
+                    alpha=0.6,
+                    linewidth=1.0,
+                )
 
         ax.set_aspect("equal", adjustable="box")
         ax.set_title("Frenet geometry check")
@@ -368,7 +382,7 @@ class TrackProcessor:
                 label=f"singular points ({len(singular_indices)} shown)",
             )
 
-        ax.set_aspect("equal", adjustable="box")    
+        ax.set_aspect("equal", adjustable="box")
         ax.set_title(
             f"Frenet geometry check with singularities\n"
             f"Normal lines: ±{normal_length_m}m | "
@@ -450,7 +464,6 @@ def debug_frenet_singularities(
 
 def _demo() -> None:
     import json
-    import sys
 
     repo_root = Path(__file__).resolve().parents[2]
 
@@ -463,9 +476,9 @@ def _demo() -> None:
     left_boundary = None
     right_boundary = None
 
-    from fast_lto.utils.track_bounds import load_boundaries, compute_lateral_bounds
-    from fast_lto.tracks.fsg_trackdrive import generate_fsg_track
     from fast_lto.splines.spline_fitter import fit_and_discretize
+    from fast_lto.tracks.fsg_trackdrive import generate_fsg_track
+    from fast_lto.utils.track_bounds import compute_lateral_bounds, load_boundaries
 
     if track_with_widths_path.exists():
         print(f"Loading track with widths from {track_with_widths_path}")
@@ -482,11 +495,11 @@ def _demo() -> None:
                 boundaries = load_boundaries(csv_path)
                 left_boundary = boundaries.get("left")
                 right_boundary = boundaries.get("right")
-                print(f"  Loaded boundaries from CSV")
+                print("  Loaded boundaries from CSV")
             except Exception as e:
                 print(f"  Could not load boundaries: {e}")
     else:
-        print(f"Track with widths not found, generating new FSG track...")
+        print("Track with widths not found, generating new FSG track...")
 
         csv_path = repo_root / "data" / "tracks" / "fsg_random_demo.csv"
         csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -525,4 +538,3 @@ def _demo() -> None:
 
 if __name__ == "__main__":
     _demo()
-

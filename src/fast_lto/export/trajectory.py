@@ -165,7 +165,9 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     else:
         v_lat = np.zeros(N, dtype=np.float64)
         v_eps = float(params.get("v_eps", 0.1))
-        yaw_rate_equiv = np.array(data.get("a_lat", np.zeros(N)), dtype=np.float64) / np.maximum(v, v_eps)
+        yaw_rate_equiv = np.array(data.get("a_lat", np.zeros(N)), dtype=np.float64) / np.maximum(
+            v, v_eps
+        )
 
     # -- Arc lengths along the optimal path --
     path_diffs = np.diff(path_xy, axis=0)
@@ -233,8 +235,13 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         F_drag = 0.5 * rho * C_d * A_f * v**2
         F_roll_val = m * g_val * C_r
         cd = np.cos(delta_arr)
-        Fx_total = ((force_long_fl + force_long_fr) * cd
-                    + force_long_rr + force_long_rl - F_roll_val - F_drag)
+        Fx_total = (
+            (force_long_fl + force_long_fr) * cd
+            + force_long_rr
+            + force_long_rl
+            - F_roll_val
+            - F_drag
+        )
         a_long = Fx_total / m + yaw_rate_arr * v_lat
 
     elif model_name == "dynamic_bicycle":

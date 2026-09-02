@@ -77,9 +77,7 @@ def plot_skidpad(
     d = np.array(data["d"], dtype=np.float64)
     w_left = np.array(data["w_left"], dtype=np.float64)
     w_right = np.array(data["w_right"], dtype=np.float64)
-    timed = np.asarray(
-        data.get("timed_mask") or np.zeros(len(s)), dtype=int
-    )
+    timed = np.asarray(data.get("timed_mask") or np.zeros(len(s)), dtype=int)
     sk = data.get("skidpad", {}) or {}
     profiling = data.get("profiling", {}) or {}
 
@@ -91,14 +89,17 @@ def plot_skidpad(
 
     ax = axes[0, 0]
     ax.scatter(cones[:, 0], cones[:, 1], c="dimgray", s=16, label="cones", zorder=2)
-    sc = ax.scatter(
-        path_xy[:, 0], path_xy[:, 1], c=v, cmap="viridis", s=8, zorder=3
-    )
+    sc = ax.scatter(path_xy[:, 0], path_xy[:, 1], c=v, cmap="viridis", s=8, zorder=3)
     tm = timed == 1
     ax.scatter(
-        path_xy[tm, 0], path_xy[tm, 1],
-        facecolors="none", edgecolors="red", s=22, linewidths=0.6,
-        label="timed laps", zorder=4,
+        path_xy[tm, 0],
+        path_xy[tm, 1],
+        facecolors="none",
+        edgecolors="red",
+        s=22,
+        linewidths=0.6,
+        label="timed laps",
+        zorder=4,
     )
     for key, mark in (("c_first", "C1"), ("c_second", "C3")):
         if key in sk:
@@ -110,7 +111,8 @@ def plot_skidpad(
     fig.colorbar(sc, ax=ax, label="v [m/s]")
     ax.set_aspect("equal", adjustable="box")
     ax.set_title("Optimal skidpad path (colored by speed)")
-    ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
     ax.legend(loc="upper right", fontsize=8)
     ax.grid(True, ls="--", alpha=0.3)
 
@@ -119,7 +121,8 @@ def plot_skidpad(
     for a, b in timed_blocks(timed):
         ax.axvspan(s[a], s[b], color="red", alpha=0.12)
     ax.set_title("Speed vs arc length (timed laps shaded)")
-    ax.set_xlabel("s [m]"); ax.set_ylabel("v [m/s]")
+    ax.set_xlabel("s [m]")
+    ax.set_ylabel("v [m/s]")
     ax.grid(True, ls="--", alpha=0.3)
 
     ax = axes[1, 0]
@@ -129,8 +132,10 @@ def plot_skidpad(
     for a, b in timed_blocks(timed):
         ax.axvspan(s[a], s[b], color="red", alpha=0.12)
     ax.set_title("Lateral deviation d(s) and corridor")
-    ax.set_xlabel("s [m]"); ax.set_ylabel("d [m]")
-    ax.legend(fontsize=8); ax.grid(True, ls="--", alpha=0.3)
+    ax.set_xlabel("s [m]")
+    ax.set_ylabel("d [m]")
+    ax.legend(fontsize=8)
+    ax.grid(True, ls="--", alpha=0.3)
 
     ax = axes[1, 1]
     wheel_keys = ["Fx_fl", "Fx_fr", "Fx_rr", "Fx_rl"]
@@ -146,7 +151,8 @@ def plot_skidpad(
     for a, b in timed_blocks(timed):
         ax.axvspan(s[a], s[b], color="red", alpha=0.12)
     ax.set_xlabel("s [m]")
-    ax.legend(fontsize=8, ncol=2); ax.grid(True, ls="--", alpha=0.3)
+    ax.legend(fontsize=8, ncol=2)
+    ax.grid(True, ls="--", alpha=0.3)
 
     lap_str = ", ".join(f"{t:.3f}s" for t in lap_times) if lap_times else "n/a"
     full_str = f"{full_time:.2f}s" if full_time is not None else "n/a"

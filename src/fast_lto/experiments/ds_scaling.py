@@ -142,12 +142,16 @@ def run_ds_scaling_experiment(
         print(f"  ds values: {[round(float(d), 3) for d in ds_values]} m (explicit)")
     else:
         print(f"  ds range: [{ds_min:.3f}, {ds_max:.3f}] m with {num_ds} points (log-spaced)")
-    print(f"  reg_u (du): {reg_u}, reg_u_l2_ref: {reg_u_l2_ref} @ ds_ref={reg_ds_ref} "
-          f"(mode={reg_scale_mode}), reg budget: {reg_relative_max:.1%}")
+    print(
+        f"  reg_u (du): {reg_u}, reg_u_l2_ref: {reg_u_l2_ref} @ ds_ref={reg_ds_ref} "
+        f"(mode={reg_scale_mode}), reg budget: {reg_relative_max:.1%}"
+    )
     print(f"  boundary_margin: {boundary_margin}, smooth_centerline: {smooth_centerline}")
     if done_by_ds:
-        print(f"  Resume: {len(done_by_ds)} ds value(s) already in {csv_path.name}; "
-              f"these will be skipped.")
+        print(
+            f"  Resume: {len(done_by_ds)} ds value(s) already in {csv_path.name}; "
+            f"these will be skipped."
+        )
     print()
 
     for ds in ds_values:
@@ -172,9 +176,7 @@ def run_ds_scaling_experiment(
             # Scale L2 input regularisation with ds so its relative contribution
             # to the objective stays within budget at every resolution, then
             # halve-and-retry if a solve still exceeds it.
-            reg_u_l2_ds = _scaled_reg_u_l2(
-                ds_float, reg_u_l2_ref, reg_ds_ref, reg_scale_mode
-            )
+            reg_u_l2_ds = _scaled_reg_u_l2(ds_float, reg_u_l2_ref, reg_ds_ref, reg_scale_mode)
 
             max_reg_retries = 3
             profiling: Dict[str, Any] = {}
@@ -270,11 +272,7 @@ def run_ds_scaling_experiment(
             else:
                 metrics["time_per_lap_solve_ratio"] = None
 
-            if (
-                time_per_point_ms is not None
-                and iter_count not in (None, 0)
-                and N not in (None, 0)
-            ):
+            if time_per_point_ms is not None and iter_count not in (None, 0) and N not in (None, 0):
                 metrics["time_per_iter_per_point_ms"] = time_per_point_ms / iter_count
             else:
                 metrics["time_per_iter_per_point_ms"] = None
@@ -481,8 +479,13 @@ def _make_lap_asymptote_plot(
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
 
     axes[0].plot(ds_arr, lap_arr, "o-", color="C0")
-    axes[0].axhline(asymptote, color="k", ls="--", alpha=0.7,
-                    label=f"asymptote = {asymptote:.3f} s (ds={ds_arr[0]:.2f} m)")
+    axes[0].axhline(
+        asymptote,
+        color="k",
+        ls="--",
+        alpha=0.7,
+        label=f"asymptote = {asymptote:.3f} s (ds={ds_arr[0]:.2f} m)",
+    )
     axes[0].set_xlabel("ds [m]")
     axes[0].set_ylabel("racing lap time [s]")
     axes[0].set_title("Lap-time convergence")
@@ -492,9 +495,14 @@ def _make_lap_asymptote_plot(
     for ds_i, lap_i in zip(ds_arr, lap_arr):
         if asymptote != 0.0:
             pct = (lap_i - asymptote) / asymptote * 100.0
-            axes[0].annotate(f"{pct:+.1f}%", (ds_i, lap_i),
-                             textcoords="offset points", xytext=(0, 6),
-                             fontsize=8, ha="center")
+            axes[0].annotate(
+                f"{pct:+.1f}%",
+                (ds_i, lap_i),
+                textcoords="offset points",
+                xytext=(0, 6),
+                fontsize=8,
+                ha="center",
+            )
 
     # Error plot (skip the reference point itself where err == 0).
     mask = err > 0
@@ -795,8 +803,7 @@ def _parse_args() -> argparse.Namespace:
         "--multi-config",
         action="store_true",
         help=(
-            "Run four predefined configurations "
-            "(euler/rk4 × C2/C4) and generate combined plots."
+            "Run four predefined configurations " "(euler/rk4 × C2/C4) and generate combined plots."
         ),
     )
     parser.add_argument(
@@ -863,10 +870,12 @@ def _resolve_non_swept_params(args: argparse.Namespace) -> Dict[str, Any]:
         if args.reg_l2_ref is None:
             params["reg_u_l2_ref"] = rc.reg_u_l2
         rc.validate_for_model()
-        print(f"Loaded config from {args.config}: model={rc.model_name}, "
-              f"v_max={rc.vehicle.v_max}, margin={rc.boundary_margin}, "
-              f"smooth={rc.smooth_centerline}, reg_u={rc.reg_u}, "
-              f"reg_u_l2_ref={params['reg_u_l2_ref']}")
+        print(
+            f"Loaded config from {args.config}: model={rc.model_name}, "
+            f"v_max={rc.vehicle.v_max}, margin={rc.boundary_margin}, "
+            f"smooth={rc.smooth_centerline}, reg_u={rc.reg_u}, "
+            f"reg_u_l2_ref={params['reg_u_l2_ref']}"
+        )
 
     return params
 
@@ -938,7 +947,9 @@ def main() -> None:
             # All CSVs are in the same directory by construction.
             if csv_entries:
                 out_dir = csv_entries[0]["csv"].parent
-                _make_combined_plots(config_results, out_dir, track_id=args.track_id, model_name=args.model)
+                _make_combined_plots(
+                    config_results, out_dir, track_id=args.track_id, model_name=args.model
+                )
         else:
             print("Skipping combined plot generation due to --no-plots.")
 
@@ -971,4 +982,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

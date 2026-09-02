@@ -85,8 +85,10 @@ def main():
     params = dict(ref["model_params"])
     params["v_max"] = V_MAX_OVERRIDE  # locked sweep used 27, ref solution had 20
     reg_du = float(ref["run_config"].get("reg_du", 0.0))
-    print(f"  v_max={params['v_max']}  m={params['m']}  D={params['D_fl']}  "
-          f"C_l={params['C_l']}  reg_du={reg_du}  reg_u_l2={REG_U_L2}")
+    print(
+        f"  v_max={params['v_max']}  m={params['m']}  D={params['D_fl']}  "
+        f"C_l={params['C_l']}  reg_du={reg_du}  reg_u_l2={REG_U_L2}"
+    )
     model = FourWheelModel(params=params)
 
     integrator = EulerIntegrator()
@@ -174,9 +176,13 @@ def main():
         arc = results[margin]["arc_lengths"]
         v = results[margin]["v_long"]
         mask = (arc >= CORNER_S_LO) & (arc <= CORNER_S_HI)
-        ax2.plot(arc[mask], v[mask], lw=2.0,
-                 color=MARGIN_COLORS[margin],
-                 label=f"{int(margin*100)} cm  ({results[margin]['lap_time']:.2f}s)")
+        ax2.plot(
+            arc[mask],
+            v[mask],
+            lw=2.0,
+            color=MARGIN_COLORS[margin],
+            label=f"{int(margin*100)} cm  ({results[margin]['lap_time']:.2f}s)",
+        )
 
     ax2.set_xlabel("arc length s [m]")
     ax2.set_ylabel("speed [m/s]")
@@ -184,8 +190,9 @@ def main():
     ax2.legend(fontsize=9, title="margin")
     ax2.grid(True, ls="--", alpha=0.3)
 
-    fig.suptitle("Margin sweep — Maisach corner (four-wheel, v_max=27, reg_u_l2=4.0, ds=1.0m)",
-                 fontsize=12)
+    fig.suptitle(
+        "Margin sweep — Maisach corner (four-wheel, v_max=27, reg_u_l2=4.0, ds=1.0m)", fontsize=12
+    )
     fig.tight_layout(rect=[0, 0, 1, 0.95])
 
     out_path = OUT_DIR / "margin_corner_zoom.png"

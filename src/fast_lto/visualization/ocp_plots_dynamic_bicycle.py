@@ -298,7 +298,14 @@ def _plot_profiling_panel_dynamic(
     ax.axis("off")
 
     if profiling is None:
-        ax.text(0.0, 0.5, "No profiling data available.", transform=ax.transAxes, fontsize=10, va="center")
+        ax.text(
+            0.0,
+            0.5,
+            "No profiling data available.",
+            transform=ax.transAxes,
+            fontsize=10,
+            va="center",
+        )
         return
 
     lines = []
@@ -341,6 +348,7 @@ def _plot_profiling_panel_dynamic(
     lines.append("")
     lines.append("Constraint activity (fraction of lap):")
     if constraint_activity is not None:
+
         def pct(key: str) -> float:
             val = constraint_activity.get(key)
             return float(val * 100.0) if val is not None else 0.0
@@ -353,7 +361,9 @@ def _plot_profiling_panel_dynamic(
     else:
         lines.append("(no constraint activity data)")
 
-    ax.text(0.0, 1.0, "\n".join(lines), transform=ax.transAxes, fontsize=9, va="top", family="monospace")
+    ax.text(
+        0.0, 1.0, "\n".join(lines), transform=ax.transAxes, fontsize=9, va="top", family="monospace"
+    )
 
 
 def plot_all_panels_dynamic_bicycle(
@@ -375,7 +385,9 @@ def plot_all_panels_dynamic_bicycle(
     out_path: Optional[Path] = None,
     show: bool = True,
 ):
-    a_lat = _compute_a_lat_from_tires(v=v, v_lat=v_lat, yaw_rate=yaw_rate, delta=delta, params=params)
+    a_lat = _compute_a_lat_from_tires(
+        v=v, v_lat=v_lat, yaw_rate=yaw_rate, delta=delta, params=params
+    )
     mu = float(params.get("mu", 1.2))
     g_val = float(params.get("g", 9.81))
     gamma = float(params.get("gamma_ellipse", 1.0))
@@ -395,10 +407,14 @@ def plot_all_panels_dynamic_bicycle(
     fig, axes = plt.subplots(3, 2, figsize=(12, 12))
     axes = axes.flatten()
 
-    plot_path_with_speed(cones_left, cones_right, path_xy, v, out_path=None, show=False, fig=fig, ax=axes[0])
+    plot_path_with_speed(
+        cones_left, cones_right, path_xy, v, out_path=None, show=False, fig=fig, ax=axes[0]
+    )
     axes[0].set_title("Path vs cones")
 
-    plot_speed_profile(s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1], timed_mask=timed_mask)
+    plot_speed_profile(
+        s, v, v_max=None, out_path=None, show=False, fig=fig, ax=axes[1], timed_mask=timed_mask
+    )
     axes[1].set_title("Speed profile")
 
     plot_offsets(s, d, w_left, w_right, out_path=None, show=False, fig=fig, ax=axes[2])
@@ -433,4 +449,3 @@ def plot_all_panels_dynamic_bicycle(
     if show:
         plt.show()
     plt.close(fig)
-

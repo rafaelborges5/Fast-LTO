@@ -12,7 +12,7 @@ optimization pipelines.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
@@ -70,8 +70,12 @@ class DiscretizedTrack:
         assert self.positions.shape == (n, 2), f"positions shape mismatch: {self.positions.shape}"
         assert self.headings.shape == (n,), f"headings shape mismatch: {self.headings.shape}"
         assert self.curvatures.shape == (n,), f"curvatures shape mismatch: {self.curvatures.shape}"
-        assert self.curvatures_half.shape == (n,), f"curvatures_half shape mismatch: {self.curvatures_half.shape}"
-        assert self.arc_lengths.shape == (n,), f"arc_lengths shape mismatch: {self.arc_lengths.shape}"
+        assert self.curvatures_half.shape == (
+            n,
+        ), f"curvatures_half shape mismatch: {self.curvatures_half.shape}"
+        assert self.arc_lengths.shape == (
+            n,
+        ), f"arc_lengths shape mismatch: {self.arc_lengths.shape}"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
@@ -153,4 +157,3 @@ class DiscretizedTrack:
 
 
 __all__ = ["DiscretizedTrack"]
-

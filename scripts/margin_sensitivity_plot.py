@@ -27,16 +27,19 @@ REPO = Path(__file__).resolve().parents[1]
 def load(path):
     d = json.loads(Path(path).read_text())
     p = d["profiling"]
-    return dict(margin=float(d.get("run_config", {}).get("boundary_margin", np.nan)),
-                lap=float(p.get("autox_lap_time_s", np.nan)),
-                obj=float(d["obj_val"]), iters=p.get("iter_count"),
-                time_s=float(p.get("solve_time_s", np.nan)),
-                status=p.get("return_status"),
-                s=np.asarray(d["arc_lengths"], float),
-                v=np.asarray(d["v_long"], float),
-                d_lat=np.asarray(d["d"], float),
-                delta=np.asarray(d["delta"], float),
-                path=np.asarray(d["path_xy"], float))
+    return dict(
+        margin=float(d.get("run_config", {}).get("boundary_margin", np.nan)),
+        lap=float(p.get("autox_lap_time_s", np.nan)),
+        obj=float(d["obj_val"]),
+        iters=p.get("iter_count"),
+        time_s=float(p.get("solve_time_s", np.nan)),
+        status=p.get("return_status"),
+        s=np.asarray(d["arc_lengths"], float),
+        v=np.asarray(d["v_long"], float),
+        d_lat=np.asarray(d["d"], float),
+        delta=np.asarray(d["delta"], float),
+        path=np.asarray(d["path_xy"], float),
+    )
 
 
 def cones(csv_path):
@@ -56,8 +59,12 @@ def main():
     ap.add_argument("--warm", nargs="*", default=[])
     ap.add_argument("--cold", nargs="*", default=[])
     ap.add_argument("--track-csv", default="data/tracks/ipz_august_3.csv")
-    ap.add_argument("--corner-s", type=float, default=184.6,
-                    help="arc length of the limiting corner, for the zoom panel")
+    ap.add_argument(
+        "--corner-s",
+        type=float,
+        default=184.6,
+        help="arc length of the limiting corner, for the zoom panel",
+    )
     ap.add_argument("--out", default="ocp_plots/ipz_margin_sensitivity.png")
     args = ap.parse_args()
 
@@ -66,8 +73,11 @@ def main():
     left, right = cones(REPO / args.track_csv)
 
     fig, ax = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle("Fast-LTO autox — boundary_margin sensitivity, ipz_august_3 "
-                 "(four_wheel, euler, ds = 0.5 m)", fontsize=13)
+    fig.suptitle(
+        "Fast-LTO autox — boundary_margin sensitivity, ipz_august_3 "
+        "(four_wheel, euler, ds = 0.5 m)",
+        fontsize=13,
+    )
 
     # -- lap time vs margin ------------------------------------------------
     a = ax[0, 0]
@@ -76,15 +86,29 @@ def main():
         t = [r["lap"] for r in warm]
         a.plot(m, t, "o-", color="tab:blue", label="continuation (warm start)")
         for mi, ti in zip(m, t):
-            a.annotate(f"{ti:.2f}", (mi, ti), textcoords="offset points",
-                       xytext=(0, 8), ha="center", fontsize=9, color="tab:blue")
+            a.annotate(
+                f"{ti:.2f}",
+                (mi, ti),
+                textcoords="offset points",
+                xytext=(0, 8),
+                ha="center",
+                fontsize=9,
+                color="tab:blue",
+            )
     if cold:
         m = [r["margin"] for r in cold]
         t = [r["lap"] for r in cold]
         a.plot(m, t, "s--", color="tab:orange", label="cold start (default guess)")
         for mi, ti in zip(m, t):
-            a.annotate(f"{ti:.2f}", (mi, ti), textcoords="offset points",
-                       xytext=(0, -14), ha="center", fontsize=9, color="tab:orange")
+            a.annotate(
+                f"{ti:.2f}",
+                (mi, ti),
+                textcoords="offset points",
+                xytext=(0, -14),
+                ha="center",
+                fontsize=9,
+                color="tab:orange",
+            )
     base = warm[0] if warm else cold[0]
     a.set_xlabel("boundary_margin [m]")
     a.set_ylabel("autox lap time [s]")
@@ -99,8 +123,13 @@ def main():
     for r, c in zip(series, colors):
         a.plot(r["s"], r["v"], color=c, lw=1.4, label=f"margin {r['margin']:.2f}")
     a.axvline(args.corner_s, color="k", ls=":", lw=1)
-    a.annotate("limiting hairpin", (args.corner_s, a.get_ylim()[1]),
-               textcoords="offset points", xytext=(-70, -14), fontsize=9)
+    a.annotate(
+        "limiting hairpin",
+        (args.corner_s, a.get_ylim()[1]),
+        textcoords="offset points",
+        xytext=(-70, -14),
+        fontsize=9,
+    )
     a.set_xlabel("s [m]")
     a.set_ylabel("v [m/s]")
     a.set_title("speed profile")
@@ -114,8 +143,7 @@ def main():
     a.scatter(left[:, 0], left[:, 1], s=18, color="tab:blue", label="left cones")
     a.scatter(right[:, 0], right[:, 1], s=18, color="tab:orange", label="right cones")
     for r, c in zip(series, colors):
-        a.plot(r["path"][:, 0], r["path"][:, 1], color=c, lw=1.6,
-               label=f"margin {r['margin']:.2f}")
+        a.plot(r["path"][:, 0], r["path"][:, 1], color=c, lw=1.6, label=f"margin {r['margin']:.2f}")
     a.set_xlim(centre[0] - 12, centre[0] + 12)
     a.set_ylim(centre[1] - 9, centre[1] + 9)
     a.set_aspect("equal")
@@ -133,11 +161,17 @@ def main():
             ref = r["lap"]
     for label, group in (("warm", warm), ("cold", cold)):
         for r in group:
-            rows.append((f"{r['margin']:.2f}", label,
-                         "OK" if r["status"] == "Solve_Succeeded" else str(r["status"]),
-                         str(r["iters"]), f"{r['time_s']:.0f}",
-                         f"{r['lap']:.3f}",
-                         f"{r['lap'] - ref:+.3f}"))
+            rows.append(
+                (
+                    f"{r['margin']:.2f}",
+                    label,
+                    "OK" if r["status"] == "Solve_Succeeded" else str(r["status"]),
+                    str(r["iters"]),
+                    f"{r['time_s']:.0f}",
+                    f"{r['lap']:.3f}",
+                    f"{r['lap'] - ref:+.3f}",
+                )
+            )
     tbl = a.table(cellText=rows[1:], colLabels=rows[0], loc="center", cellLoc="center")
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(9)

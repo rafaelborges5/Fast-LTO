@@ -14,13 +14,13 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import yaml
 
-from fast_lto.vehicle_models.point_mass import PointMassModel
 from fast_lto.vehicle_models.dynamic_bicycle import DynamicBicycleModel
 from fast_lto.vehicle_models.four_wheel import FourWheelModel
+from fast_lto.vehicle_models.point_mass import PointMassModel
 
 _MODEL_CLASSES = {
     "point_mass": PointMassModel,
@@ -41,9 +41,20 @@ def _get_model_default_keys(model_name: str) -> set:
 # ---------------------------------------------------------------------------
 
 _VEHICLE_SHARED_FIELDS = {
-    "m", "g", "v_min", "v_max", "d_max", "psi_err_max", "mu",
-    "lf", "lr", "corners",
-    "v_eps", "smoothmax_eps", "eps_s_dot", "eps_D_kappa",
+    "m",
+    "g",
+    "v_min",
+    "v_max",
+    "d_max",
+    "psi_err_max",
+    "mu",
+    "lf",
+    "lr",
+    "corners",
+    "v_eps",
+    "smoothmax_eps",
+    "eps_s_dot",
+    "eps_D_kappa",
 }
 
 
@@ -95,14 +106,11 @@ class VehicleConfig:
         """
         if model_name not in _MODEL_CLASSES:
             raise ValueError(
-                f"Unknown model_name: {model_name!r}. "
-                f"Known models: {sorted(_MODEL_CLASSES)}"
+                f"Unknown model_name: {model_name!r}. " f"Known models: {sorted(_MODEL_CLASSES)}"
             )
 
         default_keys = _get_model_default_keys(model_name)
-        defaults = copy.deepcopy(
-            _MODEL_CLASSES[model_name](params=None).get_default_params()
-        )
+        defaults = copy.deepcopy(_MODEL_CLASSES[model_name](params=None).get_default_params())
 
         # Layer shared vehicle params (only those the model knows about)
         shared = self._shared_as_dict()
@@ -139,9 +147,7 @@ class VehicleConfig:
         for model_name in _MODEL_NAMES:
             sub = d.get(model_name)
             if sub is not None and not isinstance(sub, dict):
-                raise ValueError(
-                    f"vehicle.{model_name} must be a dict, got {type(sub).__name__}"
-                )
+                raise ValueError(f"vehicle.{model_name} must be a dict, got {type(sub).__name__}")
             if isinstance(sub, dict):
                 model_keys = _get_model_default_keys(model_name)
                 unknown_model = set(sub.keys()) - model_keys
@@ -172,24 +178,54 @@ class VehicleConfig:
 # ---------------------------------------------------------------------------
 
 _PIPELINE_FIELDS = {
-    "track_id", "track_type", "ds_m", "continuity", "smooth_centerline",
-    "mode", "model_name", "integrator_name",
-    "reg_u", "reg_u_l2", "initial_speed",
-    "boundary_margin", "autox_extension_m", "autox_start_x", "autox_start_y",
-    "autox_start_node_offset", "autox_lead_in_m", "autox_ocp_lead_m",
-    "autox_timing_offset_m", "autox_terminal_state_constraint",
-    "autox_terminal_window_nodes", "autox_terminal_pad_m",
+    "track_id",
+    "track_type",
+    "ds_m",
+    "continuity",
+    "smooth_centerline",
+    "mode",
+    "model_name",
+    "integrator_name",
+    "reg_u",
+    "reg_u_l2",
+    "initial_speed",
+    "boundary_margin",
+    "autox_extension_m",
+    "autox_start_x",
+    "autox_start_y",
+    "autox_start_node_offset",
+    "autox_lead_in_m",
+    "autox_ocp_lead_m",
+    "autox_timing_offset_m",
+    "autox_terminal_state_constraint",
+    "autox_terminal_window_nodes",
+    "autox_terminal_pad_m",
     "D_safe_braking",
-    "use_savgol_bounds", "savgol_window_length", "savgol_polyorder",
-    "normalize_states_and_inputs", "solver_verbose",
-    "export_trajectory", "plot_results", "show_plots",
+    "use_savgol_bounds",
+    "savgol_window_length",
+    "savgol_polyorder",
+    "normalize_states_and_inputs",
+    "solver_verbose",
+    "export_trajectory",
+    "plot_results",
+    "show_plots",
     # Warm start
-    "warm_start", "warm_start_max_margin_gap", "warm_start_ladder_step",
-    "warm_start_max_seeds", "warm_start_seed",
+    "warm_start",
+    "warm_start_max_margin_gap",
+    "warm_start_ladder_step",
+    "warm_start_max_seeds",
+    "warm_start_seed",
     # Skidpad-specific
-    "skidpad_map_csv", "skidpad_reference_csv",
-    "eps_time", "entry_exit_halfwidth", "kappa_blend_m", "terminal_speed",
-    "decel_hold_m", "skidpad_start_x", "skidpad_start_y", "skidpad_lead_in_m",
+    "skidpad_map_csv",
+    "skidpad_reference_csv",
+    "eps_time",
+    "entry_exit_halfwidth",
+    "kappa_blend_m",
+    "terminal_speed",
+    "decel_hold_m",
+    "skidpad_start_x",
+    "skidpad_start_y",
+    "skidpad_lead_in_m",
     "skidpad_terminal_straight_m",
 }
 

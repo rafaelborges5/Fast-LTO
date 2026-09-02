@@ -37,7 +37,6 @@ from scipy.signal import savgol_filter
 
 from fast_lto.splines.discretized_track import DiscretizedTrack
 
-
 ContinuityType = Literal["C2", "C4"]
 
 _SEG_RATIO_THRESHOLD = 0.5
@@ -71,9 +70,7 @@ def _check_centerline_quality(points: np.ndarray) -> dict:
     dkds = dk / ds_local[:-1] if len(ds_local) > 1 else np.zeros(0)
     max_curv_rate = float(dkds.max()) if len(dkds) > 0 else 0.0
 
-    needs_smoothing = (
-        seg_ratio < _SEG_RATIO_THRESHOLD and max_curv_rate > _CURVATURE_RATE_THRESHOLD
-    )
+    needs_smoothing = seg_ratio < _SEG_RATIO_THRESHOLD and max_curv_rate > _CURVATURE_RATE_THRESHOLD
 
     return {
         "seg_ratio": seg_ratio,
@@ -166,9 +163,7 @@ def _compute_chord_params(points: np.ndarray) -> np.ndarray:
     return t
 
 
-def _fit_periodic_spline_c2(
-    points: np.ndarray, t: np.ndarray
-) -> Tuple[CubicSpline, CubicSpline]:
+def _fit_periodic_spline_c2(points: np.ndarray, t: np.ndarray) -> Tuple[CubicSpline, CubicSpline]:
     """
     Fit periodic cubic splines (C²) to x(t) and y(t).
 
@@ -201,9 +196,7 @@ def _fit_periodic_spline_c2(
     return spline_x, spline_y
 
 
-def _fit_periodic_spline_c4(
-    points: np.ndarray, t: np.ndarray
-) -> Tuple[object, object]:
+def _fit_periodic_spline_c4(points: np.ndarray, t: np.ndarray) -> Tuple[object, object]:
     """
     Fit periodic quintic splines (C⁴) to x(t) and y(t).
 
@@ -603,4 +596,3 @@ if __name__ == "__main__":
         save_path="data/discretized/fsg_random.json",
     )
     print(f"Fitted spline: {track}")
-
