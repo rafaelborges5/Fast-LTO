@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fast_lto.utils.track_bounds import load_boundaries
+from fast_lto.visualization.summary_panel import plot_profiling_panel
 
 
 def plot_path_with_speed(
@@ -287,90 +288,13 @@ def _compute_constraint_activity(
     }
 
 
-def _plot_profiling_panel(
-    profiling: Optional[Dict],
-    constraint_activity: Optional[Dict[str, float]],
-    ax: plt.Axes,
-) -> None:
-    """Render a small profiling + constraint summary in a single panel."""
-    ax.axis("off")
-
-    if profiling is None:
-        ax.text(
-            0.0,
-            0.5,
-            "No profiling data available.",
-            transform=ax.transAxes,
-            fontsize=10,
-            va="center",
-        )
-        return
-
-    lines = []
-    N = profiling.get("N")
-    ds_m = profiling.get("ds_m")
-    solve_time_s = profiling.get("solve_time_s")
-    iter_count = profiling.get("iter_count")
-    return_status = profiling.get("return_status")
-    time_per_point_ms = profiling.get("time_per_point_ms")
-    time_per_iter_ms = profiling.get("time_per_iter_ms")
-    lap_time_s = profiling.get("lap_time_s")
-    reg_term = profiling.get("reg_term")
-    reg_term_rel = profiling.get("reg_term_relative")
-
-    lines.append("Solver profiling")
-    if N is not None and ds_m is not None:
-        lines.append(f"N = {N}, ds = {ds_m:.3f} m")
-    if solve_time_s is not None:
-        lines.append(f"Time = {solve_time_s:.3f} s")
-    if time_per_point_ms is not None:
-        lines.append(f"Time / point = {time_per_point_ms:.3f} ms")
-    if time_per_iter_ms is not None and iter_count not in (None, 0):
-        lines.append(f"Iterations = {iter_count}, time / iter = {time_per_iter_ms:.3f} ms")
-    elif iter_count is not None:
-        lines.append(f"Iterations = {iter_count}")
-    if return_status is not None:
-        lines.append(f"Status = {return_status}")
-
-    # Objective split
-    if lap_time_s is not None or reg_term is not None:
-        lines.append("")
-        lines.append("Objective split")
-        if lap_time_s is not None:
-            lines.append(f"Lap-time term = {lap_time_s:.3f} s")
-        if reg_term is not None:
-            if reg_term_rel not in (None, 0.0):
-                lines.append(f"Reg term = {reg_term:.4f} ({reg_term_rel:.2%} of obj)")
-            else:
-                lines.append(f"Reg term = {reg_term:.4f}")
-
-    lines.append("")  # spacer
-    lines.append("Constraint activity (fraction of lap):")
-
-    if constraint_activity is not None:
-
-        def pct(key: str) -> float:
-            val = constraint_activity.get(key)
-            return float(val * 100.0) if val is not None else 0.0
-
-        lines.append(f"Track bounds  ≈ {pct('track_bounds_active'):.1f}%")
-        lines.append(f"Friction circ ≈ {pct('friction_circle_active'):.1f}%")
-        lines.append(f"a_long bounds ≈ {pct('a_long_bounds_active'):.1f}%")
-        lines.append(f"a_lat bounds  ≈ {pct('a_lat_bounds_active'):.1f}%")
-        lines.append(f"Speed bounds  ≈ {pct('v_bounds_active'):.1f}%")
-    else:
-        lines.append("(no constraint activity data)")
-
-    text = "\n".join(lines)
-    ax.text(
-        0.0,
-        1.0,
-        text,
-        transform=ax.transAxes,
-        fontsize=9,
-        va="top",
-        family="monospace",
-    )
+ACTIVITY_ROWS = (
+    ("Track bounds", "track_bounds_active"),
+    ("Friction circ", "friction_circle_active"),
+    ("a_long bounds", "a_long_bounds_active"),
+    ("a_lat bounds", "a_lat_bounds_active"),
+    ("Speed bounds", "v_bounds_active"),
+)
 
 
 def plot_all_panels(
@@ -413,7 +337,7 @@ def plot_all_panels(
     plot_gg(a_long, a_lat, mu_g, out_path=None, show=False, fig=fig, ax=axes[4])
     axes[4].set_title("GG diagram")
 
-    _plot_profiling_panel(profiling, constraint_activity, ax=axes[5])
+    plot_profiling_panel(profiling, constraint_activity, ax=axes[5], activity_rows=ACTIVITY_ROWS)
     axes[5].set_title("Profiling & activity")
     fig.tight_layout()
 

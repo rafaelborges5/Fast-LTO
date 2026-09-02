@@ -26,6 +26,7 @@ from fast_lto.visualization.ocp_plots import (
     plot_path_with_speed,
     plot_speed_profile,
 )
+from fast_lto.visualization.summary_panel import plot_profiling_panel
 
 WHEEL_COLORS = {
     "FL": "tab:blue",
@@ -330,62 +331,15 @@ def _compute_body_accels(
     return Fx_total / m, Fy_total / m
 
 
-def _plot_profiling_panel_four_wheel(
-    profiling: Optional[Dict],
-    constraint_activity: Optional[Dict[str, float]],
-    ax: plt.Axes,
-) -> None:
-    ax.axis("off")
-    if profiling is None:
-        ax.text(0.0, 0.5, "No profiling data.", transform=ax.transAxes, fontsize=10, va="center")
-        return
-
-    lines = []
-    lines.append("Solver profiling")
-    N = profiling.get("N")
-    ds_m = profiling.get("ds_m")
-    if N is not None and ds_m is not None:
-        lines.append(f"N = {N}, ds = {ds_m:.3f} m")
-    solve_time_s = profiling.get("solve_time_s")
-    if solve_time_s is not None:
-        lines.append(f"Time = {solve_time_s:.3f} s")
-    iter_count = profiling.get("iter_count")
-    if iter_count is not None:
-        lines.append(f"Iterations = {iter_count}")
-    return_status = profiling.get("return_status")
-    if return_status is not None:
-        lines.append(f"Status = {return_status}")
-    lap_time_s = profiling.get("lap_time_s")
-    reg_term = profiling.get("reg_term")
-    if lap_time_s is not None:
-        lines.append("")
-        lines.append(f"Lap time = {lap_time_s:.3f} s")
-    if reg_term is not None:
-        rel = profiling.get("reg_term_relative")
-        if rel:
-            lines.append(f"Reg term = {reg_term:.4f} ({rel:.2%})")
-        else:
-            lines.append(f"Reg term = {reg_term:.4f}")
-
-    if constraint_activity:
-        lines.append("")
-        lines.append("Constraint activity:")
-
-        def pct(key):
-            val = constraint_activity.get(key, 0.0)
-            return float(val * 100.0)
-
-        lines.append(f"Track bounds  ~ {pct('track_bounds_active'):.1f}%")
-        lines.append(f"Friction FL   ~ {pct('friction_fl_active'):.1f}%")
-        lines.append(f"Friction FR   ~ {pct('friction_fr_active'):.1f}%")
-        lines.append(f"Friction RR   ~ {pct('friction_rr_active'):.1f}%")
-        lines.append(f"Friction RL   ~ {pct('friction_rl_active'):.1f}%")
-        lines.append(f"Force bounds  ~ {pct('force_bounds_active'):.1f}%")
-        lines.append(f"Speed bounds  ~ {pct('speed_bounds_active'):.1f}%")
-
-    ax.text(
-        0.0, 1.0, "\n".join(lines), transform=ax.transAxes, fontsize=9, va="top", family="monospace"
-    )
+ACTIVITY_ROWS = (
+    ("Track bounds", "track_bounds_active"),
+    ("Friction FL", "friction_fl_active"),
+    ("Friction FR", "friction_fr_active"),
+    ("Friction RR", "friction_rr_active"),
+    ("Friction RL", "friction_rl_active"),
+    ("Force bounds", "force_bounds_active"),
+    ("Speed bounds", "speed_bounds_active"),
+)
 
 
 def _compute_constraint_activity_four_wheel(
@@ -550,7 +504,7 @@ def plot_all_panels_four_wheel(
     ax5.set_title("GG diagram")
 
     # 6. Profiling
-    _plot_profiling_panel_four_wheel(profiling, constraint_activity, axes[5])
+    plot_profiling_panel(profiling, constraint_activity, axes[5], activity_rows=ACTIVITY_ROWS)
     axes[5].set_title("Profiling & activity")
 
     fig.tight_layout()
