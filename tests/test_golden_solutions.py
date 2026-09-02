@@ -173,3 +173,28 @@ def test_solution_is_physically_sane(model_name: str, solved) -> None:
     assert actual["lap_time_s"] > 0.0
     # The ellipse is ~75 m; staying inside it is a corridor-constraint check.
     assert actual["abs_d_max"] < 5.0
+
+
+# ---------------------------------------------------------------------------
+# Cross-model parameter agreement
+# ---------------------------------------------------------------------------
+
+
+SHARED_GEOMETRY_KEYS = ["m", "g", "lf", "lr"]
+
+
+def test_models_agree_on_the_car_they_describe() -> None:
+    """Every model's defaults must describe the same physical car.
+
+    They did not: ``dynamic_bicycle`` had ``lf``/``lr`` reversed relative to
+    ``four_wheel`` and every shipped config, so building it without a config
+    gave a car with 55% front weight instead of 45%. Nothing caught it, because
+    the configs set both values and papered over the defaults.
+    """
+    from fast_lto.pipeline import _make_model
+
+    defaults = {name: _make_model(name).get_default_params() for name in MODELS}
+
+    for key in SHARED_GEOMETRY_KEYS:
+        values = {name: params[key] for name, params in defaults.items() if key in params}
+        assert len(set(values.values())) == 1, f"models disagree on {key!r}: {values}"

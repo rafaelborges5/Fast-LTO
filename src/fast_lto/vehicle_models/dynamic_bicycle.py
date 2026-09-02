@@ -35,8 +35,13 @@ class DynamicBicycleModel(VehicleModel):
         return {
             "m": 170.0,
             "Iz": 250.0,
-            "lf": 0.689,
-            "lr": 0.842,
+            # CoG-to-axle distances, same convention as four_wheel and the
+            # shipped configs: lf is to the FRONT axle, so the static front
+            # load share is lr / (lf + lr) = 45%. These were reversed here,
+            # which only ever showed up when the model was built without a
+            # config (its defaults model a 55%-front car that does not exist).
+            "lf": 0.842,
+            "lr": 0.689,
             "g": 9.81,
             "Bf": 9.0,
             "Cf": 1.3,

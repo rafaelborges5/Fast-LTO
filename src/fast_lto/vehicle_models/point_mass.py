@@ -27,8 +27,12 @@ class PointMassModel(VehicleModel):
     def get_default_params(self) -> dict:
         return {
             "m": 170.0,
-            "lf": 0.689,
-            "lr": 0.842,
+            # Declared so a shared vehicle config can set them, but unused by
+            # the point-mass dynamics. Kept in step with the other models so
+            # the three never describe different cars (see
+            # test_models_agree_on_the_car_they_describe).
+            "lf": 0.842,
+            "lr": 0.689,
             "mu": 1.4,
             "g": 9.81,
             "a_long_min": -15.0,
