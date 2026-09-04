@@ -184,7 +184,7 @@ class VehicleConfig:
 _NON_YAML_PIPELINE_FIELDS = frozenset(
     {
         "repo_root",
-        "track_csv_path",
+        "track_csv_override",
         "generate_track",
         "compute_bounds",
         "vehicle_config",

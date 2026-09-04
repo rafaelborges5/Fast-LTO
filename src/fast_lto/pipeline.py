@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, get_args
 
 import numpy as np
 
@@ -51,7 +51,13 @@ from fast_lto.visualization.panels import render_panels
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
 WarmStartPolicy = Literal["off", "auto", "ladder"]
-WARM_START_POLICIES = ("off", "auto", "ladder")
+WARM_START_POLICIES = get_args(WarmStartPolicy)
+
+TrackType = Literal["fsg", "ellipse", "bean", "skidpad"]
+# Derived from the type, not hand-listed beside it: the CLI's --track-type
+# choices read this, and a copy would be free to drift out of step (as the
+# --mode choices did, silently making skidpad unreachable from the CLI).
+TRACK_TYPES = get_args(TrackType)
 
 
 @dataclass
@@ -63,10 +69,13 @@ class PipelineConfig:
     """
 
     track_id: str = "fsg_random"
-    track_type: Literal["fsg", "ellipse", "bean", "skidpad"] = "fsg"
+    track_type: TrackType = "fsg"
 
     repo_root: Optional[Path] = None
-    track_csv_path: Optional[Path] = None
+    # Reads a CSV somewhere other than data/tracks/{track_id}.csv. Normally
+    # unset -- see the track_csv_path property, which derives the usual location
+    # from track_id on every access.
+    track_csv_override: Optional[Path] = None
 
     generate_track: bool = False
 
@@ -220,11 +229,6 @@ class PipelineConfig:
         else:
             self.repo_root = Path(self.repo_root)
 
-        if self.track_csv_path is None:
-            self.track_csv_path = self.repo_root / "data" / "tracks" / f"{self.track_id}.csv"
-        else:
-            self.track_csv_path = Path(self.track_csv_path)
-
         self.discretized_dir = self.repo_root / "data" / "discretized"
         self.solutions_dir = self.repo_root / "data" / "solutions"
         self.output_trajectories_dir = self.repo_root / "data" / "output_trajectories"
@@ -241,6 +245,28 @@ class PipelineConfig:
         """
         self.initial_speed = float(speed)
         self._initial_speed_from_mode = False
+
+    @property
+    def track_csv_path(self) -> Path:
+        """The boundary CSV this run reads.
+
+        Derived from ``track_id`` on every access rather than resolved once in
+        ``__post_init__``. It used to be a field filled in there behind an
+        ``is None`` guard, which made the derivation non-idempotent: re-running
+        ``__post_init__`` after a field changed (see
+        ``RunConfig.to_pipeline_config``, which does exactly that so a CLI flag
+        can override the YAML) left the already-resolved path alone. A
+        ``--track-id`` flag therefore renamed every output while still reading
+        the *previous* id's CSV -- a silently wrong answer rather than an error.
+
+        The same hazard is why ``initial_speed`` needs ``set_initial_speed``:
+        anything ``__post_init__`` derives must either be re-derivable or know
+        it was set deliberately.
+        """
+        if self.track_csv_override is not None:
+            return Path(self.track_csv_override)
+        assert self.repo_root is not None  # always resolved in __post_init__
+        return self.repo_root / "data" / "tracks" / f"{self.track_id}.csv"
 
     @property
     def discretized_track_path(self) -> Path:
@@ -270,7 +296,6 @@ class PipelineConfig:
 
 def step_generate_track(config: PipelineConfig) -> Path:
     csv_path = config.track_csv_path
-    assert csv_path is not None  # for type checkers
 
     print("[Step 1] Track generation")
     print(f"  Track type: {config.track_type}")
@@ -297,7 +322,6 @@ def step_fit_spline(
 ) -> DiscretizedTrack:
     if csv_path is None:
         csv_path = config.track_csv_path
-    assert csv_path is not None
 
     print("[Step 2] Spline fitting and discretization")
     print(f"  Input CSV: {csv_path}")
@@ -326,7 +350,6 @@ def step_compute_bounds(
 ) -> LateralBoundsResult:
     if csv_path is None:
         csv_path = config.track_csv_path
-    assert csv_path is not None
 
     if track is None:
         print(f"[Step 3] Loading discretized track from {config.discretized_track_path}")
@@ -973,7 +996,6 @@ def step_visualize(
         solution_path = config.solution_path
     if csv_path is None:
         csv_path = config.track_csv_path
-    assert csv_path is not None
 
     print("[Step 6] Visualization")
     print(f"  Solution: {solution_path}")
@@ -1035,11 +1057,7 @@ def run_pipeline(
     track_just_generated = False
 
     if start_from == "track":
-        need_generate = (
-            config.generate_track
-            or config.track_csv_path is None
-            or not config.track_csv_path.exists()
-        )
+        need_generate = config.generate_track or not config.track_csv_path.exists()
         if need_generate:
             csv_path = step_generate_track(config)
             track_just_generated = True
@@ -1049,7 +1067,7 @@ def run_pipeline(
         results["track"] = csv_path
     else:
         csv_path = config.track_csv_path
-        if csv_path is None or not csv_path.exists():
+        if not csv_path.exists():
             raise FileNotFoundError(
                 f"Track CSV not found at {csv_path}. " f"Run with start_from='track' first."
             )

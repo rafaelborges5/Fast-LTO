@@ -359,7 +359,7 @@ def test_run_pipeline_always_resolves(monkeypatch, tmp_path):
     widths = tmp_path / "track_with_widths.json"
     widths.write_text("{}")
 
-    config = pipeline.PipelineConfig(mode="autox", track_id="track", track_csv_path=csv_path)
+    config = pipeline.PipelineConfig(mode="autox", track_id="track", track_csv_override=csv_path)
     config.discretized_dir = tmp_path
     (tmp_path / "track.json").write_text("{}")
 

@@ -223,3 +223,103 @@ def test_yaml_initial_speed_survives_a_mode_override() -> None:
     config = _config_from_argv("--config", str(CONFIGS_DIR / "trackdrive.yaml"), "--mode", "autox")
     assert config.mode == "autox"
     assert config.initial_speed == pytest.approx(5.0)
+
+
+# ---------------------------------------------------------------------------
+# Derived paths follow the field they are derived from
+# ---------------------------------------------------------------------------
+
+
+def test_track_id_flag_moves_the_csv_it_reads() -> None:
+    """``--track-id X`` must read X's CSV, not the previous id's.
+
+    ``track_csv_path`` used to be a field resolved once in ``__post_init__``
+    behind an ``is None`` guard. ``to_pipeline_config`` re-runs
+    ``__post_init__`` so a flag can override the YAML, but the guard made that
+    re-run a no-op for an already-resolved path -- so ``--track-id`` renamed
+    every output while still reading the default track's CSV. Silently wrong
+    output, and nothing failed.
+    """
+    config = _config_from_argv("--track-id", "some_other_track")
+
+    assert config.track_id == "some_other_track"
+    assert config.track_csv_path.name == "some_other_track.csv"
+
+
+def test_track_id_moves_the_csv_when_set_after_construction() -> None:
+    """The same guarantee for library callers, not just the CLI."""
+    config = PipelineConfig(track_id="first")
+    assert config.track_csv_path.name == "first.csv"
+
+    config.track_id = "second"
+    assert config.track_csv_path.name == "second.csv"
+
+
+def test_every_output_path_follows_the_track_id() -> None:
+    """Inputs and outputs must never disagree about which track this is."""
+    config = PipelineConfig(track_id="renamed")
+
+    assert config.track_csv_path.name == "renamed.csv"
+    assert config.discretized_track_path.name == "renamed.json"
+    assert config.track_with_widths_path.name == "renamed_with_widths.json"
+    assert config.solution_path.name.startswith("renamed_")
+
+
+def test_explicit_csv_override_wins_over_the_track_id() -> None:
+    config = PipelineConfig(track_id="ignored", track_csv_override=Path("/elsewhere/real.csv"))
+    assert config.track_csv_path == Path("/elsewhere/real.csv")
+
+
+# ---------------------------------------------------------------------------
+# Flags that used to contradict their own help text
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        ((), None),
+        (("--savgol-bounds",), True),
+        (("--no-savgol-bounds",), False),
+    ],
+)
+def test_savgol_flag_says_what_it_does(argv, expected) -> None:
+    """``--savgol-bounds`` enables smoothing; the negation disables it.
+
+    It was declared ``store_false`` with help text saying "Disable", and the
+    caller then set ``use_savgol_bounds = True`` when the flag was present --
+    so passing it turned smoothing on, and nothing turned it off.
+    """
+    yaml_path = FIXTURE_CONFIGS / "no_mode_overrides.yaml"
+    from_yaml = RunConfig.from_yaml(yaml_path).pipeline.use_savgol_bounds
+
+    config = _config_from_argv("--config", str(yaml_path), *argv)
+
+    assert config.use_savgol_bounds == (from_yaml if expected is None else expected)
+
+
+# ---------------------------------------------------------------------------
+# The CLI reaches everything the config supports
+# ---------------------------------------------------------------------------
+
+
+def test_cli_offers_every_event_mode() -> None:
+    """``--mode`` hand-listed its choices and had gone stale, hiding skidpad."""
+    from fast_lto.modes import MODE_NAMES
+
+    choices = _parser_choices("--mode")
+    assert set(choices) == set(MODE_NAMES)
+
+
+def test_cli_offers_every_track_type() -> None:
+    from fast_lto.pipeline import TRACK_TYPES
+
+    assert set(_parser_choices("--track-type")) == set(TRACK_TYPES)
+
+
+def _parser_choices(flag: str) -> List[str]:
+    for action in build_parser()._actions:
+        if flag in action.option_strings:
+            assert action.choices is not None, f"{flag} declares no choices"
+            return list(action.choices)
+    raise AssertionError(f"{flag} is not a known flag")

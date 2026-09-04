@@ -13,7 +13,8 @@ import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fast_lto.pipeline import run_pipeline
+from fast_lto.modes import MODE_NAMES
+from fast_lto.pipeline import TRACK_TYPES, run_pipeline
 
 if TYPE_CHECKING:
     from fast_lto.config import RunConfig
@@ -40,6 +41,7 @@ _VALUE_OVERRIDES = {
     "autox_start_node_offset": "autox_start_node_offset",
     "warm_start_seed": "warm_start_seed",
     "reg_u_l2": "reg_u_l2",
+    "savgol_bounds": "use_savgol_bounds",
 }
 
 
@@ -92,8 +94,6 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
         pipeline.show_plots = False
     if args.generate_track:
         pipeline.generate_track = True
-    if not args.savgol_bounds:
-        pipeline.use_savgol_bounds = True
 
     if args.repo_root is not None:
         pipeline.repo_root = args.repo_root
@@ -147,7 +147,7 @@ Examples:
     parser.add_argument(
         "--track-type",
         type=str,
-        choices=["fsg", "ellipse", "bean"],
+        choices=TRACK_TYPES,
         default=None,
         help="Type of track to generate. Default: fsg",
     )
@@ -192,9 +192,9 @@ Examples:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["autox", "trackdrive"],
+        choices=sorted(MODE_NAMES),
         default=None,
-        help="Event mode: 'autox' or 'trackdrive'. Default: trackdrive",
+        help=f"Event mode: {', '.join(sorted(MODE_NAMES))}. Default: trackdrive",
     )
     parser.add_argument(
         "--autox-extension",
@@ -300,10 +300,19 @@ Examples:
         help="Shrink lateral bounds by this amount (m) on each side. Default: 0.0",
     )
 
+    # Tri-state on purpose. As a `store_false` flag this both read backwards
+    # (passing --savgol-bounds turned smoothing *on*, against its own help text)
+    # and offered no way to turn it off at all. BooleanOptionalAction gives both
+    # directions, and the None default keeps an unpassed flag from silently
+    # overriding the YAML.
     parser.add_argument(
         "--savgol-bounds",
-        action="store_false",
-        help="Disable Savitzky–Golay smoothing of lateral bounds.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Smooth the lateral bounds with a Savitzky-Golay filter. "
+            "Use --no-savgol-bounds to disable. Default: from the config file."
+        ),
     )
 
     # Warm start
