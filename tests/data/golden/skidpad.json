@@ -1,0 +1,53 @@
+{
+  "models": {
+    "dynamic_bicycle": {
+      "N": 175,
+      "abs_d_max": 1.0188697452891335,
+      "abs_d_mean": 0.526677771772636,
+      "lap_time_s": 35.306988958324354,
+      "obj_val": 44.735365725724094,
+      "pure_timed_time_s": 11.56592607708122,
+      "reg_term": 31.053599531855667,
+      "return_status": "Solve_Succeeded",
+      "skidpad_score_s": 5.78296303854061,
+      "track_length_m": 261.58115513091417,
+      "v_max": 11.729468112090155,
+      "v_min": 2.999999999999999
+    },
+    "four_wheel": {
+      "N": 175,
+      "abs_d_max": 1.0018275331406306,
+      "abs_d_mean": 0.5446148252541075,
+      "lap_time_s": 27.481130928751064,
+      "obj_val": 12.246742707396287,
+      "pure_timed_time_s": 8.82741524503894,
+      "reg_term": 1.652875877389171,
+      "return_status": "Solve_Succeeded",
+      "skidpad_score_s": 4.41370762251947,
+      "track_length_m": 261.58115513091417,
+      "v_max": 17.170646016929176,
+      "v_min": 1.0000950725655873
+    },
+    "point_mass": {
+      "N": 175,
+      "abs_d_max": 1.020961657483428,
+      "abs_d_mean": 0.7086729074651613,
+      "lap_time_s": 60.35088713497217,
+      "obj_val": 32.42264033448926,
+      "pure_timed_time_s": 22.349437123272665,
+      "reg_term": 6.433349510338523,
+      "return_status": "Solve_Succeeded",
+      "skidpad_score_s": 11.174718561636332,
+      "track_length_m": 261.58115513091417,
+      "v_max": 11.10412079026491,
+      "v_min": 2.258334055167335
+    }
+  },
+  "settings": {
+    "ds_m": 1.5,
+    "integrator_name": "euler",
+    "mode": "skidpad",
+    "track_id": "skidpad",
+    "track_type": "skidpad"
+  }
+}

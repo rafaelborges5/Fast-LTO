@@ -1,0 +1,52 @@
+{
+  "models": {
+    "dynamic_bicycle": {
+      "N": 61,
+      "abs_d_max": 1.0552827282900303,
+      "abs_d_mean": 0.5614112615695546,
+      "autox_lap_time_s": 13.595158479350165,
+      "lap_time_s": 16.443647150465146,
+      "obj_val": 34.67353097366278,
+      "reg_term": 19.00985470142526,
+      "return_status": "Solve_Succeeded",
+      "track_length_m": 89.97996674895978,
+      "v_max": 8.22565593805053,
+      "v_min": 2.999999999999999
+    },
+    "four_wheel": {
+      "N": 61,
+      "abs_d_max": 1.1495702968457082,
+      "abs_d_mean": 0.5945543365566408,
+      "autox_lap_time_s": 8.855631572300286,
+      "lap_time_s": 12.784304168057696,
+      "obj_val": 15.072276729874666,
+      "reg_term": 2.840660226757569,
+      "return_status": "Solve_Succeeded",
+      "track_length_m": 89.97996674895978,
+      "v_max": 11.679754559241701,
+      "v_min": 1.4283376864210169
+    },
+    "point_mass": {
+      "N": 61,
+      "abs_d_max": 1.1486422627156394,
+      "abs_d_mean": 0.6162159086143102,
+      "autox_lap_time_s": 14.85768270691196,
+      "lap_time_s": 17.62456907833075,
+      "obj_val": 20.41457849358321,
+      "reg_term": 3.4681187447458015,
+      "return_status": "Solve_Succeeded",
+      "track_length_m": 89.97996674895978,
+      "v_max": 9.683086416628827,
+      "v_min": 3.0
+    }
+  },
+  "settings": {
+    "autox_extension_m": 10.0,
+    "continuity": "C2",
+    "ds_m": 1.5,
+    "integrator_name": "euler",
+    "mode": "autox",
+    "track_id": "ellipse",
+    "track_type": "ellipse"
+  }
+}

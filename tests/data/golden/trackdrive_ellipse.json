@@ -37,11 +37,12 @@
       "v_min": 4.433554171930425
     }
   },
-  "track": {
+  "settings": {
     "continuity": "C2",
     "ds_m": 1.5,
     "integrator_name": "euler",
     "mode": "trackdrive",
+    "track_id": "ellipse",
     "track_type": "ellipse"
   }
 }
