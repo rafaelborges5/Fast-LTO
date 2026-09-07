@@ -25,10 +25,7 @@ from abc import ABC, abstractmethod
 
 import casadi as ca
 
-
-def _smoothmax(a: ca.MX, b: ca.MX, eps: float) -> ca.MX:
-    """Smooth C1 approximation of max(a, b)."""
-    return 0.5 * (a + b + ca.sqrt((a - b) ** 2 + eps**2))
+from fast_lto.utils.smooth import smoothmax
 
 
 class SpaceIntegrator(ABC):
@@ -139,7 +136,7 @@ class EulerIntegrator(SpaceIntegrator):
     ):
         _, s_dot = eval_at_point(x, u, kappa)
         smooth_eps = eps if smooth_eps is None else smooth_eps
-        s_dot_safe = _smoothmax(s_dot, ca.MX(eps), smooth_eps)
+        s_dot_safe = smoothmax(s_dot, ca.MX(eps), smooth_eps)
         return ds / s_dot_safe
 
 
@@ -183,10 +180,10 @@ class RK4Integrator(SpaceIntegrator):
         _, sd3 = eval_at_point(x3, u, kh)
         _, sd4 = eval_at_point(x4, u, kn)
 
-        sd1_safe = _smoothmax(sd1, ca.MX(eps), smooth_eps)
-        sd2_safe = _smoothmax(sd2, ca.MX(eps), smooth_eps)
-        sd3_safe = _smoothmax(sd3, ca.MX(eps), smooth_eps)
-        sd4_safe = _smoothmax(sd4, ca.MX(eps), smooth_eps)
+        sd1_safe = smoothmax(sd1, ca.MX(eps), smooth_eps)
+        sd2_safe = smoothmax(sd2, ca.MX(eps), smooth_eps)
+        sd3_safe = smoothmax(sd3, ca.MX(eps), smooth_eps)
+        sd4_safe = smoothmax(sd4, ca.MX(eps), smooth_eps)
 
         # Simpson-3/8 weighted time integral (RK4-consistent quadrature).
         return (ds / 6) * (1 / sd1_safe + 2 / sd2_safe + 2 / sd3_safe + 1 / sd4_safe)

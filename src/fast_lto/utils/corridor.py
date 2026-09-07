@@ -27,6 +27,13 @@ except ImportError:  # script-style imports without package context
     from fast_lto.vehicle_models.vehicle_base import CornerOffset  # type: ignore
 
 
+#: Smallest magnitude the Frenet Jacobian ``D_kappa = 1 - kappa*d`` is allowed
+#: to take in the NumPy corner geometry, clamped keeping its sign. Inside the
+#: OCP no clamp is needed: the models constrain ``D_kappa >= eps_D_kappa``, so
+#: the symbolic expression stays smooth for the solver.
+D_KAPPA_FLOOR = 1e-9
+
+
 @dataclass(frozen=True)
 class CriticalMargin:
     """Where the ``psi_err = 0`` corridor closes."""
@@ -63,8 +70,8 @@ def corridor_at(
     lo = hi = 0.0
     for _ in range(max(iters, 1)):
         d_kappa = 1.0 - kappa * d_mid
-        if abs(d_kappa) < 1e-9:
-            d_kappa = 1e-9 if d_kappa >= 0.0 else -1e-9
+        if abs(d_kappa) < D_KAPPA_FLOOR:
+            d_kappa = float(np.copysign(D_KAPPA_FLOOR, d_kappa))
         hi, lo = np.inf, -np.inf
         for corner in corners:
             long_proj = corner.dx * cos_p - corner.dy * sin_p

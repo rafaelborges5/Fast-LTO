@@ -16,6 +16,8 @@ from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 import casadi as ca
 import numpy as np
 
+from fast_lto.utils.smooth import smoothmax
+
 
 class CornerOffset(NamedTuple):
     name: str
@@ -254,11 +256,6 @@ class VehicleModel(ABC):
         return self._u_scale_dm, self._u_shift_dm
 
     @staticmethod
-    def _smoothmax(a: ca.MX, b: ca.MX, eps: float) -> ca.MX:
-        """Smooth C1 approximation of max(a, b)."""
-        return 0.5 * (a + b + ca.sqrt((a - b) ** 2 + eps**2))
-
-    @staticmethod
     def physical_to_norm(val_phys: ca.MX, scale: ca.DM, shift: ca.DM) -> ca.MX:
         """Generic affine map from physical values to normalised space."""
         return (val_phys - shift) / scale
@@ -349,7 +346,7 @@ class VehicleModel(ABC):
         x_dot_phys_red = x_dot_phys_full[1:]
         s_dot_floor = float(self.params.get("eps_s_dot", 1e-3))
         s_dot_smooth_eps = float(self.params.get("smoothmax_eps", 1e-3))
-        s_dot_safe = self._smoothmax(s_dot, ca.MX(s_dot_floor), s_dot_smooth_eps)
+        s_dot_safe = smoothmax(s_dot, ca.MX(s_dot_floor), s_dot_smooth_eps)
 
         x_red_dot_phys_per_s = x_dot_phys_red / s_dot_safe
 

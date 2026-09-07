@@ -10,6 +10,7 @@ import casadi as ca
 import numpy as np
 
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
+from fast_lto.utils.smooth import smoothmax
 from fast_lto.vehicle_models import VehicleModel
 
 # Tolerances for the optional terminal centering/heading constraints (see
@@ -90,7 +91,7 @@ def _s_dot_guard_params(model: VehicleModel) -> Tuple[float, float]:
 
 def _safe_s_dot(model: VehicleModel, s_dot: ca.MX) -> ca.MX:
     floor, smooth_eps = _s_dot_guard_params(model)
-    return model._smoothmax(s_dot, ca.MX(floor), smooth_eps)
+    return smoothmax(s_dot, ca.MX(floor), smooth_eps)
 
 
 def _enforce_rk4_mesh_limit(integrator: SpaceIntegrator, model: VehicleModel, ds: float) -> None:

@@ -4,14 +4,9 @@ from typing import Dict, List, Sequence, Tuple
 
 import casadi as ca
 
+from fast_lto.utils.smooth import smoothmax
+
 from .vehicle_base import VehicleModel
-
-
-def _smoothmax(a: ca.MX, b: ca.MX, eps: float) -> ca.MX:
-    """
-    Smooth approximation of max(a, b) with C1 continuity.
-    """
-    return 0.5 * (a + b + ca.sqrt((a - b) ** 2 + eps**2))
 
 
 class DynamicBicycleModel(VehicleModel):
@@ -126,7 +121,7 @@ class DynamicBicycleModel(VehicleModel):
         kappa = curvature
 
         # Smooth guard on v to avoid division by zero in slip angles.
-        v_safe = _smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
+        v_safe = smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
 
         D_kappa = 1 - kappa * d
         # In dynamics we keep the raw D_kappa; constraints enforce positivity.
@@ -175,7 +170,7 @@ class DynamicBicycleModel(VehicleModel):
         kappa = curvature
 
         # Recompute key kinematics for guard constraints.
-        v_safe = _smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
+        v_safe = smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
         D_kappa = 1 - kappa * d
         s_dot = (v * ca.cos(psi_err) - v_lat * ca.sin(psi_err)) / D_kappa
 
@@ -256,7 +251,7 @@ class DynamicBicycleModel(VehicleModel):
         lr = float(p["lr"])
         m = float(p["m"])
 
-        v_safe = _smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
+        v_safe = smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
 
         alpha_f = ca.atan((v_lat + lf * yaw_rate) / v_safe) - delta
         alpha_r = ca.atan((v_lat - lr * yaw_rate) / v_safe)

@@ -33,6 +33,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from fast_lto.utils.corridor import D_KAPPA_FLOOR
+
 SEEDS_DIRNAME = "_seeds"
 INDEX_FILENAME = "index.json"
 
@@ -403,6 +405,46 @@ def resample_guess(
     return {"X": (x_phys - x_shift) / x_scale, "U": (u_phys - u_shift) / u_scale}
 
 
+def corner_slacks(
+    d: np.ndarray,
+    psi_err: np.ndarray,
+    kappa: np.ndarray,
+    w_left: np.ndarray,
+    w_right: np.ndarray,
+    corners: Sequence,
+) -> List[np.ndarray]:
+    """Room left around each body corner, per node. Negative means outside.
+
+    The numeric twin of ``VehicleModel.get_corner_constraints``, which builds
+    the same geometry as CasADi expressions for the solver. Slack is the
+    negation of that constraint (``g <= 0`` there is ``slack >= 0`` here), and
+    ``tests/test_corner_geometry.py`` asserts the two agree -- the check that
+    was missing when this code and the symbolic version drifted apart.
+
+    The curvature term divides by the Frenet Jacobian ``D_kappa = 1 - kappa*d``,
+    which vanishes at the centre of the osculating circle. Inside the OCP that
+    never happens, because the models constrain ``D_kappa >= eps_D_kappa``, so
+    the symbolic version needs no guard and is left smooth for the solver. Here
+    the input is an arbitrary seed that no constraint has cleaned up, so the
+    denominator is clamped -- keeping its sign, so a seed that has crossed the
+    singularity still reports which way it is wrong. It used to clamp to
+    ``+1e-9`` regardless of sign, which silently flipped the curvature
+    correction exactly where a seed is most marginal.
+    """
+    sin_p, cos_p = np.sin(psi_err), np.cos(psi_err)
+
+    d_kappa = 1.0 - kappa * d
+    too_small = np.abs(d_kappa) < D_KAPPA_FLOOR
+    d_kappa = np.where(too_small, np.copysign(D_KAPPA_FLOOR, d_kappa), d_kappa)
+
+    slacks: List[np.ndarray] = []
+    for corner in corners:
+        long_proj = corner.dx * cos_p - corner.dy * sin_p
+        d_corner = d + corner.dx * sin_p + corner.dy * cos_p - 0.5 * kappa / d_kappa * long_proj**2
+        slacks.append((w_left - d_corner) if corner.dy >= 0 else (d_corner + w_right))
+    return slacks
+
+
 def validate_guess(
     guess: Dict[str, np.ndarray],
     track: Dict,
@@ -449,15 +491,8 @@ def validate_guess(
     w_left = np.asarray(track["w_left"], dtype=float) - boundary_margin
     w_right = np.asarray(track["w_right"], dtype=float) - boundary_margin
 
-    sin_p, cos_p = np.sin(psi), np.cos(psi)
-    d_kappa = 1.0 - kappa * d
-    d_kappa[np.abs(d_kappa) < 1e-9] = 1e-9
-    worst = 0.0
-    for corner in corners:
-        long_proj = corner.dx * cos_p - corner.dy * sin_p
-        d_corner = d + corner.dx * sin_p + corner.dy * cos_p - 0.5 * kappa / d_kappa * long_proj**2
-        slack = (w_left - d_corner) if corner.dy >= 0 else (d_corner + w_right)
-        worst = max(worst, float(-slack.min()))
+    slacks = corner_slacks(d, psi, kappa, w_left, w_right, corners)
+    worst = max(float(-slack.min()) for slack in slacks)
 
     if worst > max_corner_violation_m:
         return False, f"seed violates the corridor by {worst:.2f} m"

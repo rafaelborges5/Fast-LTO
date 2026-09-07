@@ -4,11 +4,9 @@ from typing import Dict, List, Sequence, Tuple
 
 import casadi as ca
 
+from fast_lto.utils.smooth import smoothmax
+
 from .vehicle_base import VehicleModel
-
-
-def _smoothmax(a: ca.MX, b: ca.MX, eps: float) -> ca.MX:
-    return 0.5 * (a + b + ca.sqrt((a - b) ** 2 + eps**2))
 
 
 class FourWheelModel(VehicleModel):
@@ -286,10 +284,10 @@ class FourWheelModel(VehicleModel):
 
         eps_fz = float(p.get("smoothmax_eps", 1e-3))
         Fz_min = ca.MX(10.0)
-        Fz_fl_s = _smoothmax(Fz_vec[0], Fz_min, eps_fz)
-        Fz_fr_s = _smoothmax(Fz_vec[1], Fz_min, eps_fz)
-        Fz_rr_s = _smoothmax(Fz_vec[2], Fz_min, eps_fz)
-        Fz_rl_s = _smoothmax(Fz_vec[3], Fz_min, eps_fz)
+        Fz_fl_s = smoothmax(Fz_vec[0], Fz_min, eps_fz)
+        Fz_fr_s = smoothmax(Fz_vec[1], Fz_min, eps_fz)
+        Fz_rr_s = smoothmax(Fz_vec[2], Fz_min, eps_fz)
+        Fz_rl_s = smoothmax(Fz_vec[3], Fz_min, eps_fz)
 
         return Fz_fl_s, Fz_fr_s, Fz_rr_s, Fz_rl_s
 
