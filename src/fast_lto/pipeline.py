@@ -29,6 +29,7 @@ import numpy as np
 from fast_lto.modes import EventMode, get_mode
 from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
+from fast_lto.paths import default_data_root
 from fast_lto.splines.discretized_track import DiscretizedTrack
 from fast_lto.splines.spline_fitter import ContinuityType, fit_and_discretize
 from fast_lto.tracks.bean import generate_bean_track
@@ -225,7 +226,7 @@ class PipelineConfig:
             )
 
         if self.repo_root is None:
-            self.repo_root = Path(__file__).resolve().parents[2]
+            self.repo_root = default_data_root()
         else:
             self.repo_root = Path(self.repo_root)
 

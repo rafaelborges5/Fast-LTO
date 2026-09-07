@@ -35,20 +35,49 @@ def _shipped_configs() -> List[Path]:
 
 
 def test_default_repo_root_is_the_repository_not_the_package() -> None:
-    """The repo root is derived by counting parents up from ``pipeline.py``.
+    """Working from a clone puts outputs in the clone, whatever the cwd.
 
-    That count is silently wrong the moment the module moves to a different
-    nesting depth, and every other test passes an explicit ``repo_root``, so
-    nothing else would notice. Asserted against a marker that only the real
-    repository root has.
+    This used to count parents up from ``pipeline.py``, which is right in a
+    checkout and silently wrong once the module moves -- or once the package is
+    installed, where it points inside site-packages.
     """
     root = PipelineConfig().repo_root
 
     assert (root / "src" / "fast_lto").is_dir(), (
-        f"default repo_root {root} does not contain src/fast_lto; the parents[] "
-        "depth in PipelineConfig.__post_init__ is out of step with the layout"
+        f"default repo_root {root} does not contain src/fast_lto; the checkout "
+        "search in fast_lto.paths is out of step with the layout"
     )
     assert (root / "pyproject.toml").is_file()
+
+
+def test_repo_root_ignores_the_working_directory_inside_a_checkout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Running from /tmp must still write into the clone, as it always has."""
+    monkeypatch.chdir(tmp_path)
+    assert PipelineConfig().repo_root == REPO_ROOT
+
+
+def test_data_root_env_var_wins(tmp_path: Path, monkeypatch) -> None:
+    from fast_lto.paths import DATA_ROOT_ENV_VAR
+
+    monkeypatch.setenv(DATA_ROOT_ENV_VAR, str(tmp_path))
+    assert PipelineConfig().repo_root == tmp_path.resolve()
+
+
+def test_an_installed_package_falls_back_to_the_working_directory() -> None:
+    """Outside a checkout there is no repo to write into, so use the cwd.
+
+    Checked through ``find_source_checkout`` rather than by installing a wheel:
+    the CI ``install`` job covers the real thing. A path that looks like
+    site-packages must not resolve to whichever project owns the virtualenv,
+    which is why the search requires ``src/fast_lto`` and not merely a
+    ``pyproject.toml``.
+    """
+    from fast_lto.paths import find_source_checkout
+
+    assert find_source_checkout(Path("/usr/lib/python3/site-packages/fast_lto/pipeline.py")) is None
+    assert find_source_checkout() == REPO_ROOT
 
 
 def test_default_data_paths_hang_off_the_repo_root() -> None:
@@ -315,6 +344,109 @@ def test_cli_offers_every_track_type() -> None:
     from fast_lto.pipeline import TRACK_TYPES
 
     assert set(_parser_choices("--track-type")) == set(TRACK_TYPES)
+
+
+# ---------------------------------------------------------------------------
+# Config inheritance
+# ---------------------------------------------------------------------------
+
+
+def _write(path: Path, text: str) -> Path:
+    path.write_text(text)
+    return path
+
+
+def test_extends_pulls_in_the_base_config(tmp_path: Path) -> None:
+    _write(tmp_path / "base.yaml", "vehicle:\n  m: 165.0\n  v_max: 20.0\n")
+    child = _write(tmp_path / "child.yaml", "extends: base.yaml\npipeline:\n  ds_m: 0.25\n")
+
+    config = RunConfig.from_yaml(child)
+
+    assert config.vehicle.m == pytest.approx(165.0)
+    assert config.vehicle.v_max == pytest.approx(20.0)
+    assert config.pipeline.ds_m == pytest.approx(0.25)
+
+
+def test_child_values_win_over_the_base(tmp_path: Path) -> None:
+    _write(tmp_path / "base.yaml", "vehicle:\n  m: 165.0\n  v_max: 20.0\n")
+    child = _write(tmp_path / "child.yaml", "extends: base.yaml\nvehicle:\n  v_max: 14.0\n")
+
+    config = RunConfig.from_yaml(child)
+
+    assert config.vehicle.v_max == pytest.approx(14.0), "the event's own value must win"
+    assert config.vehicle.m == pytest.approx(165.0), "unmentioned base values survive"
+
+
+def test_nested_blocks_merge_rather_than_replace(tmp_path: Path) -> None:
+    """Overriding one tyre coefficient must not drop the other twenty."""
+    _write(
+        tmp_path / "base.yaml",
+        "vehicle:\n  four_wheel:\n    B_fl: 9.0\n    C_fl: 1.3\n    D_fl: 1.1\n",
+    )
+    child = _write(
+        tmp_path / "child.yaml", "extends: base.yaml\nvehicle:\n  four_wheel:\n    D_fl: 1.3\n"
+    )
+
+    four_wheel = RunConfig.from_yaml(child).vehicle.four_wheel or {}
+
+    assert four_wheel["D_fl"] == pytest.approx(1.3)
+    assert four_wheel["B_fl"] == pytest.approx(9.0)
+    assert four_wheel["C_fl"] == pytest.approx(1.3)
+
+
+def test_a_corner_list_replaces_rather_than_appends(tmp_path: Path) -> None:
+    """The car has four corners, not eight."""
+    _write(
+        tmp_path / "base.yaml", "vehicle:\n  corners:\n  - [FL, 1.8, 0.75]\n  - [FR, 1.8, -0.75]\n"
+    )
+    child = _write(
+        tmp_path / "child.yaml",
+        "extends: base.yaml\nvehicle:\n  corners:\n  - [FL, 1.7, 0.75]\n  - [FR, 1.7, -0.75]\n",
+    )
+
+    corners = RunConfig.from_yaml(child).vehicle.corners or []
+
+    assert len(corners) == 2
+    assert corners[0][1] == pytest.approx(1.7)
+
+
+def test_a_missing_base_says_which_file_wanted_it(tmp_path: Path) -> None:
+    child = _write(tmp_path / "child.yaml", "extends: nope.yaml\n")
+    with pytest.raises(FileNotFoundError, match="nope.yaml"):
+        RunConfig.from_yaml(child)
+
+
+def test_a_cycle_is_reported_not_recursed(tmp_path: Path) -> None:
+    _write(tmp_path / "a.yaml", "extends: b.yaml\n")
+    _write(tmp_path / "b.yaml", "extends: a.yaml\n")
+    with pytest.raises(ValueError, match="Circular"):
+        RunConfig.from_yaml(tmp_path / "a.yaml")
+
+
+def test_shipped_event_configs_inherit_the_shared_car() -> None:
+    """Every event config extends vehicle.yaml and overrides only what it tunes.
+
+    Before the split, 48 vehicle settings were copied into each of the three
+    files, so a tyre coefficient had to be edited in three places -- and the
+    three could silently come to describe different cars.
+    """
+    import yaml
+
+    shared = yaml.safe_load((CONFIGS_DIR / "vehicle.yaml").read_text())
+    assert "pipeline" not in shared, "vehicle.yaml describes the car, not a run"
+
+    for path in _shipped_configs():
+        if path.name == "vehicle.yaml":
+            continue
+        raw = yaml.safe_load(path.read_text())
+        assert raw.get("extends") == "vehicle.yaml", f"{path.name} does not extend the shared car"
+        assert "pipeline" in raw, f"{path.name} should carry its own pipeline settings"
+        # Only the genuinely per-event knobs stay behind.
+        overrides = set(raw.get("vehicle") or {})
+        assert overrides <= {"v_max", "corners", "four_wheel"}, (
+            f"{path.name} overrides {sorted(overrides)}; anything the events agree on "
+            "belongs in vehicle.yaml"
+        )
 
 
 def _parser_choices(flag: str) -> List[str]:

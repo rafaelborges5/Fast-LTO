@@ -93,15 +93,22 @@ jobs:
       - run: python -m pip install --upgrade pip build
       - run: python -m build
 
-      # A wheel that imports is the minimum promise `pip install fast-lto`
-      # makes. Installed into a bare venv, away from the source tree, so a
-      # missing package or an undeclared dependency shows up here rather than
-      # in someone else's terminal.
-      - name: Install the wheel into a clean environment and import it
+      # Installed into a bare venv, away from the source tree, so a missing
+      # package or an undeclared dependency shows up here rather than in
+      # someone else's terminal. It solves a real lap rather than only
+      # importing, because the interesting failure is where the outputs land:
+      # with no checkout to find, they must appear under the working directory
+      # and not inside site-packages.
+      - name: Install the wheel into a clean environment and solve a lap
         run: |
           python -m venv /tmp/wheel-env
           /tmp/wheel-env/bin/pip install --upgrade pip
           /tmp/wheel-env/bin/pip install dist/*.whl
-          cd /tmp
-          /tmp/wheel-env/bin/python -c "import fast_lto; print(fast_lto.__name__, 'ok')"
+          mkdir -p /tmp/run-here && cd /tmp/run-here
           /tmp/wheel-env/bin/fast-lto --help > /dev/null
+          /tmp/wheel-env/bin/fast-lto \
+            --track-type ellipse --track-id ellipse --ds 3.0 \
+            --model point_mass --no-warm-start --no-plot
+          test -f data/solutions/ellipse_point_mass_euler_trackdrive.json \
+            || { echo "installed run did not write into the working directory"; exit 1; }
+          echo "installed wheel solved a lap and wrote to \$(pwd)"

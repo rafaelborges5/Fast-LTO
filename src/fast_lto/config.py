@@ -204,6 +204,70 @@ def _pipeline_yaml_fields() -> set:
     )
 
 
+EXTENDS_KEY = "extends"
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """``override`` layered onto ``base``; nested mappings merge, everything else replaces.
+
+    A list replaces rather than concatenates: ``corners`` is the car's four body
+    corners, and an event that names its own set means those four, not eight.
+    """
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def _load_yaml_with_extends(path: Path, _seen: Optional[List[Path]] = None) -> Dict[str, Any]:
+    """Read a config, resolving an ``extends:`` chain from the bottom up.
+
+    The three event configs share a car. Before this, all of it was copied into
+    each of them -- 32 vehicle settings identical across all three, so a tyre
+    coefficient had to be edited in three places and could silently end up
+    describing three different cars. ``extends: vehicle.yaml`` puts the shared
+    description in one file and leaves each event with only what it genuinely
+    tunes.
+
+    The path is resolved relative to the file naming it, so a config directory
+    can be copied or moved as a unit.
+    """
+    path = Path(path).resolve()
+    _seen = list(_seen or [])
+    if path in _seen:
+        chain = " -> ".join(p.name for p in [*_seen, path])
+        raise ValueError(f"Circular 'extends' in config files: {chain}")
+    _seen.append(path)
+
+    with path.open("r") as f:
+        raw = yaml.safe_load(f) or {}
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"YAML root must be a mapping, got {type(raw).__name__} in {path.name}")
+
+    parent_ref = raw.pop(EXTENDS_KEY, None)
+    if parent_ref is None:
+        return raw
+
+    if not isinstance(parent_ref, str):
+        raise ValueError(
+            f"'{EXTENDS_KEY}' in {path.name} must be a path string, "
+            f"got {type(parent_ref).__name__}"
+        )
+
+    parent_path = (path.parent / parent_ref).resolve()
+    if not parent_path.is_file():
+        raise FileNotFoundError(
+            f"{path.name} extends {parent_ref!r}, which does not exist "
+            f"(looked in {parent_path.parent})"
+        )
+
+    return _deep_merge(_load_yaml_with_extends(parent_path, _seen), raw)
+
+
 @dataclass
 class RunConfig:
     """A parsed config file: the ``vehicle`` section plus the ``pipeline`` one.
@@ -223,11 +287,7 @@ class RunConfig:
     def from_yaml(cls, path: str | Path) -> "RunConfig":
         """Load and validate a YAML config file."""
         path = Path(path)
-        with path.open("r") as f:
-            raw = yaml.safe_load(f) or {}
-
-        if not isinstance(raw, dict):
-            raise ValueError(f"YAML root must be a mapping, got {type(raw).__name__}")
+        raw = _load_yaml_with_extends(path)
 
         allowed_top = {"vehicle", "pipeline"}
         unknown_top = set(raw.keys()) - allowed_top

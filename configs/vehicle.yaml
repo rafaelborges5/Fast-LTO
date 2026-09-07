@@ -1,0 +1,59 @@
+# The car, shared by every event config through `extends: vehicle.yaml`.
+#
+# Only settings identical across all disciplines belong here. What an event
+# genuinely tunes -- tyre peak grip, air density, downforce, top speed, the
+# body corners -- stays in that event's own file, so the numbers you change
+# are the numbers you can see there.
+
+vehicle:
+  d_max: 3.0
+  dynamic_bicycle:
+    Bf: 9.0
+    Br: 9.0
+    Cf: 1.3
+    Cr: 1.3
+    Dmf_f: 1.4
+    Dmf_r: 1.4
+    Iz: 250.0
+    a_long_max: 15.0
+    a_long_min: -15.0
+    delta_max: 0.4
+    gamma_ellipse: 1.0
+    use_friction_ellipse: true
+  eps_D_kappa: 0.05
+  eps_s_dot: 1.0
+  four_wheel:
+    A_f: 1.2
+    B_fl: 9.0
+    B_fr: 9.0
+    B_rl: 9.0
+    B_rr: 9.0
+    C_d: 1.58
+    C_fl: 1.3
+    C_fr: 1.3
+    C_r: 0.15
+    C_rl: 1.3
+    C_rr: 1.3
+    Fx_max: 1500.0
+    Iz: 180.0
+    a_l: 0.63
+    a_lat_max: null
+    a_long_max: null
+    a_r: 0.63
+    ddeltamax: 1.3
+    delta_max: 0.4
+    h: 0.246
+    load_transfer_mode: current_quasistatic
+  g: 9.81
+  lf: 0.842
+  lr: 0.689
+  m: 165.0
+  point_mass:
+    a_lat_max: 13.73
+    a_lat_min: -13.73
+    a_long_max: 13.73
+    a_long_min: -13.73
+  psi_err_max: 1.2
+  smoothmax_eps: 0.001
+  v_eps: 0.5
+  v_min: 0.4

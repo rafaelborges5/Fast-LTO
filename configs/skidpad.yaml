@@ -1,51 +1,22 @@
-vehicle:
-  m: 165.0
-  g: 9.81
-  lf: 0.842
-  lr: 0.689
-  v_min: 0.4
-  v_max: 14.0
-  d_max: 3.0
-  psi_err_max: 1.2
-  v_eps: 0.5
-  smoothmax_eps: 0.001
-  eps_s_dot: 1.0
-  eps_D_kappa: 0.05
-  corners:
-    - [FL, 1.809, 0.750]
-    - [FR, 1.809, -0.750]
-    - [RL, -0.850, 0.630]
-    - [RR, -0.850, -0.630]
+# skidpad: the car from vehicle.yaml, plus what this event tunes.
 
+extends: vehicle.yaml
+
+vehicle:
+  corners:
+  - [FL, 1.809, 0.75]
+  - [FR, 1.809, -0.75]
+  - [RL, -0.85, 0.63]
+  - [RR, -0.85, -0.63]
   four_wheel:
-    Iz: 180.0
-    a_l: 0.630
-    a_r: 0.630
-    h: 0.246
-    rho: 1.20
     C_l: 5.54
-    C_d: 1.58
-    C_r: 0.15
-    A_f: 1.2
-    B_fl: 9.0
-    C_fl: 1.3
     D_fl: 1.3
-    B_fr: 9.0
-    C_fr: 1.3
     D_fr: 1.3
-    B_rr: 9.0
-    C_rr: 1.3
-    D_rr: 1.3
-    B_rl: 9.0
-    C_rl: 1.3
     D_rl: 1.3
+    D_rr: 1.3
     dFxmax: 2000.0
-    ddeltamax: 1.3
-    Fx_max: 1500.0
-    delta_max: 0.4
-    load_transfer_mode: current_quasistatic
-    a_long_max: null
-    a_lat_max: null
+    rho: 1.115
+  v_max: 14.0
 
 pipeline:
   track_id: skidpad
@@ -58,7 +29,7 @@ pipeline:
   reg_u: 0.0
   reg_u_l2: 0.0055
   initial_speed: 2.0
-  boundary_margin: 0.50
+  boundary_margin: 0.5
   skidpad_map_csv: data/tracks/skidpad/skidpad_map.csv
   skidpad_reference_csv: data/tracks/skidpad/skidpad_reference.csv
   eps_time: 0.005
