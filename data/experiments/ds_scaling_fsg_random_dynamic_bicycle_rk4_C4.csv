@@ -1,2 +1,0 @@
-N,ds_m,error,integrator_name,iter_count,iters_per_point,lap_time_s,model_name,reg_term,reg_term_relative,return_status,solve_time_s,time_per_iter_ms,time_per_iter_per_point_ms,time_per_lap_solve_ratio,time_per_point_ms,track_id
-800,0.5,,rk4,266,0.3325,26.073456439929405,dynamic_bicycle,0.2956125375869263,0.011210579252493944,Solve_Succeeded,531.7418931959983,1999.0296736691664,2.498787092086458,20.393993194614513,664.6773664949978,fsg_random

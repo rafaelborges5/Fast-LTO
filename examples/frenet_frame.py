@@ -1,17 +1,47 @@
-"""
-Frenet projection utilities for discretized tracks.
+"""The Frenet frame the optimizer works in, and where it breaks down.
 
-This module lets you:
-- Project Cartesian points (and headings) onto a discretized centerline
-- Convert back from Frenet (s, d) to Cartesian
-- Visualize tangents/normals for geometry sanity checks
+Every vehicle model in this repo describes the car in curvilinear coordinates
+along the track centerline rather than in the world frame:
 
-It can be imported or run directly:
-    python src/utils/frenet.py
+    s        arc length travelled along the centerline
+    d        signed lateral offset from it, positive to the left
+    psi_err  heading of the car relative to the centerline tangent
+
+That change of variables is what makes a minimum-time lap tractable: the track
+corridor becomes a plain box constraint on ``d``, and progress along the lap is
+a state rather than something to be recovered from (x, y). This example builds
+the frame from a discretized track and shows both directions of the mapping --
+``frenet_to_xy`` and ``project_xy_to_frenet``.
+
+The mapping is not global, and the failure is worth seeing. A point at lateral
+offset ``d`` on a centerline of curvature ``kappa`` has a Jacobian determinant
+
+    D_kappa = 1 - kappa * d
+
+so the frame degenerates as ``d`` approaches ``1 / kappa`` -- the centre of the
+osculating circle, where every normal line meets and (s, d) stops being unique.
+``visualize_frenet_singularities`` draws the normals so you can see them cross.
+This is the quantity the models guard with ``eps_D_kappa``, and the reason a
+tight corner plus a wide corridor is a genuinely harder problem than either
+alone.
+
+Run it::
+
+    python examples/frenet_frame.py                  # generates a track
+    python examples/frenet_frame.py --track-csv data/tracks/fsg_random.csv
+    python examples/frenet_frame.py --out frenet.png # headless
+
+This file is an example, not library code: it lives outside ``src/`` so it is
+never packaged, and nothing in ``fast_lto`` imports it. The pipeline's own
+Cartesian-to-Frenet projection is the cKDTree one in ``utils.track_bounds``,
+which is built for a different job -- resampling boundary polylines onto the
+centerline, at speed.
 """
 
 from __future__ import annotations
 
+import argparse
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -410,131 +440,101 @@ class TrackProcessor:
         plt.close(fig)
 
 
-def debug_frenet_singularities(
-    track: DiscretizedTrack,
-    w_left: Optional[np.ndarray] = None,
-    w_right: Optional[np.ndarray] = None,
-    left_boundary: Optional[np.ndarray] = None,
-    right_boundary: Optional[np.ndarray] = None,
-    normal_length_m: float = 3.0,
-    every: int = 5,
-    singularity_threshold: float = 0.4,
-    show: bool = True,
-    out_path: Optional[Path] = None,
-) -> None:
+def _load_track(track_csv: Optional[Path], ds_m: float):
+    """A discretized track plus its corridor, from a CSV or freshly generated.
+
+    Returns ``(track, w_left, w_right, left_boundary, right_boundary)``.
     """
-    Convenience function to visualize Frenet singularities for a DiscretizedTrack.
-
-    Parameters
-    ----------
-    track : DiscretizedTrack
-        The discretized track to visualize.
-    w_left : np.ndarray | None
-        Left half-widths at each sample point.
-    w_right : np.ndarray | None
-        Right half-widths at each sample point.
-    left_boundary : np.ndarray | None
-        Left boundary polyline.
-    right_boundary : np.ndarray | None
-        Right boundary polyline.
-    normal_length_m : float
-        Length of normal lines in meters on each side (default: 3.0).
-    every : int
-        Plot every N-th normal line (default: 5).
-    singularity_threshold : float
-        Singularity detection threshold (default: 0.4).
-    show : bool
-        Whether to display the plot.
-    out_path : Path | None
-        Optional path to save the figure.
-    """
-    processor = TrackProcessor(track)
-    processor.visualize_frenet_singularities(
-        w_left=w_left,
-        w_right=w_right,
-        left_boundary=left_boundary,
-        right_boundary=right_boundary,
-        normal_length_m=normal_length_m,
-        every=every,
-        singularity_threshold=singularity_threshold,
-        show=show,
-        out_path=out_path,
-    )
-
-
-def _demo() -> None:
-    import json
-
-    repo_root = Path(__file__).resolve().parents[3]
-
-    track_with_widths_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
-    csv_path = repo_root / "data" / "tracks" / "fsg_random.csv"
-
-    track = None
-    w_left = None
-    w_right = None
-    left_boundary = None
-    right_boundary = None
-
     from fast_lto.splines.spline_fitter import fit_and_discretize
     from fast_lto.tracks.fsg_trackdrive import generate_fsg_track
     from fast_lto.utils.track_bounds import compute_lateral_bounds, load_boundaries
 
-    if track_with_widths_path.exists():
-        print(f"Loading track with widths from {track_with_widths_path}")
-        with track_with_widths_path.open("r") as f:
-            track_data = json.load(f)
-        track = DiscretizedTrack.from_dict(track_data)
-        w_left = np.array(track_data.get("w_left", []), dtype=np.float64)
-        w_right = np.array(track_data.get("w_right", []), dtype=np.float64)
-        print(f"Loaded track: {track}")
-        print(f"  Widths: w_left shape={w_left.shape}, w_right shape={w_right.shape}")
-
-        if csv_path.exists():
-            try:
-                boundaries = load_boundaries(csv_path)
-                left_boundary = boundaries.get("left")
-                right_boundary = boundaries.get("right")
-                print("  Loaded boundaries from CSV")
-            except Exception as e:
-                print(f"  Could not load boundaries: {e}")
+    if track_csv is not None:
+        print(f"Reading boundaries from {track_csv}")
+        boundaries = load_boundaries(track_csv)
     else:
-        print("Track with widths not found, generating new FSG track...")
-
-        csv_path = repo_root / "data" / "tracks" / "fsg_random_demo.csv"
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        # No input asked for, so make one. Keeps the example runnable in a
+        # fresh clone, where data/ holds only what ships.
+        print("No --track-csv given; generating a random FSG-style track")
+        csv_path = Path(tempfile.mkdtemp()) / "frenet_example.csv"
         boundaries = generate_fsg_track(output_csv=csv_path)
-        left_boundary = boundaries["left"]
-        right_boundary = boundaries["right"]
+        track_csv = csv_path
 
-        track = fit_and_discretize(csv_path, ds_m=4.0, continuity="C2")
-        print(f"Generated track: {track}")
+    left = boundaries["left"]
+    right = boundaries["right"]
 
-        result = compute_lateral_bounds(track, left=left_boundary, right=right_boundary)
-        w_left = result.w_left
-        w_right = result.w_right
-        print(f"Computed widths: misses left/right: {result.misses_left}/{result.misses_right}")
+    track = fit_and_discretize(track_csv, ds_m=ds_m, continuity="C2")
+    print(f"Discretized track: {track}")
+
+    bounds = compute_lateral_bounds(track, left=left, right=right)
+    print(f"Corridor widths: misses left/right {bounds.misses_left}/{bounds.misses_right}")
+
+    return track, bounds.w_left, bounds.w_right, left, right
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--track-csv",
+        type=Path,
+        default=None,
+        help="Boundary CSV to read. Default: generate a random FSG-style track.",
+    )
+    parser.add_argument(
+        "--ds",
+        type=float,
+        default=4.0,
+        help="Centerline discretization step in metres. Coarse by default so the "
+        "normals stay far enough apart to read. Default: 4.0",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Save the figure here instead of opening a window.",
+    )
+    parser.add_argument(
+        "--singularity-threshold",
+        type=float,
+        default=0.4,
+        help="Flag a station once |kappa * d| exceeds this fraction. Default: 0.4",
+    )
+    args = parser.parse_args(argv)
+
+    track, w_left, w_right, left, right = _load_track(args.track_csv, args.ds)
 
     processor = TrackProcessor(track)
-    sample_xy = track.positions[10] + 0.5 * processor.normals[10]
-    proj = processor.project_xy_to_frenet(sample_xy)
+
+    # Both directions of the mapping, on a point placed half a metre to the
+    # left of station 10: project it back and the offset should come out as the
+    # half metre it was built from.
+    offset_m = 0.5
+    sample_xy = track.positions[10] + offset_m * processor.normals[10]
+    projected = processor.project_xy_to_frenet(sample_xy)
     print(
-        f"\nExample projection -> s={proj.s:.2f} m, d={proj.d:.2f} m, "
-        f"kappa={proj.kappa_s:.4f} 1/m, residual={proj.residual:.3f} m"
+        f"\nRound trip: placed a point {offset_m} m left of station 10, "
+        f"projected back to s={projected.s:.2f} m, d={projected.d:.3f} m "
+        f"(kappa={projected.kappa_s:+.4f} 1/m, residual={projected.residual:.3e} m)"
     )
 
-    print("\nVisualizing Frenet geometry with singularity detection...")
+    print("\nDrawing the frame and its singularities...")
     processor.visualize_frenet_singularities(
         w_left=w_left,
         w_right=w_right,
-        left_boundary=left_boundary,
-        right_boundary=right_boundary,
+        left_boundary=left,
+        right_boundary=right,
         normal_length_m=6.0,
         every=3,
-        singularity_threshold=0.4,
-        show=True,
+        singularity_threshold=args.singularity_threshold,
+        show=args.out is None,
+        out_path=args.out,
     )
+    if args.out is not None:
+        print(f"Saved {args.out}")
 
 
 if __name__ == "__main__":
-    _demo()
+    main()

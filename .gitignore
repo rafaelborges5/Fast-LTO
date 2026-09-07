@@ -28,8 +28,15 @@ data/discretized/
 data/solutions/
 data/output_trajectories/
 data/validation/
+data/experiments/
+data/sensitivity/
 ocp_plots/
 results/
 todo-list.md
 
 logs/
+
+# Working-tree scratch: figures written next to the code that made them.
+/*.png
+eng_design/
+.claude/

@@ -10,7 +10,7 @@ import casadi as ca
 import numpy as np
 
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
-from fast_lto.vehicle_models import PointMassModel, VehicleModel
+from fast_lto.vehicle_models import VehicleModel
 
 # Tolerances for the optional terminal centering/heading constraints (see
 # `_terminal_state_bounds` in `build_ocp`): how close to centered/aligned the
@@ -961,24 +961,3 @@ def solve_ocp_and_save(
     print(f"Saved solution to {solution_path}")
 
     return sol_dict
-
-
-def _demo() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    track_path = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
-    solution_out = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
-    track = load_track_with_widths(track_path)
-
-    model = PointMassModel()
-    solve_ocp_and_save(
-        track=track,
-        model=model,
-        solution_path=solution_out,
-        integrator=EulerIntegrator(),
-        initial_speed=5.0,
-        reg_du=1e-4,
-    )
-
-
-if __name__ == "__main__":
-    _demo()

@@ -7,15 +7,12 @@ Run directly to plot the last saved solution (ellipse_point_mass.npz) if present
 
 from __future__ import annotations
 
-import json
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fast_lto.utils.track_bounds import load_boundaries
 from fast_lto.visualization.summary_panel import plot_profiling_panel
 
 
@@ -348,68 +345,3 @@ def plot_all_panels(
     if show:
         plt.show()
     plt.close(fig)
-
-
-def _demo() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    solution_path = repo_root / "data" / "solutions" / "fsg_random_point_mass.json"
-    cones_csv = repo_root / "data" / "tracks" / "fsg_random.csv"
-    timestamp_dir = repo_root / "ocp_plots" / datetime.now().strftime("%Y%m%d-%H%M%S")
-    if not solution_path.exists():
-        print(f"Solution not found at {solution_path}, run global_ocp first.")
-        return
-
-    with solution_path.open("r") as f:
-        data = json.load(f)
-    boundaries = load_boundaries(cones_csv)
-    cones_left = boundaries["left"]
-    cones_right = boundaries["right"]
-
-    path_xy = np.array(data["path_xy"], dtype=np.float64)
-    v = np.array(data["v"], dtype=np.float64)
-    s = np.array(data["arc_lengths"], dtype=np.float64)
-    d = np.array(data["d"], dtype=np.float64)
-    w_left = np.array(data["w_left"], dtype=np.float64)
-    w_right = np.array(data["w_right"], dtype=np.float64)
-    a_long = np.array(data["a_long"], dtype=np.float64)
-    a_lat = np.array(data["a_lat"], dtype=np.float64)
-    params = data.get("model_params", {})
-    mu = params.get("mu", 1.2)
-    g_val = params.get("g", 9.81)
-    mu_g = mu * g_val
-
-    profiling = data.get("profiling")
-    constraint_activity = _compute_constraint_activity(
-        d=d,
-        w_left=w_left,
-        w_right=w_right,
-        a_long=a_long,
-        a_lat=a_lat,
-        v=v,
-        params=params,
-    )
-
-    timestamp_dir.mkdir(parents=True, exist_ok=True)
-
-    plot_all_panels(
-        cones_left,
-        cones_right,
-        path_xy,
-        v,
-        s,
-        d,
-        w_left,
-        w_right,
-        a_long,
-        a_lat,
-        mu_g,
-        profiling=profiling,
-        constraint_activity=constraint_activity,
-        out_path=timestamp_dir / "panels.png",
-        show=True,
-    )
-    print(f"Saved plots to {timestamp_dir}")
-
-
-if __name__ == "__main__":
-    _demo()

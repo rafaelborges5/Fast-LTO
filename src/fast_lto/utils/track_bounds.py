@@ -122,95 +122,6 @@ def load_boundaries(csv_path: Path) -> Dict[str, np.ndarray]:
     return out
 
 
-def _ray_segment_intersection(p: np.ndarray, n_hat: np.ndarray, q0: np.ndarray, q1: np.ndarray):
-    """
-    Solve p + t*n_hat = q0 + u*(q1-q0). Returns (t, u) or (None, None) if no hit.
-    """
-    v = q1 - q0
-    A = np.array([[n_hat[0], -v[0]], [n_hat[1], -v[1]]], dtype=np.float64)
-    b = q0 - p
-    det = A[0, 0] * A[1, 1] - A[0, 1] * A[1, 0]
-    if abs(det) < 1e-12:
-        return None, None
-    inv_det = 1.0 / det
-    t = inv_det * (b[0] * A[1, 1] - b[1] * A[0, 1])
-    u = inv_det * (-b[0] * A[1, 0] + b[1] * A[0, 0])
-    return t, u
-
-
-def _compute_lateral_bounds_rays(
-    track: DiscretizedTrack, left: np.ndarray, right: np.ndarray
-) -> LateralBoundsResult:
-    """
-    Legacy implementation: for each center sample, intersect its normal with
-    left/right boundary polylines using a ray–segment scan.
-
-    Returns w_left (positive along +n) and w_right (positive along -n).
-    """
-    n_samples = track.num_points
-    w_left = np.full(n_samples, np.nan, dtype=np.float64)
-    w_right = np.full(n_samples, np.nan, dtype=np.float64)
-
-    def _segments(poly: np.ndarray) -> list[Tuple[np.ndarray, np.ndarray]]:
-        segs = list(zip(poly[:-1], poly[1:]))
-        # Close the loop
-        segs.append((poly[-1], poly[0]))
-        return segs
-
-    left_segs = _segments(left)
-    right_segs = _segments(right)
-
-    misses_left = 0
-    misses_right = 0
-
-    normals = np.column_stack((-np.sin(track.headings), np.cos(track.headings)))
-
-    for i in range(n_samples):
-        p = track.positions[i]
-        n_hat = normals[i]
-
-        # Left: t > 0
-        t_min = None
-        for q0, q1 in left_segs:
-            t, u = _ray_segment_intersection(p, n_hat, q0, q1)
-            if t is None or u is None:
-                continue
-            if u < -1e-9 or u > 1 + 1e-9:
-                continue
-            if t <= 1e-9:
-                continue
-            if (t_min is None) or (t < t_min):
-                t_min = t
-        if t_min is None:
-            misses_left += 1
-        else:
-            w_left[i] = t_min
-
-        # Right: t < 0 (we store positive magnitude)
-        t_min = None
-        for q0, q1 in right_segs:
-            t, u = _ray_segment_intersection(p, n_hat, q0, q1)
-            if t is None or u is None:
-                continue
-            if u < -1e-9 or u > 1 + 1e-9:
-                continue
-            if t >= -1e-9:
-                continue
-            if (t_min is None) or (-t < t_min):
-                t_min = -t  # store as positive distance
-        if t_min is None:
-            misses_right += 1
-        else:
-            w_right[i] = t_min
-
-    return LateralBoundsResult(
-        w_left=w_left,
-        w_right=w_right,
-        misses_left=misses_left,
-        misses_right=misses_right,
-    )
-
-
 def _make_spline(s: np.ndarray, d: np.ndarray):
     """
     Internal fun for 1D splines d(s).
@@ -380,28 +291,8 @@ def _compute_lateral_bounds_kdtree(
 def compute_lateral_bounds(
     track: DiscretizedTrack, left: np.ndarray, right: np.ndarray
 ) -> LateralBoundsResult:
-    # New KD-tree + spline implementation (default)
+    """Half-widths of the corridor at every centerline station."""
     return _compute_lateral_bounds_kdtree(track, left, right)
-    # Legacy ray-based implementation:
-    # return _compute_lateral_bounds_rays(track, left, right)
-
-
-def save_bounds_json(
-    path: Path, track: DiscretizedTrack, csv_source: Path, result: LateralBoundsResult
-) -> None:
-    data = {
-        "source_boundaries_csv": str(csv_source),
-        "discretized_track": str(path),
-        "w_left": result.w_left.tolist(),
-        "w_right": result.w_right.tolist(),
-        "num_points": int(track.num_points),
-        "misses_left": int(result.misses_left),
-        "misses_right": int(result.misses_right),
-    }
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        json.dump(data, f, indent=2)
 
 
 def save_track_with_widths(
@@ -478,29 +369,3 @@ def plot_bounds(
     if show:
         plt.show()
     plt.close(fig)
-
-
-def _demo() -> None:
-    """Minimal runnable example for computing and visualizing bounds."""
-    repo_root = Path(__file__).resolve().parents[3]
-    track_path = repo_root / "data" / "discretized" / "fsg_random.json"
-    csv_path = repo_root / "data" / "tracks" / "fsg_random.csv"
-
-    track = DiscretizedTrack.load(track_path)
-    boundaries = load_boundaries(csv_path)
-    left = boundaries["left"]
-    right = boundaries["right"]
-
-    result = compute_lateral_bounds(track, left=left, right=right)
-    print(f"Misses left/right: {result.misses_left} / {result.misses_right}")
-    out_json = repo_root / "data" / "discretized" / "fsg_random_with_widths.json"
-    save_track_with_widths(out_json, track=track, csv_source=csv_path, result=result)
-    print(f"Saved bounds + track to {out_json}")
-
-    out_plot = repo_root / "out" / "lateral_bounds.png"
-    plot_bounds(track, left, right, result.w_left, result.w_right, every=10, show=True)
-    print(f"Saved plot to {out_plot}")
-
-
-if __name__ == "__main__":
-    _demo()
