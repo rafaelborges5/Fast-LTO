@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, get_args
+from typing import Callable, Dict, List, Literal, Optional, Tuple, get_args
 
 import numpy as np
 
@@ -544,31 +544,6 @@ def step_build_skidpad_track(config: PipelineConfig) -> Path:
     return config.track_with_widths_path
 
 
-def _run_skidpad_pipeline(config: PipelineConfig, end_at: Optional[StepName]) -> Dict[str, Path]:
-    """Dedicated skidpad flow: build track -> OCP -> export -> visualize."""
-    results: Dict[str, Path] = {}
-
-    results["bounds"] = step_build_skidpad_track(config)
-    if end_at == "bounds":
-        return results
-
-    solution_path = step_solve_ocp(config)
-    results["ocp"] = solution_path
-    if end_at == "ocp":
-        return results
-
-    if config.export_trajectory:
-        results["export"] = step_export_trajectory(config, solution_path=solution_path)
-    if end_at == "export":
-        return results
-
-    if config.plot_results:
-        map_csv = _resolve_path(config.repo_root, config.skidpad_map_csv)
-        results["plot"] = step_visualize(config, solution_path=solution_path, csv_path=map_csv)
-
-    return results
-
-
 def _seed_signature_for(
     config: PipelineConfig,
     track_data: Dict,
@@ -1039,164 +1014,160 @@ def step_visualize(
     return timestamp_dir
 
 
+# --------------------------------------------------------------------------- #
+#  The run plan
+# --------------------------------------------------------------------------- #
+#
+# Steps used to decide for themselves whether their output was still current:
+# compare the cached spline's ds against the requested one, compare the stored
+# bounds settings against the current ones, and skip the step if they matched.
+# None of it ever fired. The spline check compared the *requested* ds against
+# the *achieved* one, and `fit_and_discretize` resamples to a whole number of
+# points, so the two agree only when the track length is an exact multiple of
+# ds -- which was true for none of the tracks in this repo. The bounds check
+# compared a stored four-key dict against a freshly built three-key one, so it
+# was never equal either, and it was unreachable regardless because the spline
+# always refit.
+#
+# It guarded 0.02 s of spline and bounds work in front of a solve measured in
+# minutes, so rather than repair it, it is gone. `start_from` remains: reuse is
+# something the caller asks for explicitly, and it cannot silently hand the
+# solver a track built under settings that have since changed -- which is what
+# a repaired cache would have done, since `smooth_centerline` was never part of
+# the comparison.
+
+STEP_ORDER: Tuple[StepName, ...] = ("track", "spline", "bounds", "ocp", "export", "plot")
+
+
+@dataclass(frozen=True)
+class _Step:
+    """One stage of the pipeline: what it runs, and where its output lands."""
+
+    name: StepName
+    run: Callable[[PipelineConfig, Dict[str, Path]], Path]
+    artifact: Callable[[PipelineConfig], Path]
+    enabled: Callable[[PipelineConfig], bool] = lambda config: True
+
+
+def _plot_source_csv(config: PipelineConfig) -> Path:
+    """The cone CSV the plots are drawn against."""
+    if config.mode == "skidpad":
+        if config.skidpad_map_csv is None:
+            raise ValueError("mode='skidpad' requires skidpad_map_csv.")
+        return _resolve_path(config.repo_root, config.skidpad_map_csv)
+    return config.track_csv_path
+
+
+def _step_track(config: PipelineConfig, results: Dict[str, Path]) -> Path:
+    if config.generate_track or not config.track_csv_path.exists():
+        return step_generate_track(config)
+    print(f"[Step 1] Using existing track CSV: {config.track_csv_path}")
+    return config.track_csv_path
+
+
+def _step_spline(config: PipelineConfig, results: Dict[str, Path]) -> Path:
+    step_fit_spline(config, csv_path=results["track"])
+    return config.discretized_track_path
+
+
+def _step_bounds(config: PipelineConfig, results: Dict[str, Path]) -> Path:
+    # Always reads the discretized track back from disk rather than taking it
+    # from the spline step: it costs milliseconds, and it means this step
+    # behaves the same whether or not the spline ran in this process.
+    step_compute_bounds(config, track=None, csv_path=results["track"])
+    return config.track_with_widths_path
+
+
+def _step_ocp(config: PipelineConfig, results: Dict[str, Path]) -> Path:
+    return step_solve_ocp(config)
+
+
+def _step_export(config: PipelineConfig, results: Dict[str, Path]) -> Path:
+    return step_export_trajectory(config, solution_path=results["ocp"])
+
+
+def _step_plot(config: PipelineConfig, results: Dict[str, Path]) -> Path:
+    return step_visualize(config, solution_path=results["ocp"], csv_path=_plot_source_csv(config))
+
+
+_SOLVE_AND_AFTER = (
+    _Step("ocp", _step_ocp, lambda c: c.solution_path),
+    _Step(
+        "export", _step_export, lambda c: c.output_trajectories_dir, lambda c: c.export_trajectory
+    ),
+    _Step("plot", _step_plot, lambda c: c.plots_dir, lambda c: c.plot_results),
+)
+
+
+def _plan(config: PipelineConfig) -> List[_Step]:
+    """The steps this configuration runs, in order.
+
+    Skidpad reaches the same track-with-widths JSON by a different route -- its
+    path overlaps itself, so it cannot go through the generic spline and bounds
+    machinery -- and used to be a parallel copy of the whole function that took
+    ``end_at`` but quietly ignored ``start_from``. It is one entry in the plan
+    instead; everything from the solve onward is shared.
+    """
+    if config.mode == "skidpad" or config.track_type == "skidpad":
+        upstream: List[_Step] = [
+            _Step(
+                "bounds",
+                lambda c, r: step_build_skidpad_track(c),
+                lambda c: c.track_with_widths_path,
+            )
+        ]
+    else:
+        upstream = [
+            _Step("track", _step_track, lambda c: c.track_csv_path),
+            _Step("spline", _step_spline, lambda c: c.discretized_track_path),
+            _Step(
+                "bounds",
+                _step_bounds,
+                lambda c: c.track_with_widths_path,
+                lambda c: c.compute_bounds,
+            ),
+        ]
+    return [*upstream, *_SOLVE_AND_AFTER]
+
+
 def run_pipeline(
     config: PipelineConfig,
     start_from: StepName = "track",
     end_at: Optional[StepName] = None,
 ) -> Dict[str, Path]:
+    """Run the pipeline from ``start_from`` through ``end_at`` (both inclusive).
+
+    Steps before ``start_from`` are not run; their outputs must already exist,
+    and are reported in the result so the caller sees the full set of paths
+    either way.
+    """
+    for name, value in (("start_from", start_from), ("end_at", end_at)):
+        if value is not None and value not in STEP_ORDER:
+            raise ValueError(f"Unknown {name}: {value!r}. Must be one of {list(STEP_ORDER)}.")
+
+    first = STEP_ORDER.index(start_from)
+    last = STEP_ORDER.index(end_at) if end_at is not None else len(STEP_ORDER) - 1
+    if last < first:
+        raise ValueError(f"end_at={end_at!r} comes before start_from={start_from!r}.")
+
     results: Dict[str, Path] = {}
+    for step in _plan(config):
+        position = STEP_ORDER.index(step.name)
+        if position > last or not step.enabled(config):
+            continue
 
-    if end_at is None:
-        end_at = "plot"
-
-    # Skidpad uses a dedicated builder (overlapping path can't go through the
-    # generic spline/bounds machinery); the OCP/export/plot steps are reused.
-    if config.mode == "skidpad" or config.track_type == "skidpad":
-        return _run_skidpad_pipeline(config, end_at)
-
-    # Track whether we just generated a new track CSV
-    track_just_generated = False
-
-    if start_from == "track":
-        need_generate = config.generate_track or not config.track_csv_path.exists()
-        if need_generate:
-            csv_path = step_generate_track(config)
-            track_just_generated = True
-        else:
-            csv_path = config.track_csv_path
-            print(f"[Step 1] Using existing track CSV: {csv_path}")
-        results["track"] = csv_path
-    else:
-        csv_path = config.track_csv_path
-        if not csv_path.exists():
-            raise FileNotFoundError(
-                f"Track CSV not found at {csv_path}. " f"Run with start_from='track' first."
-            )
-        results["track"] = csv_path
-
-    if end_at == "track":
-        return results
-
-    # If track was just generated, force recomputation of downstream steps
-    if start_from in ("track", "spline"):
-        need_refit = (
-            start_from == "spline"
-            or track_just_generated
-            or not config.discretized_track_path.exists()
-        )
-        if not need_refit:
-            try:
-                cached = DiscretizedTrack.load(config.discretized_track_path)
-                if abs(cached.ds_m - config.ds_m) > 1e-6 or cached.continuity != config.continuity:
-                    need_refit = True
-            except Exception:
-                need_refit = True
-
-        if need_refit:
-            track = step_fit_spline(config, csv_path=csv_path)
-        else:
-            print(f"[Step 2] Using existing discretized track: " f"{config.discretized_track_path}")
-            track = cached
-        results["spline"] = config.discretized_track_path
-    else:
-        if not config.discretized_track_path.exists():
-            raise FileNotFoundError(
-                f"Discretized track not found at {config.discretized_track_path}. "
-                f"Run with start_from='spline' first."
-            )
-        results["spline"] = config.discretized_track_path
-        track = None
-
-    if end_at == "spline":
-        return results
-
-    if start_from in ("track", "spline", "bounds"):
-        if config.compute_bounds:
-            if track is not None:
-                result = step_compute_bounds(
-                    config,
-                    track=track,
-                    csv_path=csv_path,
+        if position < first:
+            # Skipped by request, so its output has to be there already.
+            artifact = step.artifact(config)
+            if not artifact.exists():
+                raise FileNotFoundError(
+                    f"{step.name} output not found at {artifact}. "
+                    f"Run with start_from={step.name!r} first."
                 )
-                _ = result  # currently unused
-            else:
-                need_bounds = False
-                if (
-                    start_from == "bounds"
-                    or track_just_generated
-                    or not config.track_with_widths_path.exists()
-                ):
-                    need_bounds = True
-                else:
-                    try:
-                        with config.track_with_widths_path.open("r") as f:
-                            existing_bounds = json.load(f)
-                        stored_cfg = existing_bounds.get("bounds_config")
-                    except Exception:
-                        stored_cfg = None
+            results[step.name] = artifact
+            continue
 
-                    current_cfg = {
-                        "use_savgol_bounds": bool(config.use_savgol_bounds),
-                        "savgol_window_length": int(config.savgol_window_length),
-                        "savgol_polyorder": int(config.savgol_polyorder),
-                    }
-                    if stored_cfg != current_cfg:
-                        need_bounds = True
-
-                if need_bounds:
-                    result = step_compute_bounds(
-                        config,
-                        track=None,
-                        csv_path=csv_path,
-                    )
-                    _ = result  # currently unused
-                else:
-                    print(
-                        f"[Step 3] Using existing track with widths: "
-                        f"{config.track_with_widths_path}"
-                    )
-            results["bounds"] = config.track_with_widths_path
-    else:
-        if not config.track_with_widths_path.exists():
-            raise FileNotFoundError(
-                f"Track with widths not found at {config.track_with_widths_path}. "
-                f"Run with start_from='bounds' first."
-            )
-        results["bounds"] = config.track_with_widths_path
-
-    if end_at == "bounds":
-        return results
-
-    if start_from in ("track", "spline", "bounds", "ocp"):
-        # Solution reuse is deliberately off: every run re-solves, so a config
-        # change can never be masked by a stale file on disk. Caching lives one
-        # level down instead, in optimization/warm_start.py, which only changes
-        # where the solver starts from — never whether it runs.
-        solution_path = step_solve_ocp(config)
-        results["ocp"] = solution_path
-    else:
-        if not config.solution_path.exists():
-            raise FileNotFoundError(
-                f"Solution not found at {config.solution_path}. "
-                f"Run with start_from='ocp' first."
-            )
-        results["ocp"] = config.solution_path
-
-    if end_at == "ocp":
-        return results
-
-    # Trajectory export.
-    if config.export_trajectory:
-        export_path = step_export_trajectory(config, solution_path=results["ocp"])
-        results["export"] = export_path
-
-    if end_at == "export":
-        return results
-
-    # Visualization.
-    if config.plot_results:
-        plot_dir = step_visualize(config, solution_path=results["ocp"], csv_path=csv_path)
-        results["plot"] = plot_dir
+        results[step.name] = step.run(config, results)
 
     return results
 
