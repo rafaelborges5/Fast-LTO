@@ -5,5 +5,6 @@ pipeline:
   mode: skidpad
   track_type: skidpad
   model_name: four_wheel
-  skidpad_start_x: 4.0
-  skidpad_start_y: 1.5
+  skidpad:
+    start_x: 4.0
+    start_y: 1.5

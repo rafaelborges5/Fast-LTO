@@ -12,12 +12,13 @@ parameters raise ``ValueError`` rather than being silently ignored.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 
+from fast_lto.modes import MODE_NAMES, get_mode
 from fast_lto.pipeline import PipelineConfig
 from fast_lto.vehicle_models.dynamic_bicycle import DynamicBicycleModel
 from fast_lto.vehicle_models.four_wheel import FourWheelModel
@@ -192,6 +193,11 @@ _NON_YAML_PIPELINE_FIELDS = frozenset(
 )
 
 
+#: ``mode`` value -> the pipeline key holding that event's settings.
+_MODE_BLOCKS = {mode_name: get_mode(mode_name).config_attr for mode_name in MODE_NAMES}
+_ALL_MODE_BLOCKS = {attr for attr in _MODE_BLOCKS.values() if attr is not None}
+
+
 def _pipeline_yaml_fields() -> set:
     """The YAML-settable keys of the ``pipeline`` section.
 
@@ -202,6 +208,61 @@ def _pipeline_yaml_fields() -> set:
     return {f.name for f in fields(PipelineConfig) if not f.name.startswith("_")} - (
         _NON_YAML_PIPELINE_FIELDS
     )
+
+
+def _parse_mode_block(mode_name: str, raw: Any) -> Any:
+    """Turn one event's YAML block into its settings dataclass."""
+    config_type = get_mode(mode_name).config_type
+    assert config_type is not None  # only called for modes that have a block
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"pipeline.{mode_name} must be a mapping, got {type(raw).__name__}")
+
+    known = {f.name for f in fields(config_type)}
+    unknown = set(raw) - known
+    if unknown:
+        raise ValueError(
+            f"Unknown keys in pipeline.{mode_name}: {sorted(unknown)}. "
+            f"Known settings: {sorted(known)}"
+        )
+    return config_type(**raw)
+
+
+def build_pipeline_config(raw: Dict[str, Any]) -> PipelineConfig:
+    """Construct a PipelineConfig from a plain ``pipeline`` mapping.
+
+    Public because it is the only correct way to build one from untrusted keys:
+    it validates them and turns an event's block into its settings dataclass.
+    Callers with a dict -- a config file, a sweep, a test -- should come
+    through here rather than splatting into ``PipelineConfig`` directly.
+
+    An event's settings live in a block named after it. A block belonging to a
+    different event than the configured ``mode`` is an error: before the blocks
+    existed every setting was accepted regardless of mode, so a stray
+    ``skidpad_lead_in_m`` in an autox config was silently ignored rather than
+    questioned.
+    """
+    raw = dict(raw)
+    mode_name = raw.get("mode", PipelineConfig.mode)
+    if mode_name not in _MODE_BLOCKS:
+        raise ValueError(f"Unknown mode: {mode_name!r}. Must be one of {sorted(_MODE_BLOCKS)}.")
+
+    active = _MODE_BLOCKS[mode_name]
+    for block in sorted(_ALL_MODE_BLOCKS & set(raw)):
+        if block != active:
+            raise ValueError(
+                f"pipeline.{block} is set, but mode is {mode_name!r}. "
+                + (
+                    f"Move those settings to pipeline.{active}."
+                    if active
+                    else f"Mode {mode_name!r} takes no event settings."
+                )
+            )
+
+    if active is not None and active in raw:
+        raw[active] = _parse_mode_block(mode_name, raw[active])
+
+    return PipelineConfig(**raw)
 
 
 EXTENDS_KEY = "extends"
@@ -309,7 +370,7 @@ class RunConfig:
                 f"Allowed keys: {sorted(allowed_pipeline)}"
             )
 
-        return cls(vehicle=vehicle, pipeline=PipelineConfig(**pipeline_raw))
+        return cls(vehicle=vehicle, pipeline=build_pipeline_config(pipeline_raw))
 
     def to_yaml(self, path: str | Path) -> None:
         """Save configuration to YAML."""
@@ -317,7 +378,15 @@ class RunConfig:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         pipeline: Dict[str, Any] = {}
+        active = _MODE_BLOCKS.get(self.pipeline.mode)
         for name in sorted(_pipeline_yaml_fields()):
+            if name in _ALL_MODE_BLOCKS:
+                # Only the event actually being run; the other block is at its
+                # defaults and would just be noise in the written file.
+                if name != active:
+                    continue
+                pipeline[name] = asdict(getattr(self.pipeline, name))
+                continue
             val = getattr(self.pipeline, name)
             if val is not None:
                 pipeline[name] = val

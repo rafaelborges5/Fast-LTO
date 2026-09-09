@@ -29,17 +29,18 @@ pipeline:
   reg_u_l2: 0.001
   initial_speed: 3.0
   boundary_margin: 0.45
-  autox_extension_m: 20.0
-  autox_start_x: 0.0
-  autox_start_y: 0.0
-  autox_start_node_offset: 1
-  autox_lead_in_m: 8.0
-  autox_ocp_lead_m: 0.0
-  terminal_speed: 1.3
-  eps_time: 0.05
-  decel_hold_m: 0.0
-  autox_terminal_state_constraint: true
-  autox_terminal_window_nodes: 2
-  autox_terminal_pad_m: 10.0
-  D_safe_braking: 1.075
   warm_start: auto
+  autox:
+    extension_m: 20.0
+    start_x: 0.0
+    start_y: 0.0
+    start_node_offset: 1
+    lead_in_m: 8.0
+    ocp_lead_m: 0.0
+    terminal_speed: 1.3
+    eps_time: 0.05
+    decel_hold_m: 0.0
+    terminal_state_constraint: true
+    terminal_window_nodes: 2
+    terminal_pad_m: 10.0
+    D_safe_braking: 1.075

@@ -96,32 +96,32 @@ def test_default_data_paths_hang_off_the_repo_root() -> None:
 
 def test_skidpad_start_defaults_to_none() -> None:
     rc = RunConfig()
-    assert rc.pipeline.skidpad_start_x is None
-    assert rc.pipeline.skidpad_start_y == 0.0
+    assert rc.pipeline.skidpad.start_x is None
+    assert rc.pipeline.skidpad.start_y == 0.0
 
     pc = rc.to_pipeline_config()
-    assert pc.skidpad_start_x is None
-    assert pc.skidpad_start_y == 0.0
+    assert pc.skidpad.start_x is None
+    assert pc.skidpad.start_y == 0.0
 
 
 def test_autox_ocp_lead_defaults_to_zero() -> None:
     rc = RunConfig()
-    assert rc.pipeline.autox_ocp_lead_m == 0.0
+    assert rc.pipeline.autox.ocp_lead_m == 0.0
 
     pc = rc.to_pipeline_config()
-    assert pc.autox_ocp_lead_m == 0.0
+    assert pc.autox.ocp_lead_m == 0.0
 
 
 def test_autox_start_defaults_to_origin() -> None:
     rc = RunConfig()
-    assert rc.pipeline.autox_start_x == 0.0
-    assert rc.pipeline.autox_start_y == 0.0
-    assert rc.pipeline.autox_start_node_offset == 1
+    assert rc.pipeline.autox.start_x == 0.0
+    assert rc.pipeline.autox.start_y == 0.0
+    assert rc.pipeline.autox.start_node_offset == 1
 
     pc = rc.to_pipeline_config()
-    assert pc.autox_start_x == 0.0
-    assert pc.autox_start_y == 0.0
-    assert pc.autox_start_node_offset == 1
+    assert pc.autox.start_x == 0.0
+    assert pc.autox.start_y == 0.0
+    assert pc.autox.start_node_offset == 1
 
 
 # ---------------------------------------------------------------------------
@@ -131,41 +131,41 @@ def test_autox_start_defaults_to_origin() -> None:
 
 def test_skidpad_yaml_loads_start_xy() -> None:
     rc = RunConfig.from_yaml(FIXTURE_CONFIGS / "skidpad_start_xy.yaml")
-    assert rc.pipeline.skidpad_start_x == pytest.approx(4.0)
-    assert rc.pipeline.skidpad_start_y == pytest.approx(1.5)
+    assert rc.pipeline.skidpad.start_x == pytest.approx(4.0)
+    assert rc.pipeline.skidpad.start_y == pytest.approx(1.5)
 
     pc = rc.to_pipeline_config()
-    assert pc.skidpad_start_x == pytest.approx(4.0)
-    assert pc.skidpad_start_y == pytest.approx(1.5)
+    assert pc.skidpad.start_x == pytest.approx(4.0)
+    assert pc.skidpad.start_y == pytest.approx(1.5)
 
 
 def test_autox_yaml_loads_anchor_fields() -> None:
     rc = RunConfig.from_yaml(FIXTURE_CONFIGS / "autox_anchor.yaml")
-    assert rc.pipeline.autox_lead_in_m == pytest.approx(8.0)
-    assert rc.pipeline.autox_ocp_lead_m == pytest.approx(2.5)
-    assert rc.pipeline.autox_start_x == pytest.approx(12.5)
-    assert rc.pipeline.autox_start_y == pytest.approx(-3.25)
-    assert rc.pipeline.autox_start_node_offset == 3
+    assert rc.pipeline.autox.lead_in_m == pytest.approx(8.0)
+    assert rc.pipeline.autox.ocp_lead_m == pytest.approx(2.5)
+    assert rc.pipeline.autox.start_x == pytest.approx(12.5)
+    assert rc.pipeline.autox.start_y == pytest.approx(-3.25)
+    assert rc.pipeline.autox.start_node_offset == 3
 
     pc = rc.to_pipeline_config()
-    assert pc.autox_lead_in_m == pytest.approx(8.0)
-    assert pc.autox_ocp_lead_m == pytest.approx(2.5)
-    assert pc.autox_start_x == pytest.approx(12.5)
-    assert pc.autox_start_y == pytest.approx(-3.25)
-    assert pc.autox_start_node_offset == 3
+    assert pc.autox.lead_in_m == pytest.approx(8.0)
+    assert pc.autox.ocp_lead_m == pytest.approx(2.5)
+    assert pc.autox.start_x == pytest.approx(12.5)
+    assert pc.autox.start_y == pytest.approx(-3.25)
+    assert pc.autox.start_node_offset == 3
 
 
 def test_unset_mode_fields_keep_their_defaults() -> None:
     """A config that names no anchor fields must not invent values for them."""
     rc = RunConfig.from_yaml(FIXTURE_CONFIGS / "no_mode_overrides.yaml")
-    assert rc.pipeline.skidpad_start_x is None
-    assert rc.pipeline.autox_ocp_lead_m == 0.0
-    assert rc.pipeline.autox_start_node_offset == 1
+    assert rc.pipeline.skidpad.start_x is None
+    assert rc.pipeline.autox.ocp_lead_m == 0.0
+    assert rc.pipeline.autox.start_node_offset == 1
 
     pc = rc.to_pipeline_config()
-    assert pc.skidpad_start_x is None
-    assert pc.autox_ocp_lead_m == 0.0
-    assert pc.autox_start_node_offset == 1
+    assert pc.skidpad.start_x is None
+    assert pc.autox.ocp_lead_m == 0.0
+    assert pc.autox.start_node_offset == 1
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +344,54 @@ def test_cli_offers_every_track_type() -> None:
     from fast_lto.pipeline import TRACK_TYPES
 
     assert set(_parser_choices("--track-type")) == set(TRACK_TYPES)
+
+
+# ---------------------------------------------------------------------------
+# Per-event settings blocks
+# ---------------------------------------------------------------------------
+
+
+def test_another_events_block_is_an_error_not_a_no_op() -> None:
+    """An autox config setting skidpad options used to be silently ignored.
+
+    Every field lived flat on PipelineConfig and was accepted regardless of
+    mode, so a misplaced setting looked applied and did nothing.
+    """
+    with pytest.raises(ValueError, match="pipeline.skidpad is set, but mode is 'autox'"):
+        RunConfig.from_yaml(FIXTURE_CONFIGS / "wrong_mode_block.yaml")
+
+
+def test_an_unknown_key_inside_an_event_block_is_rejected(tmp_path: Path) -> None:
+    config = tmp_path / "c.yaml"
+    config.write_text("pipeline:\n  mode: autox\n  autox:\n    lead_in_metres: 8.0\n")
+
+    with pytest.raises(ValueError, match="Unknown keys in pipeline.autox"):
+        RunConfig.from_yaml(config)
+
+
+def test_trackdrive_takes_no_event_settings(tmp_path: Path) -> None:
+    """It has no settings class, so there is no terminal_speed to reject.
+
+    A terminal speed on a closed lap would pin the free launch speed at node 0
+    through the wrap-around constraint. That used to need an explicit check in
+    __post_init__; now the field simply does not exist for this mode.
+    """
+    config = tmp_path / "c.yaml"
+    config.write_text("pipeline:\n  mode: trackdrive\n  autox:\n    lead_in_m: 8.0\n")
+
+    with pytest.raises(ValueError, match="takes no event settings"):
+        RunConfig.from_yaml(config)
+
+
+def test_an_event_block_round_trips_through_yaml(tmp_path: Path) -> None:
+    """Saving and reloading a config must not flatten or drop the block."""
+    source = RunConfig.from_yaml(CONFIGS_DIR / "autox.yaml")
+    written = tmp_path / "out.yaml"
+    source.to_yaml(written)
+
+    reloaded = RunConfig.from_yaml(written)
+
+    assert reloaded.pipeline.autox == source.pipeline.autox
 
 
 # ---------------------------------------------------------------------------

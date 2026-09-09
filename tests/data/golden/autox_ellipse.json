@@ -41,7 +41,9 @@
     }
   },
   "settings": {
-    "autox_extension_m": 10.0,
+    "autox": {
+      "extension_m": 10.0
+    },
     "continuity": "C2",
     "ds_m": 1.5,
     "integrator_name": "euler",

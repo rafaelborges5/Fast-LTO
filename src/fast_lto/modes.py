@@ -38,6 +38,130 @@ if TYPE_CHECKING:
     from fast_lto.pipeline import PipelineConfig
 
 
+# ---------------------------------------------------------------------------
+# Per-event settings
+# ---------------------------------------------------------------------------
+#
+# These used to be flat fields on PipelineConfig, prefixed by hand. Twenty-one
+# of its fifty-two settings belonged to exactly one event, and three of those
+# did not say so in their names -- `entry_exit_halfwidth` and `kappa_blend_m`
+# read like general track settings and are skidpad-only, `D_safe_braking` like
+# a vehicle limit and is autox-only. Nothing stopped an autox config from
+# setting a skidpad option either: every field was accepted regardless of mode
+# and the irrelevant ones were silently ignored.
+#
+# Each event now owns its settings, and `EventMode.config_of` reaches the block
+# that belongs to it. A block that does not match the configured mode is an
+# error rather than a no-op, and a setting has one obvious home.
+
+
+@dataclass
+class TimedEventConfig:
+    """Settings shared by the events that are timed against a gate.
+
+    Trackdrive has no such settings, which is why it has no config class at
+    all: its closed-loop constraint already ties the lap together. That is also
+    what used to make ``terminal_speed`` a special case -- it had to be
+    rejected for trackdrive in ``PipelineConfig.__post_init__``, because a
+    terminal speed on a closed lap silently pins the free launch speed at node
+    0 as well. There is now no trackdrive field to set, so the check is gone.
+    """
+
+    #: Objective weight on time for nodes past the finish, so the run-off costs
+    #: almost nothing compared to the timed section.
+    eps_time: float = 0.1
+    # Metres of the exit/decel zone (measured from the finish gate) that keep the
+    # heavy timed time-weight, so the terminal brake starts AFTER the finish line
+    # instead of bleeding back before it. 0.0 = original behaviour.
+    decel_hold_m: float = 0.0
+    #: Speed the trajectory must be at or under by the final node.
+    terminal_speed: Optional[float] = None
+
+
+@dataclass
+class AutoxConfig(TimedEventConfig):
+    """One timed lap from a standing start, with run-off to brake into."""
+
+    #: Metres of run-off appended past the timing gate's second crossing.
+    extension_m: float = 50.0
+    # Car's real start position in the map frame (x, y), used to find the autox
+    # horizon's anchor node instead of trusting the track CSV's arbitrary array
+    # index 0 (see _resolve_autox_start_index). Default (0.0, 0.0): this
+    # stack's SLAM pose-graph anchors the first pose at the origin, so this is
+    # reliably close to the car's actual start regardless of which CSV row the
+    # boundary-estimation tool happened to emit first.
+    start_x: float = 0.0
+    start_y: float = 0.0
+    # Nodes to step forward (direction of travel) from the sample nearest
+    # (start_x, start_y) before pinning it as the OCP's launch node -- a small
+    # mesh-scale safety margin so the pin sits slightly ahead of, not behind,
+    # the car. Default 1 (~0.5 m at ds_m=0.5).
+    start_node_offset: int = 1
+    #: Metres of prescribed constant-speed run-in before the OCP horizon.
+    lead_in_m: float = 0.0
+    # Metres before the anchor node (see start_x/y above) that the OCP's own
+    # optimized horizon begins (instead of the flat lead_in_m hold). The pinned
+    # launch condition moves back by this much; the flat hold is trimmed to sit
+    # immediately before it. With the anchor now genuinely at the car's
+    # position, there's usually nothing to gain by pushing the pin further back
+    # -- 0.0 is the normal setting; only raise this if part of the approach
+    # itself needs to be optimized rather than held flat.
+    ocp_lead_m: float = 0.0
+    # Distance (m) from the car's start position to the real timing gate; the
+    # accurate autox lap time is measured between this point and the same point
+    # one lap later, not from s=0 through the run-off extension.
+    timing_offset_m: float = 6.0
+    # If True, only the last terminal_window_nodes of the OCP horizon must land
+    # centered (d) and heading-aligned (psi_err) within a tight tolerance --
+    # unlike skidpad's terminal_straight_m, the path leading up to that short
+    # window is left free.
+    terminal_state_constraint: bool = False
+    # Discrete steps the terminal-state constraint above is enforced over.
+    # 1 was tried first and found infeasible for rate-limited actuator models
+    # (e.g. four_wheel): the state can't snap to the target in zero steps, so
+    # a couple of nodes of slack let the dynamics actually converge into it.
+    terminal_window_nodes: int = 2
+    # Metres of straight, prescribed constant-speed pad appended after the OCP
+    # horizon (held at the solved terminal speed on the real centerline), not
+    # part of the optimization -- reference margin in case the controller
+    # tracks past the solved end. 0.0 = off.
+    terminal_pad_m: float = 0.0
+    # If set, replaces D_fl/D_fr/D_rr/D_rl (absolute override, not a scale)
+    # with this single value for every OCP node with no timing objective --
+    # i.e. the untimed tail after the timing gate's second crossing, same
+    # boundary as `timed_mask`/_autox_time_weights. Everything else (B, C,
+    # aero, mass, ...) stays at the nominal, racing-line value. Does not reach
+    # the constant-speed pad appended after the OCP solve (terminal_pad_m) --
+    # that pad isn't part of the OCP at all. None = off (nominal D used
+    # everywhere).
+    D_safe_braking: Optional[float] = None
+
+
+@dataclass
+class SkidpadConfig(TimedEventConfig):
+    """Two timed circles each way, built from a cone map and a reference line."""
+
+    #: Cone map and reference trajectory the track is built from. Paths are
+    #: resolved against the data root when relative.
+    map_csv: Optional[str] = None
+    reference_csv: Optional[str] = None
+    #: Half-width of the entry and exit straights, in metres.
+    entry_exit_halfwidth: float = 1.5
+    #: Metres over which curvature blends between straight and circle.
+    kappa_blend_m: float = 1.5
+    # Overrides the entry point (P0), otherwise taken from the reference's first
+    # row. start_x=None keeps the original behaviour.
+    start_x: Optional[float] = None
+    start_y: float = 0.0
+    # Metres of straight, prescribed constant-speed run-in prepended before the
+    # OCP's s=0 (at initial_speed), not part of the optimization. 0.0 = off.
+    lead_in_m: float = 0.0
+    # Metres before the finish that must stay centered (d) and heading-aligned
+    # (psi_err) within a tight tolerance, so the trajectory ends straight
+    # instead of at a residual angle. 0.0 = off.
+    terminal_straight_m: float = 0.0
+
+
 @dataclass(frozen=True)
 class SplicePlan:
     """One prescribed segment to stitch onto a solved trajectory.
@@ -376,10 +500,24 @@ def _skidpad_time_weights(
 class EventMode(ABC):
     """What one Formula Student event needs from the pipeline."""
 
+    #: The ``PipelineConfig`` attribute holding this event's settings, or None
+    #: for an event that has none. Also the YAML key: a config naming a block
+    #: that no mode claims, or one claimed by a different mode, is an error.
+    config_attr: Optional[str] = None
+
+    #: The dataclass that block is parsed into.
+    config_type: Optional[type] = None
+
     @property
     @abstractmethod
     def name(self) -> str:
         """The ``mode`` string this class implements."""
+
+    def config_of(self, config: "PipelineConfig") -> Any:
+        """This event's settings block, or None if it has no settings."""
+        if self.config_attr is None:
+            return None
+        return getattr(config, self.config_attr)
 
     def prepare_track(self, track_data: Dict, config: "PipelineConfig") -> Dict:
         """Return the track the OCP should be built over."""
@@ -397,10 +535,18 @@ class EventMode(ABC):
         """Mode-specific arguments for the warm-start seed signature.
 
         The same knobs as ``solver_kwargs`` minus the ones the signature does
-        not take: they describe how a solution was produced, so leaving one out
-        would let two different solves share a cache entry.
+        not take, plus the shared timing weights. All of them describe how a
+        solution was produced, so leaving one out would let two different
+        solves share a cache entry.
         """
-        return {k: v for k, v in self.solver_kwargs(config).items() if k != "autox_timing_offset_m"}
+        kwargs = {
+            k: v for k, v in self.solver_kwargs(config).items() if k != "autox_timing_offset_m"
+        }
+        event = self.config_of(config)
+        if isinstance(event, TimedEventConfig):
+            kwargs.setdefault("eps_time", event.eps_time)
+            kwargs.setdefault("decel_hold_m", event.decel_hold_m)
+        return kwargs
 
     def splices(
         self, config: "PipelineConfig", track_data: Dict, sol_dict: Dict
@@ -437,27 +583,31 @@ class AutoxMode(EventMode):
     """One timed lap from a standing start, with run-off to brake into."""
 
     name = "autox"
+    config_attr = "autox"
+    config_type = AutoxConfig
 
     def prepare_track(self, track_data: Dict, config: "PipelineConfig") -> Dict:
+        autox = config.autox
         return _extend_track_for_autox(
             track_data,
-            config.autox_extension_m,
-            config.autox_lead_in_m,
-            config.autox_ocp_lead_m,
-            timing_offset_m=config.autox_timing_offset_m,
-            terminal_pad_m=config.autox_terminal_pad_m,
-            start_x=config.autox_start_x,
-            start_y=config.autox_start_y,
-            start_node_offset=config.autox_start_node_offset,
+            autox.extension_m,
+            autox.lead_in_m,
+            autox.ocp_lead_m,
+            timing_offset_m=autox.timing_offset_m,
+            terminal_pad_m=autox.terminal_pad_m,
+            start_x=autox.start_x,
+            start_y=autox.start_y,
+            start_node_offset=autox.start_node_offset,
         )
 
     def time_weights(self, track_data: Dict, config: "PipelineConfig") -> Optional[np.ndarray]:
+        autox = config.autox
         weights = _autox_time_weights(
             track_data["arc_lengths"],
             track_data["autox_base_length_m"],
-            config.autox_timing_offset_m,
-            config.eps_time,
-            config.decel_hold_m,
+            autox.timing_offset_m,
+            autox.eps_time,
+            autox.decel_hold_m,
         )
         # Flows through to the solution JSON via the generic
         # `track.get("timed_mask")` in solve_ocp_and_save (the same field
@@ -467,12 +617,13 @@ class AutoxMode(EventMode):
         return weights
 
     def solver_kwargs(self, config: "PipelineConfig") -> Dict[str, Any]:
+        autox = config.autox
         return {
-            "terminal_speed": config.terminal_speed,
-            "autox_timing_offset_m": config.autox_timing_offset_m,
-            "terminal_state_constraint": config.autox_terminal_state_constraint,
-            "terminal_window_nodes": config.autox_terminal_window_nodes,
-            "D_safe_braking": config.D_safe_braking,
+            "terminal_speed": autox.terminal_speed,
+            "autox_timing_offset_m": autox.timing_offset_m,
+            "terminal_state_constraint": autox.terminal_state_constraint,
+            "terminal_window_nodes": autox.terminal_window_nodes,
+            "D_safe_braking": autox.D_safe_braking,
         }
 
     def summary(
@@ -481,23 +632,24 @@ class AutoxMode(EventMode):
         track_data: Dict,
         time_weights: Optional[np.ndarray],
     ) -> List[str]:
+        autox = config.autox
         lines = [
             f"  Autox: extended track by "
-            f"{config.autox_timing_offset_m + config.autox_extension_m:.0f} m "
+            f"{autox.timing_offset_m + autox.extension_m:.0f} m "
             f"({track_data['num_points']} points total, OCP horizon, "
-            f"{config.autox_ocp_lead_m:.1f} m of which is backward run-in, "
-            f"{config.autox_extension_m:.0f} m of which is post-finish run-off)",
+            f"{autox.ocp_lead_m:.1f} m of which is backward run-in, "
+            f"{autox.extension_m:.0f} m of which is post-finish run-off)",
             f"  Autox: start anchored at idx_ref={track_data['autox_idx_ref']} "
             f"(snapped {track_data['autox_start_snap_m']:.2f} m from "
-            f"requested ({config.autox_start_x:.2f}, {config.autox_start_y:.2f}))",
+            f"requested ({autox.start_x:.2f}, {autox.start_y:.2f}))",
         ]
         if time_weights is not None:
             n_timed = int(np.sum(time_weights >= 1.0 - 1e-9))
             lines.append(
                 f"  Autox: {n_timed}/{len(time_weights)} timed nodes, "
-                f"un-timed weight eps_time={config.eps_time}, "
-                f"decel_hold={config.decel_hold_m} m, "
-                f"terminal_speed={config.terminal_speed}"
+                f"un-timed weight eps_time={autox.eps_time}, "
+                f"decel_hold={autox.decel_hold_m} m, "
+                f"terminal_speed={autox.terminal_speed}"
             )
         return lines
 
@@ -517,7 +669,7 @@ class AutoxMode(EventMode):
                     # the same convention as the rest of the run-up.
                     timed=1,
                     message=(
-                        f"  Autox: prepended {config.autox_lead_in_m:.0f} m constant-speed "
+                        f"  Autox: prepended {config.autox.lead_in_m:.0f} m constant-speed "
                         f"lead-in ({len(lead_in['arc_lengths'])} points, "
                         "not part of the OCP solve)"
                     ),
@@ -535,7 +687,7 @@ class AutoxMode(EventMode):
                     side="after",
                     timed=0,
                     message=(
-                        f"  Autox: appended {config.autox_terminal_pad_m:.0f} m constant-speed "
+                        f"  Autox: appended {config.autox.terminal_pad_m:.0f} m constant-speed "
                         f"({pad_speed:.2f} m/s) terminal pad "
                         f"({len(pad['arc_lengths'])} points, not part of the OCP solve)"
                     ),
@@ -549,14 +701,19 @@ class SkidpadMode(EventMode):
     """Two timed circles each way, with the timing taken from the track's mask."""
 
     name = "skidpad"
+    config_attr = "skidpad"
+    config_type = SkidpadConfig
 
     def time_weights(self, track_data: Dict, config: "PipelineConfig") -> Optional[np.ndarray]:
-        return _skidpad_time_weights(track_data, config.eps_time, config.decel_hold_m, config.ds_m)
+        skidpad = config.skidpad
+        return _skidpad_time_weights(
+            track_data, skidpad.eps_time, skidpad.decel_hold_m, config.ds_m
+        )
 
     def solver_kwargs(self, config: "PipelineConfig") -> Dict[str, Any]:
         return {
-            "terminal_speed": config.terminal_speed,
-            "terminal_straight_m": config.skidpad_terminal_straight_m,
+            "terminal_speed": config.skidpad.terminal_speed,
+            "terminal_straight_m": config.skidpad.terminal_straight_m,
         }
 
     def summary(
@@ -575,15 +732,15 @@ class SkidpadMode(EventMode):
         return [
             f"  Skidpad: {int(mask.sum())}/{len(mask)} timed nodes, "
             f"{int(decel.sum())} exit (decel) nodes, "
-            f"un-timed weight eps_time={config.eps_time}, "
-            f"decel_hold={config.decel_hold_m} m ({n_hold} exit nodes held), "
-            f"terminal_speed={config.terminal_speed}"
+            f"un-timed weight eps_time={config.skidpad.eps_time}, "
+            f"decel_hold={config.skidpad.decel_hold_m} m ({n_hold} exit nodes held), "
+            f"terminal_speed={config.skidpad.terminal_speed}"
         ]
 
     def splices(
         self, config: "PipelineConfig", track_data: Dict, sol_dict: Dict
     ) -> List[SplicePlan]:
-        lead_in = _build_skidpad_lead_in(track_data, config.skidpad_lead_in_m)
+        lead_in = _build_skidpad_lead_in(track_data, config.skidpad.lead_in_m)
         if not lead_in:
             return []
         return [
@@ -594,7 +751,7 @@ class SkidpadMode(EventMode):
                 # Sits before the gate, same as the entry straight it extends.
                 timed=0,
                 message=(
-                    f"  Skidpad: prepended {config.skidpad_lead_in_m:.1f} m constant-speed "
+                    f"  Skidpad: prepended {config.skidpad.lead_in_m:.1f} m constant-speed "
                     f"({config.initial_speed:.1f} m/s) lead-in "
                     f"({len(lead_in['arc_lengths'])} points, not part of the OCP solve)"
                 ),

@@ -48,7 +48,8 @@ from typing import Any, Dict, FrozenSet, Tuple
 import numpy as np
 import pytest
 
-from fast_lto.pipeline import PipelineConfig, run_pipeline
+from fast_lto.config import build_pipeline_config
+from fast_lto.pipeline import run_pipeline
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "data" / "golden"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +112,7 @@ SCENARIOS = {
                 "integrator_name": "euler",
                 # Short on purpose: enough run-off to reach the timing gate and
                 # brake into, without doubling the node count.
-                "autox_extension_m": 10.0,
+                "autox": {"extension_m": 10.0},
             },
             extra_metrics=("autox_lap_time_s",),
         ),
@@ -125,10 +126,10 @@ SCENARIOS = {
                 "integrator_name": "euler",
             },
             inputs={
-                "skidpad_map_csv": str(REPO_ROOT / "data/tracks/skidpad/skidpad_map.csv"),
-                "skidpad_reference_csv": str(
-                    REPO_ROOT / "data/tracks/skidpad/skidpad_reference.csv"
-                ),
+                "skidpad": {
+                    "map_csv": str(REPO_ROOT / "data/tracks/skidpad/skidpad_map.csv"),
+                    "reference_csv": str(REPO_ROOT / "data/tracks/skidpad/skidpad_reference.csv"),
+                }
             },
             extra_metrics=("skidpad_score_s", "pure_timed_time_s"),
             slow_models=frozenset({"four_wheel"}),
@@ -154,18 +155,25 @@ def _case_params():
 
 def _solve(scenario: Scenario, model_name: str, repo_root: Path) -> Dict[str, Any]:
     """Solve one scenario for one model under an isolated repo root."""
-    config = PipelineConfig(
-        repo_root=repo_root,
-        model_name=model_name,
-        generate_track=True,
-        # A seed store would make the result depend on test ordering.
-        warm_start="off",
-        export_trajectory=False,
-        plot_results=False,
-        show_plots=False,
-        solver_verbose=False,
-        **scenario.settings,
-        **scenario.inputs,
+    # Through build_pipeline_config so a scenario's event block is validated and
+    # built the same way a config file's is, rather than by a second code path.
+    clash = set(scenario.settings) & set(scenario.inputs)
+    assert not clash, f"{scenario.key} splits {sorted(clash)} across settings and inputs"
+
+    config = build_pipeline_config(
+        {
+            **scenario.settings,
+            **scenario.inputs,
+            "repo_root": repo_root,
+            "model_name": model_name,
+            "generate_track": True,
+            # A seed store would make the result depend on test ordering.
+            "warm_start": "off",
+            "export_trajectory": False,
+            "plot_results": False,
+            "show_plots": False,
+            "solver_verbose": False,
+        }
     )
     with redirect_stdout(io.StringIO()):
         results = run_pipeline(config, start_from="track", end_at="ocp")

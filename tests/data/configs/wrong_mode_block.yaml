@@ -1,0 +1,8 @@
+# Fixture: an autox run that sets skidpad settings. Before the settings were
+# split per event, every field was accepted regardless of mode and the
+# irrelevant ones were silently ignored.
+pipeline:
+  mode: autox
+  model_name: four_wheel
+  skidpad:
+    lead_in_m: 10.0

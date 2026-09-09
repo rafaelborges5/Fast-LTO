@@ -32,16 +32,20 @@ _VALUE_OVERRIDES = {
     "ds": "ds_m",
     "continuity": "continuity",
     "boundary_margin": "boundary_margin",
-    "autox_extension": "autox_extension_m",
-    "autox_lead_in": "autox_lead_in_m",
-    "autox_ocp_lead": "autox_ocp_lead_m",
-    "autox_timing_offset": "autox_timing_offset_m",
-    "autox_start_x": "autox_start_x",
-    "autox_start_y": "autox_start_y",
-    "autox_start_node_offset": "autox_start_node_offset",
     "warm_start_seed": "warm_start_seed",
     "reg_u_l2": "reg_u_l2",
     "savgol_bounds": "use_savgol_bounds",
+}
+
+# argparse dest -> AutoxConfig field.
+_AUTOX_OVERRIDES = {
+    "autox_extension": "extension_m",
+    "autox_lead_in": "lead_in_m",
+    "autox_ocp_lead": "ocp_lead_m",
+    "autox_timing_offset": "timing_offset_m",
+    "autox_start_x": "start_x",
+    "autox_start_y": "start_y",
+    "autox_start_node_offset": "start_node_offset",
 }
 
 
@@ -63,7 +67,14 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
         if value is not None:
             setattr(pipeline, field_name, value)
 
-    # Not part of the table above: an explicitly requested launch speed has to
+    # Autox settings live on their own block (see modes.AutoxConfig), so these
+    # are applied by attribute rather than through the flat table above.
+    for arg_name, field_name in _AUTOX_OVERRIDES.items():
+        value = getattr(args, arg_name)
+        if value is not None:
+            setattr(pipeline.autox, field_name, value)
+
+    # Not part of the tables above: an explicitly requested launch speed has to
     # be pinned, or a `--mode` on the same command line re-derives it.
     if args.initial_speed is not None:
         pipeline.set_initial_speed(args.initial_speed)

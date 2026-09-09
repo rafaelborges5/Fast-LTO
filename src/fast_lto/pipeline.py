@@ -26,7 +26,7 @@ from typing import Callable, Dict, List, Literal, Optional, Tuple, get_args
 
 import numpy as np
 
-from fast_lto.modes import EventMode, get_mode
+from fast_lto.modes import AutoxConfig, EventMode, SkidpadConfig, get_mode
 from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
 from fast_lto.paths import default_data_root
@@ -98,80 +98,11 @@ class PipelineConfig:
     reg_u_l2: float | None = None
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
-    autox_extension_m: float = 50.0
-    # Car's real start position in the map frame (x, y), used to find the autox
-    # horizon's anchor node instead of trusting the track CSV's arbitrary array
-    # index 0 (see pipeline._resolve_autox_start_index). Default (0.0, 0.0):
-    # this stack's SLAM pose-graph anchors the first pose at the origin, so
-    # this is reliably close to the car's actual start regardless of which CSV
-    # row the boundary-estimation tool happened to emit first.
-    autox_start_x: float = 0.0
-    autox_start_y: float = 0.0
-    # Nodes to step forward (direction of travel) from the sample nearest
-    # (autox_start_x, autox_start_y) before pinning it as the OCP's launch
-    # node -- a small mesh-scale safety margin so the pin sits slightly ahead
-    # of, not behind, the car. Default 1 (~0.5 m at ds_m=0.5).
-    autox_start_node_offset: int = 1
-    autox_lead_in_m: float = 0.0
-    # Metres before the anchor node (see autox_start_x/y above) that the OCP's
-    # own optimized horizon begins (instead of the flat autox_lead_in_m hold).
-    # The pinned launch condition moves back by this much; the flat hold is
-    # trimmed to sit immediately before it. With the anchor now genuinely at
-    # the car's position, there's usually nothing to gain by pushing the pin
-    # further back -- 0.0 is the normal setting; only raise this if part of
-    # the approach itself needs to be optimized rather than held flat.
-    autox_ocp_lead_m: float = 0.0
-    # Distance (m) from the car's start position to the real timing gate; the
-    # accurate autox lap time is measured between this point and the same point
-    # one lap later, not from s=0 through the run-off extension.
-    autox_timing_offset_m: float = 6.0
-    # If True, only the last autox_terminal_window_nodes of the OCP horizon
-    # must land centered (d) and heading-aligned (psi_err) within a tight
-    # tolerance -- unlike skidpad_terminal_straight_m, the path leading up to
-    # that short window is left free.
-    autox_terminal_state_constraint: bool = False
-    # Discrete steps the terminal-state constraint above is enforced over.
-    # 1 was tried first and found infeasible for rate-limited actuator models
-    # (e.g. four_wheel): the state can't snap to the target in zero steps, so
-    # a couple of nodes of slack let the dynamics actually converge into it.
-    autox_terminal_window_nodes: int = 2
-    # Metres of straight, prescribed constant-speed pad appended after the OCP
-    # horizon (held at the solved terminal speed on the real centerline), not
-    # part of the optimization -- reference margin in case the controller
-    # tracks past the solved end. 0.0 = off.
-    autox_terminal_pad_m: float = 0.0
-    # If set, replaces D_fl/D_fr/D_rr/D_rl (absolute override, not a scale)
-    # with this single value for every OCP node with no timing objective --
-    # i.e. the untimed tail after the timing gate's second crossing, same
-    # boundary as `timed_mask`/_autox_time_weights. Everything else (B, C,
-    # aero, mass, ...) stays at the nominal, racing-line value. Does not
-    # reach the constant-speed pad appended after the OCP solve
-    # (autox_terminal_pad_m) -- that pad isn't part of the OCP at all.
-    # None = off (nominal D used everywhere, same as before this option
-    # existed).
-    D_safe_braking: Optional[float] = None
-
-    skidpad_map_csv: Optional[str] = None
-    skidpad_reference_csv: Optional[str] = None
-    eps_time: float = 0.1
-    entry_exit_halfwidth: float = 1.5
-    kappa_blend_m: float = 1.5
-    # Overrides the entry point (P0), otherwise taken from the reference's first
-    # row. skidpad_start_x=None keeps the original behaviour.
-    skidpad_start_x: Optional[float] = None
-    skidpad_start_y: float = 0.0
-    # Metres of straight, prescribed constant-speed run-in prepended before the
-    # OCP's s=0 (at initial_speed), not part of the optimization. 0.0 = off.
-    skidpad_lead_in_m: float = 0.0
-    terminal_speed: Optional[float] = None
-    # Metres of the exit/decel zone (measured from the finish gate) that keep the
-    # heavy timed time-weight, so the terminal brake starts AFTER the finish line
-    # instead of bleeding back before it. 0.0 = original behaviour.
-    decel_hold_m: float = 0.0
-    # Metres before the finish that must stay centered (d) and heading-aligned
-    # (psi_err) within a tight tolerance, so the trajectory ends straight
-    # instead of at a residual angle. 0.0 = off.
-    skidpad_terminal_straight_m: float = 0.0
+    # Per-event settings, each owned by its EventMode (see modes.py). Only the
+    # block matching `mode` is consulted; naming the other one in a config file
+    # is an error rather than a silent no-op.
+    autox: AutoxConfig = field(default_factory=AutoxConfig)
+    skidpad: SkidpadConfig = field(default_factory=SkidpadConfig)
 
     export_trajectory: bool = True
 
@@ -205,14 +136,6 @@ class PipelineConfig:
         if self.mode not in ("autox", "trackdrive", "skidpad"):
             raise ValueError(
                 f"Unknown mode: {self.mode!r}. Must be 'autox', 'trackdrive' or 'skidpad'."
-            )
-
-        if self.terminal_speed is not None and self.mode == "trackdrive":
-            raise ValueError(
-                "terminal_speed is not supported for mode='trackdrive': the "
-                "closed-loop constraint (X[N-1] == X[0]) would silently pin "
-                "the free launch speed at node 0 too. Use 'autox' or "
-                "'skidpad'."
             )
 
         if self.initial_speed is None or self._initial_speed_from_mode:
@@ -506,26 +429,27 @@ def step_build_skidpad_track(config: PipelineConfig) -> Path:
     """Build the skidpad track-with-widths JSON from the cone map + reference."""
     from fast_lto.tracks.skidpad import build_skidpad_track
 
-    if config.skidpad_map_csv is None or config.skidpad_reference_csv is None:
-        raise ValueError("mode='skidpad' requires skidpad_map_csv and skidpad_reference_csv.")
+    skidpad = config.skidpad
+    if skidpad.map_csv is None or skidpad.reference_csv is None:
+        raise ValueError("mode='skidpad' requires skidpad.map_csv and skidpad.reference_csv.")
 
-    map_csv = _resolve_path(config.repo_root, config.skidpad_map_csv)
-    ref_csv = _resolve_path(config.repo_root, config.skidpad_reference_csv)
+    map_csv = _resolve_path(config.repo_root, skidpad.map_csv)
+    ref_csv = _resolve_path(config.repo_root, skidpad.reference_csv)
 
     print("[Skidpad] Building track from cone map + reference trajectory")
     print(f"  Map:       {map_csv}")
     print(f"  Reference: {ref_csv}")
 
     start_xy = None
-    if config.skidpad_start_x is not None:
-        start_xy = (config.skidpad_start_x, config.skidpad_start_y)
+    if skidpad.start_x is not None:
+        start_xy = (skidpad.start_x, skidpad.start_y)
 
     track = build_skidpad_track(
         map_csv=map_csv,
         ref_csv=ref_csv,
         ds_m=config.ds_m,
-        entry_exit_halfwidth=config.entry_exit_halfwidth,
-        kappa_blend_m=config.kappa_blend_m,
+        entry_exit_halfwidth=skidpad.entry_exit_halfwidth,
+        kappa_blend_m=skidpad.kappa_blend_m,
         start_xy=start_xy,
     )
 
@@ -566,8 +490,6 @@ def _seed_signature_for(
         reg_u=config.reg_u,
         reg_u_l2=config.reg_u_l2,
         initial_speed=config.initial_speed,
-        eps_time=config.eps_time,
-        decel_hold_m=config.decel_hold_m,
         **mode.seed_kwargs(config),
     )
 
@@ -890,14 +812,14 @@ def step_solve_ocp(
         "savgol_window_length": int(config.savgol_window_length),
         "savgol_polyorder": int(config.savgol_polyorder),
         "boundary_margin": float(config.boundary_margin),
-        "autox_timing_offset_m": float(config.autox_timing_offset_m),
-        "autox_ocp_lead_m": float(config.autox_ocp_lead_m),
-        "autox_start_x": float(config.autox_start_x),
-        "autox_start_y": float(config.autox_start_y),
-        "autox_start_node_offset": int(config.autox_start_node_offset),
+        "autox_timing_offset_m": float(config.autox.timing_offset_m),
+        "autox_ocp_lead_m": float(config.autox.ocp_lead_m),
+        "autox_start_x": float(config.autox.start_x),
+        "autox_start_y": float(config.autox.start_y),
+        "autox_start_node_offset": int(config.autox.start_node_offset),
         "autox_idx_ref": int(track_data.get("autox_idx_ref", 0)),
         "D_safe_braking": (
-            float(config.D_safe_braking) if config.D_safe_braking is not None else None
+            float(config.autox.D_safe_braking) if config.autox.D_safe_braking is not None else None
         ),
     }
 
@@ -1052,9 +974,9 @@ class _Step:
 def _plot_source_csv(config: PipelineConfig) -> Path:
     """The cone CSV the plots are drawn against."""
     if config.mode == "skidpad":
-        if config.skidpad_map_csv is None:
+        if config.skidpad.map_csv is None:
             raise ValueError("mode='skidpad' requires skidpad_map_csv.")
-        return _resolve_path(config.repo_root, config.skidpad_map_csv)
+        return _resolve_path(config.repo_root, config.skidpad.map_csv)
     return config.track_csv_path
 
 
