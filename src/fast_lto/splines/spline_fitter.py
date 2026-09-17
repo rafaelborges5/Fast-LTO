@@ -1,11 +1,7 @@
-"""
-Spline fitting and discretization for track centerlines.
+"""Spline fitting and arc-length discretisation for track centrelines.
 
-A periodic spline through the CSV's midline cones, reparameterised by arc
-length and sampled at uniform spacing, giving the position, heading and
-curvature at every station the OCP will use as a node.
-
-Entry point ``fit_and_discretize``.
+Periodic spline through midline cones, sampled at uniform ``ds``.
+Entry point: ``fit_and_discretize``.
 """
 
 from __future__ import annotations
@@ -227,7 +223,7 @@ def _sample_at_arc_lengths(
     """
     total_length = s_samples[-1]
 
-    # Near ds_m, but dividing the loop evenly -- hence the achieved ds.
+    # Even division of the loop; actual_ds ≈ ds_m.
     num_points = int(np.round(total_length / ds_m))
     actual_ds = total_length / num_points
 
@@ -277,8 +273,7 @@ def fit_and_discretize(
     save_path: str | Path | None = None,
     smooth_centerline: int = 0,
 ) -> DiscretizedTrack:
-    """
-    Fit a periodic spline to the track centerline and discretize it.
+    """Fit a periodic centreline spline and discretize at spacing ``ds_m``.
 
     This is the main entry point for spline fitting.
 

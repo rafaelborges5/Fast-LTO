@@ -1,11 +1,7 @@
-"""
-Abstract interface for vehicle models used in the optimizer.
+"""Abstract interface for vehicle models used by the optimizer.
 
-Convention
-----------
-state[0] = s     arc-length progress along the centerline
-state[1] = d     lateral deviation from the centerline
-state[2:] = ...  model-specific (e.g. psi_err, v, yaw_rate, ...)
+``state[0] = s`` (arc length), ``state[1] = d`` (lateral offset);
+``state[2:]`` are model-specific.
 """
 
 from __future__ import annotations
@@ -26,23 +22,17 @@ class CornerOffset(NamedTuple):
 
 
 class VehicleModel(ABC):
-    """
-    Abstract base class for vehicle models used in the optimizer.
+    """Abstract base for vehicle models.
 
-    Concrete models must provide:
-      - state names and input names
-      - physical time-domain dynamics:  x_dot = f(x, u, kappa)
-      - physical inequality constraints: g(x, u) <= 0
-      - finite physical bounds for all OPTIMIZED states (excluding s) and all inputs
-
-    The base class computes per-instance normalisation factors for the
-    reduced state (everything except s) and for the inputs
+    Subclasses provide state/input names, time-domain dynamics
+    ``x_dot = f(x, u, kappa)``, inequalities ``g(x, u, kappa) <= 0``, and
+    finite physical bounds on all optimised states (excluding ``s``) and
+    inputs. The base class builds the reduced-state and input normalisation.
     """
 
     def __init__(self, params: dict) -> None:
         self.params = params
 
-        # Normalisation metadata, as NumPy and as CasADi DM.
         self._x_red_lb: Optional[np.ndarray] = None
         self._x_red_ub: Optional[np.ndarray] = None
         self._x_red_scale_np: Optional[np.ndarray] = None
@@ -61,21 +51,21 @@ class VehicleModel(ABC):
 
     @property
     def nx(self) -> int:
-        """Number of states in the full state vector (including *s*)."""
+        """Full state dimension (including ``s``)."""
         return len(self.get_state_names())
 
     @property
     def nu(self) -> int:
-        """Number of inputs."""
+        """Input dimension."""
         return len(self.get_input_names())
 
     @property
     def nx_reduced(self) -> int:
-        """Number of states in the space-domain formulation (full minus *s*)."""
+        """Reduced-state dimension (full minus ``s``)."""
         return self.nx - 1
 
     def reduced_state_names(self) -> List[str]:
-        """State names excluding *s* (the space-domain reduced states)."""
+        """State names excluding ``s``."""
         return self.get_state_names()[1:]
 
     @abstractmethod
@@ -93,9 +83,7 @@ class VehicleModel(ABC):
         inputs: Sequence[ca.MX],
         curvature: ca.MX,
     ) -> ca.MX:
-        """
-        Symbolic expression for the TIME derivatives: x_dot = f(x, u, kappa).
-        """
+        """Time derivatives ``x_dot = f(x, u, kappa)``."""
         raise NotImplementedError
 
     @abstractmethod
@@ -105,32 +93,18 @@ class VehicleModel(ABC):
         inputs: Sequence[ca.MX],
         curvature: ca.MX,
     ) -> List[ca.MX]:
-        """
-        Inequality constraints g(x, u, kappa) <= 0.
-        """
+        """Inequality constraints ``g(x, u, kappa) <= 0``."""
         raise NotImplementedError
 
     def get_default_params(self) -> dict:
         return {}
 
     def diagnostics(self, x_red: ca.MX, u: ca.MX) -> Dict[str, ca.MX]:
-        """Named per-node quantities derived from the reduced state and inputs.
+        """Named per-node CasADi quantities from the reduced state and inputs.
 
-        These are the internals a plot wants to show — tire loads, slip angles,
-        friction usage — expressed symbolically, from the same parameters and
-        the same formulae the solver used. Evaluate them over a solved
-        trajectory with
+        Evaluate over a solution with
         :func:`fast_lto.vehicle_models.diagnostics.evaluate_diagnostics`.
-
-        Exists so plotting code never has to re-derive the physics in NumPy:
-        a second implementation drifts from the first, and then the plot you
-        would use to catch the drift is the thing that drifted.
-
-        Takes the inputs as well as the state because models disagree about
-        where a quantity lives: the four-wheel model carries steering as a
-        state, the dynamic bicycle as an input.
-
-        Default: nothing. A model reports whatever it can.
+        Default: empty.
         """
         return {}
 
@@ -146,13 +120,10 @@ class VehicleModel(ABC):
         w_left: ca.MX,
         w_right: ca.MX,
     ) -> List[ca.MX]:
-        """Corridor constraints for each corner of the car, not just its CoG.
+        """Corridor inequalities for each body corner (not only the CoG).
 
-        A corner held at ``dx`` ahead of the CoG follows a centreline that has
-        bent away by ``0.5 * kappa / D_kappa * dx^2`` to second order, which is
-        why an outside front corner loses room in a turn even with the CoG
-        centred. Cross-checked against the NumPy form in ``warm_start`` by
-        ``tests/test_corner_geometry.py``.
+        Includes the second-order centreline shift
+        ``0.5 * kappa / D_kappa * long_proj^2``.
         """
         corners = self.get_corner_offsets()
         if not corners:
@@ -177,16 +148,14 @@ class VehicleModel(ABC):
         return g_list
 
     def state_bounds(self) -> Optional[Tuple[List[float], List[float]]]:
-        """
-        Bounds on the FULL state vector [s, d, ...] in PHYSICAL units.
+        """Full-state bounds ``[s, d, ...]`` in physical units.
 
-        Concrete models are expected to override this and provide finite
-        bounds for all OPTIMISED states
+        Subclasses should provide finite bounds for all optimised states.
         """
         return None
 
     def reduced_state_bounds(self) -> Optional[Tuple[List[float], List[float]]]:
-        """Bounds on the reduced state vector [d, ...] (everything except *s*)."""
+        """Reduced-state bounds ``[d, ...]`` (everything except ``s``)."""
         bounds = self.state_bounds()
         if bounds is None:
             return None
@@ -194,14 +163,11 @@ class VehicleModel(ABC):
         return lb[1:], ub[1:]
 
     def input_bounds(self) -> Optional[Tuple[List[float], List[float]]]:
-        """Bounds on the INPUT vector in PHYSICAL units."""
+        """Input bounds in physical units."""
         return None
 
     def _init_normalisation(self) -> None:
-        """
-        Pre-compute scaling/shift for reduced states and inputs based on
-        physical bounds, mapping approximately to [-1, 1].
-        """
+        """Build affine maps from physical bounds onto roughly ``[-1, 1]``."""
 
         red_bounds = self.reduced_state_bounds()
         if red_bounds is not None:
@@ -216,7 +182,7 @@ class VehicleModel(ABC):
             scale[near_zero] = 1.0
             shift[near_zero] = 0.0
 
-            # Exactly symmetric bounds drop a term from every expression.
+            # Drop exact-zero shifts (symmetric bounds).
             symmetric = np.isclose(shift, 0.0, atol=1e-6)
             shift[symmetric] = 0.0
 
@@ -251,55 +217,49 @@ class VehicleModel(ABC):
             self._u_shift_dm = ca.DM(shift_u)
 
     def get_reduced_state_scaling(self) -> Tuple[Optional[ca.DM], Optional[ca.DM]]:
-        """
-        Return (scale, shift) for the reduced state in CasADi DM form.
-        """
+        """``(scale, shift)`` for the reduced state as CasADi ``DM``."""
         return self._x_red_scale_dm, self._x_red_shift_dm
 
     def get_input_scaling(self) -> Tuple[Optional[ca.DM], Optional[ca.DM]]:
-        """
-        Return (scale, shift) for the inputs in CasADi DM form.
-        """
+        """``(scale, shift)`` for the inputs as CasADi ``DM``."""
         return self._u_scale_dm, self._u_shift_dm
 
     @staticmethod
     def physical_to_norm(val_phys: ca.MX, scale: ca.DM, shift: ca.DM) -> ca.MX:
-        """Generic affine map from physical values to normalised space."""
+        """Affine map physical → normalised."""
         return (val_phys - shift) / scale
 
     @staticmethod
     def norm_to_physical(val_norm: ca.MX, scale: ca.DM, shift: ca.DM) -> ca.MX:
-        """Generic affine map from normalised space back to physical."""
+        """Affine map normalised → physical."""
         return val_norm * scale + shift
 
     def reduced_state_phys_to_norm(self, x_red_phys: ca.MX) -> ca.MX:
-        """Map reduced physical state [d, ...] -> normalised coordinates."""
+        """Reduced physical state ``[d, ...]`` → normalised."""
         if self._x_red_scale_dm is None or self._x_red_shift_dm is None:
             return x_red_phys
         return self.physical_to_norm(x_red_phys, self._x_red_scale_dm, self._x_red_shift_dm)
 
     def reduced_state_norm_to_phys(self, x_red_norm: ca.MX) -> ca.MX:
-        """Map reduced normreduced_state_phys_to_normalised state [d, ...] -> physical coordinates."""
+        """Reduced normalised state ``[d, ...]`` → physical."""
         if self._x_red_scale_dm is None or self._x_red_shift_dm is None:
             return x_red_norm
         return self.norm_to_physical(x_red_norm, self._x_red_scale_dm, self._x_red_shift_dm)
 
     def input_phys_to_norm(self, u_phys: ca.MX) -> ca.MX:
-        """Map physical inputs u -> normalised inputs."""
+        """Physical inputs → normalised."""
         if self._u_scale_dm is None or self._u_shift_dm is None:
             return u_phys
         return self.physical_to_norm(u_phys, self._u_scale_dm, self._u_shift_dm)
 
     def input_norm_to_phys(self, u_norm: ca.MX) -> ca.MX:
-        """Map normalised inputs -> physical inputs u."""
+        """Normalised inputs → physical."""
         if self._u_scale_dm is None or self._u_shift_dm is None:
             return u_norm
         return self.norm_to_physical(u_norm, self._u_scale_dm, self._u_shift_dm)
 
     def reduced_state_bounds_normalized(self) -> Optional[Tuple[List[float], List[float]]]:
-        """
-        Bounds on the reduced state in the normalised domain.
-        """
+        """Reduced-state bounds in normalised coordinates."""
         red_bounds = self.reduced_state_bounds()
         if red_bounds is None or self._x_red_scale_np is None or self._x_red_shift_np is None:
             return None
@@ -313,9 +273,7 @@ class VehicleModel(ABC):
         return lb_n.tolist(), ub_n.tolist()
 
     def input_bounds_normalized(self) -> Optional[Tuple[List[float], List[float]]]:
-        """
-        Bounds on the inputs in the normalised domain.
-        """
+        """Input bounds in normalised coordinates."""
         in_bounds = self.input_bounds()
         if in_bounds is None or self._u_scale_np is None or self._u_shift_np is None:
             return None
@@ -334,9 +292,7 @@ class VehicleModel(ABC):
         u_norm: ca.MX,
         curvature: ca.MX,
     ) -> ca.MX:
-        """
-        Space-domain dynamics in the normalised reduced state.
-        """
+        """Space-domain dynamics in the normalised reduced state."""
 
         x_scale, x_shift = self.get_reduced_state_scaling()
         u_scale, u_shift = self.get_input_scaling()
@@ -365,10 +321,7 @@ class VehicleModel(ABC):
         u_norm: ca.MX,
         curvature: ca.MX,
     ) -> List[ca.MX]:
-        """
-        Inequality constraints g(x_norm, u_norm) <= 0 evaluated in
-        physical space but taking normalised arguments.
-        """
+        """``g <= 0`` for normalised arguments (evaluated in physical space)."""
         x_scale, x_shift = self.get_reduced_state_scaling()
         u_scale, u_shift = self.get_input_scaling()
         if x_scale is None or x_shift is None or u_scale is None or u_shift is None:

@@ -1,17 +1,12 @@
-"""
-Visualization for the partially-timed skidpad LTO solution.
+"""Skidpad LTO solution plots.
 
-The skidpad cone map is a set of unlabeled ring cones (not L/R/M polylines), and
-the optimal path self-overlaps (each circle driven twice), so this plotter is
-separate from the generic track panels. It draws:
+The cone map is unlabeled rings (not L/R/M polylines) and the path
+self-overlaps, so this is separate from the generic track panels.
 
-  A) XY overview: cones + fitted centers/gate, the optimal path colored by speed,
-     with the two *timed* laps highlighted.
-  B) speed vs arc length, timed laps shaded.
-  C) lateral deviation d(s) within the corridor.
-  D) per-wheel longitudinal forces (four_wheel) or available inputs.
-
-It also computes and annotates the two timed-lap times and the FS score.
+Draws: XY overview (cones, centres/gate, path by speed, timed laps
+highlighted); speed and lateral deviation vs arc length; per-wheel
+longitudinal forces or other available inputs. Annotates timed-lap times
+and the FS score.
 """
 
 from __future__ import annotations

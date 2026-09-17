@@ -1,13 +1,7 @@
-"""Evaluate a model's symbolic diagnostics over a solved trajectory.
+"""Evaluate ``VehicleModel.diagnostics`` over a solved trajectory.
 
-``VehicleModel.diagnostics`` returns CasADi expressions built from the same
-helpers as the dynamics and constraints. This turns them into plain NumPy
-arrays, one value per node, by compiling them once into a ``ca.Function`` and
-mapping it across the whole lap.
-
-The point is that plots showing tire loads, slip angles or friction usage read
-those numbers out of the model rather than recomputing the physics — the plot
-is then a view of the solve, and cannot quietly disagree with it.
+Compiles the CasADi expressions into a ``ca.Function`` and maps it across
+nodes, returning one NumPy array per diagnostic.
 """
 
 from __future__ import annotations

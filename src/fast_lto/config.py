@@ -1,12 +1,8 @@
-"""
-YAML configuration: the car, and what to do with it.
+"""YAML configuration: vehicle parameters and pipeline run settings.
 
-``VehicleConfig`` holds the shared vehicle parameters plus a per-model block;
-``RunConfig`` pairs one of those with a pipeline setup. Load with
-``RunConfig.from_yaml``, save with ``to_yaml``.
-
-Every key is validated against a known field, so a typo raises rather than
-being silently ignored. See ``configs/README.md``.
+``VehicleConfig`` holds shared vehicle params plus per-model blocks;
+``RunConfig`` pairs one with a pipeline setup. Load with
+``RunConfig.from_yaml``. Unknown keys raise. See ``configs/README.md``.
 """
 
 from __future__ import annotations
@@ -25,8 +21,7 @@ from fast_lto.vehicle_models.four_wheel import FourWheelModel
 from fast_lto.vehicle_models.point_mass import PointMassModel
 from fast_lto.vehicle_models.vehicle_base import VehicleModel
 
-# Concrete constructors rather than ``type[VehicleModel]``: they are
-# instantiated here to read their defaults, and the base class is abstract.
+# Concrete constructors (base class is abstract).
 _MODEL_CLASSES: Dict[str, Callable[..., VehicleModel]] = {
     "point_mass": PointMassModel,
     "dynamic_bicycle": DynamicBicycleModel,
@@ -99,15 +94,9 @@ class VehicleConfig:
         return result
 
     def build_model_params(self, model_name: str) -> Dict[str, Any]:
-        """Build a flat params dict for the given model.
+        """Flat params for ``model_name``: defaults ← shared ← model overrides.
 
-        Merge order: model defaults ← shared vehicle ← model-specific overrides.
-        Raises ValueError if any override key is unknown to the model.
-
-        Shared vehicle params that aren't in the model's defaults are silently
-        skipped (not all models use every shared param, e.g. ``mu``).  But
-        model-specific overrides must exactly match known params — a typo there
-        is always an error.
+        Unknown override keys raise; unused shared keys are skipped.
         """
         if model_name not in _MODEL_CLASSES:
             raise ValueError(
@@ -181,8 +170,7 @@ class VehicleConfig:
 # RunConfig
 # ---------------------------------------------------------------------------
 
-# Runtime plumbing rather than YAML settings: the caller supplies these, so
-# they are neither accepted in nor written to a config file.
+# Not YAML fields; supplied by the caller at runtime.
 _NON_YAML_PIPELINE_FIELDS = frozenset(
     {
         "repo_root",
@@ -200,12 +188,7 @@ _ALL_MODE_BLOCKS = {attr for attr in _MODE_BLOCKS.values() if attr is not None}
 
 
 def _pipeline_yaml_fields() -> set:
-    """The YAML-settable keys of the ``pipeline`` section.
-
-    Derived from ``PipelineConfig`` rather than hand-listed, so a new option is
-    declared exactly once — next to its own documentation and default — and can
-    never be silently dropped on load because someone forgot a second list.
-    """
+    """YAML-settable keys of the ``pipeline`` section (from ``PipelineConfig``)."""
     return {f.name for f in fields(PipelineConfig) if not f.name.startswith("_")} - (
         _NON_YAML_PIPELINE_FIELDS
     )
@@ -230,18 +213,10 @@ def _parse_mode_block(mode_name: str, raw: Any) -> Any:
 
 
 def build_pipeline_config(raw: Dict[str, Any]) -> PipelineConfig:
-    """Construct a PipelineConfig from a plain ``pipeline`` mapping.
+    """Build a ``PipelineConfig`` from a ``pipeline`` mapping.
 
-    Public because it is the only correct way to build one from untrusted keys:
-    it validates them and turns an event's block into its settings dataclass.
-    Callers with a dict -- a config file, a sweep, a test -- should come
-    through here rather than splatting into ``PipelineConfig`` directly.
-
-    An event's settings live in a block named after it. A block belonging to a
-    different event than the configured ``mode`` is an error: before the blocks
-    existed every setting was accepted regardless of mode, so a stray
-    ``skidpad_lead_in_m`` in an autox config was silently ignored rather than
-    questioned.
+    Validates keys and event blocks; a block for an event other than ``mode``
+    is an error.
     """
     raw = dict(raw)
     mode_name = raw.get("mode", PipelineConfig.mode)
@@ -270,11 +245,7 @@ EXTENDS_KEY = "extends"
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """``override`` layered onto ``base``; nested mappings merge, everything else replaces.
-
-    A list replaces rather than concatenates: ``corners`` is the car's four body
-    corners, and an event that names its own set means those four, not eight.
-    """
+    """Layer ``override`` onto ``base``; nested dicts merge, lists replace."""
     merged = copy.deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
@@ -285,12 +256,7 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def _load_yaml_with_extends(path: Path, _seen: Optional[List[Path]] = None) -> Dict[str, Any]:
-    """Read a config, resolving an ``extends:`` chain from the bottom up.
-
-    The car is described once in ``vehicle.yaml``; each event config names it
-    and overrides only what it genuinely tunes. The path is resolved relative
-    to the file naming it, so a config directory moves as a unit.
-    """
+    """Load YAML with bottom-up ``extends:`` resolution (paths relative to the file)."""
     path = Path(path).resolve()
     _seen = list(_seen or [])
     if path in _seen:
@@ -390,13 +356,7 @@ class RunConfig:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
     def to_pipeline_config(self) -> PipelineConfig:
-        """Attach the vehicle config and return the pipeline settings.
-
-        Re-runs ``__post_init__`` so paths and mode-dependent defaults reflect
-        any field changed since load (a CLI flag overriding the YAML, say).
-        Returns the live object, not a copy: later edits to it are edits to
-        ``self.pipeline``.
-        """
+        """Attach ``vehicle_config`` and re-run ``__post_init__`` (returns live object)."""
         self.pipeline.vehicle_config = self.vehicle
         self.pipeline.__post_init__()
         return self.pipeline

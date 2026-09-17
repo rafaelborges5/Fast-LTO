@@ -13,10 +13,8 @@ from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, Sp
 from fast_lto.utils.smooth import smoothmax
 from fast_lto.vehicle_models import VehicleModel
 
-# How close to centred and aligned the end of the trajectory has to be. Tight
-# but not exact, so the discrete dynamics are not over-determined.
-#: The events ``build_ocp`` knows how to pose. Only trackdrive leaves node 0
-#: free: its closed-loop equality already ties the state across the wrap.
+# Terminal state tolerances (physical units). Slightly loose so dynamics stay feasible.
+#: Events ``build_ocp`` supports. Trackdrive leaves node 0 free (closed-loop).
 OCP_MODES = ("trackdrive", "autox", "skidpad")
 
 _TERMINAL_D_TOL_M = 0.05
@@ -28,8 +26,7 @@ _TERMINAL_V_LAT_TOL = 0.15
 def _terminal_state_bounds(
     model: VehicleModel, use_normalization: bool
 ) -> list[tuple[int, float, float]]:
-    """(state_idx, lo, hi) triples enforcing the terminal tolerances in solver
-    units, for d, psi_err and yaw_rate/v_lat where the model has them."""
+    """``(state_idx, lo, hi)`` terminal tolerances in solver units."""
     reduced_names = model.reduced_state_names()
     if use_normalization:
         x_scale, x_shift = model.get_reduced_state_scaling()
@@ -55,17 +52,7 @@ def _apply_terminal_window(
     n_window: int,
     bounds: list[tuple[int, float, float]],
 ) -> None:
-    """Bound each (idx, lo, hi) in ``bounds`` over the last ``n_window`` nodes.
-
-    Holding the end of the horizon centred and heading-aligned is the visible
-    half. The other half is that ``bounds`` also caps ``yaw_rate`` and
-    ``v_lat``: with a speed target active and nothing costing state shape in an
-    untimed zone, the solver otherwise takes a cost-free excursion on the last
-    node or two to land exactly on the target.
-
-    ``n_window`` is never usefully 1 -- rate-limited actuators cannot reach the
-    target in zero steps.
-    """
+    """Apply ``bounds`` over the last ``n_window`` nodes (d, heading, yaw_rate, v_lat)."""
     n_window = min(N, max(1, int(n_window)))
     for i in range(N - n_window, N):
         for idx, lo, hi in bounds:
@@ -80,10 +67,7 @@ def _autox_gate_lap_time(
 ) -> Tuple[float | None, str | None]:
     """Elapsed time between the two crossings of the autox timing gate.
 
-    The gate sits ``timing_offset_m`` downstream of where the car starts, so
-    the lap runs gate to gate rather than from s = 0 to the end of the run-off.
-
-    Returns ``(lap_time_s, warning)``, of which exactly one is None.
+    Gate is ``timing_offset_m`` past the start. Returns ``(lap_time_s, warning)``.
     """
     base_length_m = track.get("autox_base_length_m")
     if base_length_m is None:
@@ -167,12 +151,7 @@ def _build_brake_zone(
     D_safe_braking: float,
     use_normalization: bool,
 ) -> _BrakeZone:
-    """A copy of ``model`` with its tyre D coefficients overridden outright.
-
-    Applied to the nodes with no timing objective, so the car brakes on a grip
-    estimate it can trust. Possible because tyre coefficients are baked into
-    each node as plain floats rather than carried as CasADi parameters.
-    """
+    """Copy of ``model`` with tyre ``D`` overridden on untimed nodes (``timed_mask``)."""
     timed_mask_raw = track.get("timed_mask")
     if timed_mask_raw is None:
         raise ValueError(
@@ -211,12 +190,7 @@ def _apply_final_node_constraints(
     eval_at_point_last: Callable,
     use_normalization: bool,
 ) -> None:
-    """Apply the model's own constraints at the last node.
-
-    The node loop evaluates them at ``x_i`` for ``i < N-1`` only, so the final
-    node is otherwise unchecked -- which a terminal speed target makes worth
-    cheating at.
-    """
+    """Apply model constraints at the last node (node loop covers ``i < N-1`` only)."""
     x_last = X[N - 1, :].T
     u_last = U[N - 1, :].T
     if use_normalization:
@@ -236,12 +210,7 @@ def _apply_terminal_speed(
     terminal_speed: float,
     use_normalization: bool,
 ) -> None:
-    """Require the final node to be at or under ``terminal_speed``.
-
-    An upper bound rather than an equality: landing on one exact point through
-    the discrete dynamics, where the friction circle is also newly binding, is
-    a far more tightly coupled problem to solve.
-    """
+    """Inequality ``v <= terminal_speed`` at the final node."""
     reduced_names = model.reduced_state_names()
     v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
     if use_normalization:

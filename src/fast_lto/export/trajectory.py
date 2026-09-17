@@ -46,34 +46,9 @@ def _analytic_path_geometry(
     yaw_rate_equiv: np.ndarray,
     v_path_eps: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """The vehicle's true path heading and curvature, without differentiating.
+    """Path heading and curvature from solved states (no XY differentiation).
 
-    Both follow algebraically from the solved states: the path tangent is
-    ``vehicle_heading + beta`` and the path curvature is
-    ``yaw_rate_equiv / v_path``. Differentiating a re-interpolated (x, y)
-    spline instead, or finite-differencing ``beta``, is ill-conditioned
-    wherever both velocity components are small -- skidpad's terminal
-    deceleration, for one.
-
-    Parameters
-    ----------
-    vehicle_heading : np.ndarray
-        Vehicle body heading in the world frame (track heading + psi_err).
-    v_long, v_lat : np.ndarray
-        Body-frame longitudinal/lateral velocity (``v_lat`` all-zero for
-        models without sideslip, e.g. point_mass).
-    yaw_rate_equiv : np.ndarray
-        Yaw rate (or its point_mass equivalent, ``a_lat / v_safe``).
-    v_path_eps : float
-        Floor on path speed, to avoid blow-up at near-standstill points
-        (e.g. skidpad's terminal deceleration).
-
-    Returns
-    -------
-    heading_path : np.ndarray
-        True path-tangent heading.
-    kappa_path : np.ndarray
-        Signed curvature of the actual path.
+    ``heading + beta`` and ``yaw_rate_equiv / max(v_path, v_path_eps)``.
     """
     beta = np.arctan2(v_lat, v_long)
     v_path = np.hypot(v_long, v_lat)

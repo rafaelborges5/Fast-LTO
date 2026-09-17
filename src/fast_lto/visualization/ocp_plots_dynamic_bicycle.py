@@ -1,12 +1,4 @@
-"""
-Visualization helpers for dynamic-bicycle OCP solutions.
-
-This module is intentionally separate from `visualization/ocp_plots.py`:
-- point-mass solutions have inputs [a_long, a_lat]
-- dynamic bicycle solutions have inputs [a_long, delta]
-
-We keep the point-mass plots unchanged and provide bicycle-specific panels.
-"""
+"""Panel plots for dynamic-bicycle OCP solutions (inputs ``a_long``, ``delta``)."""
 
 from __future__ import annotations
 

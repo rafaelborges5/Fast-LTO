@@ -1,8 +1,8 @@
 # vehicle_models
 
-What the car is. Three models, one interface, same physical car.
+Three vehicle models, one `VehicleModel` interface, one physical car.
 
-## The contract
+## Interface
 
 A model is a `VehicleModel` (`vehicle_base.py`) that provides:
 
@@ -17,18 +17,13 @@ A model is a `VehicleModel` (`vehicle_base.py`) that provides:
 
 Optionally:
 
-- `diagnostics` — named per-node quantities (tyre loads, slip angles, friction
-  usage) as CasADi expressions built from the same helpers as the dynamics. This
-  exists so a plot never re-derives the physics in NumPy: a second
-  implementation drifts, and then the figure you would use to catch the drift is
-  itself what drifted.
+- `diagnostics` — named per-node CasADi quantities (tyre loads, slip angles,
+  friction usage); evaluate with `diagnostics.evaluate_diagnostics`.
 
-`get_corner_offsets` reads the `corners` list from the vehicle config, and
-`get_corner_constraints` turns it into one corridor constraint per corner, so it
-is the car's extents that have to fit through a gap and not a point at its
-centre of gravity.
+`get_corner_offsets` reads `corners` from the vehicle config;
+`get_corner_constraints` emits one corridor inequality per corner.
 
-## The three
+## Models
 
 | | State | Input |
 | --- | --- | --- |
@@ -36,56 +31,45 @@ centre of gravity.
 | `dynamic_bicycle` | `+ v_lat yaw_rate` | `a_long delta` |
 | `four_wheel` | `+ Fx_fl Fx_fr Fx_rr Fx_rl delta` | the rates of those five |
 
-`point_mass` is a friction circle on a curve — seconds to solve, and the right
-model for checking that a track, a corridor margin or a config change behaves
-before spending real time on it.
-
-`dynamic_bicycle` adds sideslip and yaw, with a simplified Magic Formula per
-axle and an optional friction ellipse.
-
-`four_wheel` is the one that gets used in anger: per-wheel Pacejka forces,
-aerodynamic load, longitudinal and lateral load transfer, and torque vectoring.
-Its actuators are **states**, driven by rate inputs, which is what makes
-`dFxmax` and `ddeltamax` real limits rather than post-hoc filters — and also
-what makes the terminal region delicate (see `optimization/README.md`).
+- **`point_mass`** — friction circle on a curve; fastest; for track, corridor
+  margin, and config checks.
+- **`dynamic_bicycle`** — sideslip and yaw; simplified Magic Formula per axle;
+  optional friction ellipse.
+- **`four_wheel`** — per-wheel Pacejka, aero, load transfer, torque vectoring;
+  wheel forces and steering are states; inputs are their rates (`dFxmax`,
+  `ddeltamax`). Originally developed by
+  [Tanmay Ganguli](https://github.com/TanmayGanguli09). This is the model AMZ
+  used for most of the 2026 season; `point_mass` and `dynamic_bicycle` were
+  mostly development aids.
 
 ## One car, three descriptions
 
 `configs/vehicle.yaml` defines the car once; each model block holds only what
-that model needs. Parameters a model does not use are still declared in it, so
-the three can never describe different cars —
-`test_models_agree_on_the_car_they_describe` pins this.
+that model needs. Unused parameters are still declared so the three blocks
+stay consistent — `test_models_agree_on_the_car_they_describe` enforces this.
 
 `lf` is the distance to the **front** axle, so the static front load share is
 `lr / (lf + lr)`. Same convention in all three, and in the configs.
 
 ## Guards
 
-Two quantities can go singular, and each model declares a floor for them:
+Two quantities can go singular; each model declares a floor:
 
-- `eps_s_dot` — `ṡ` appears in a denominator everywhere, since the space-domain
-  conversion divides by it;
-- `eps_D_kappa` — the Frenet Jacobian `D_kappa = 1 - kappa * d` vanishes at the
-  centre of the osculating circle, where `(s, d)` stops being unique.
-  `examples/frenet_frame.py` draws it.
+- `eps_s_dot` — `ṡ` in the space-domain conversion (`dx/ds = (dx/dt) / ṡ`);
+- `eps_D_kappa` — Frenet Jacobian `D_kappa = 1 - kappa * d`; see
+  `examples/frenet_frame.py`.
 
-`dynamic_bicycle` and `four_wheel` enforce both as constraints, which is what
-lets the symbolic expressions keep the raw quantity and stay smooth for the
-solver.
+`dynamic_bicycle` and `four_wheel` enforce both as constraints.
 
-**`point_mass` declares `eps_D_kappa` but does not enforce it**, while still
-carrying four corners — so its corner constraints divide by an unconstrained
-Jacobian. In practice `d_max` is far below `1 / kappa` on any real Formula
-Student track, so it has never bitten; on a hairpin with a wide corridor it
-could. Enforcing it would change `point_mass` lap times, so it is a deliberate
-open question rather than an oversight.
+**`point_mass` declares `eps_D_kappa` but does not enforce it**; corner
+constraints still divide by raw `D_kappa`. Not enforced because it would change
+lap times.
 
 ## Adding one
 
-1. Subclass `VehicleModel` here and implement the contract above.
+1. Subclass `VehicleModel` here and implement the interface above.
 2. Register it in `pipeline._make_model`.
 3. Add a panel renderer and an entry in `visualization.PANEL_RENDERERS` —
-   `tests/test_panel_registry.py` fails until you do, rather than letting the
-   pipeline solve for minutes and then die at the last step.
+   `tests/test_panel_registry.py` fails until both exist.
 4. Add its block to `configs/vehicle.yaml`.
 5. Add a golden scenario in `tests/test_golden_solutions.py`.

@@ -61,7 +61,7 @@ from fast_lto.vehicle_models import (
 from fast_lto.visualization.panels import render_panels
 
 if TYPE_CHECKING:
-    # Typing only: config imports pipeline, so a runtime import is circular.
+    # Avoid circular import with config.
     from fast_lto.config import VehicleConfig
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
@@ -69,23 +69,19 @@ WarmStartPolicy = Literal["off", "auto", "ladder"]
 WARM_START_POLICIES = get_args(WarmStartPolicy)
 
 TrackType = Literal["fsg", "ellipse", "bean", "skidpad"]
-# Derived, not hand-listed: the CLI's --track-type choices read this.
+# CLI --track-type choices.
 TRACK_TYPES = get_args(TrackType)
 
 
 @dataclass
 class PipelineConfig:
-    """
-    Configuration for the Fast-LTO pipeline.
-
-    Parameters are grouped roughly by pipeline step; most have sensible defaults.
-    """
+    """Configuration for the Fast-LTO pipeline."""
 
     track_id: str = "fsg_random"
     track_type: TrackType = "fsg"
 
     repo_root: Optional[Path] = None
-    #: Reads a CSV somewhere other than data/tracks/{track_id}.csv.
+    #: Boundary CSV other than ``data/tracks/{track_id}.csv``.
     track_csv_override: Optional[Path] = None
 
     generate_track: bool = False
@@ -104,14 +100,13 @@ class PipelineConfig:
 
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
-    #: A scalar weight, or one per input (see --reg-du-vec).
+    #: Scalar weight, or one per input (see ``--reg-du-vec``).
     reg_u: Union[float, Sequence[float]] = 600.0
     reg_u_l2: float | None = None
-    #: None follows the mode; the ``launch_speed`` property resolves it.
+    #: ``None`` follows the mode via ``launch_speed``.
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
-    #: Per-event settings, each owned by its ``EventMode``. Naming the block of
-    #: an event other than ``mode`` is an error rather than a silent no-op.
+    #: Per-event settings (owned by ``EventMode``); wrong-mode blocks error.
     autox: AutoxConfig = field(default_factory=AutoxConfig)
     skidpad: SkidpadConfig = field(default_factory=SkidpadConfig)
 
@@ -122,9 +117,7 @@ class PipelineConfig:
     normalize_states_and_inputs: bool = True
     solver_verbose: bool = False
 
-    #: ``"off"`` reads and writes no seed, ``"auto"`` seeds from the store and
-    #: solves an easier problem first if nothing fits, ``"ladder"`` always
-    #: climbs from a safe margin. See the package README.
+    #: ``off`` / ``auto`` / ``ladder``; see package README.
     warm_start: WarmStartPolicy = "auto"
     warm_start_max_margin_gap: float = 0.15
     warm_start_ladder_step: float = 0.05
@@ -157,16 +150,10 @@ class PipelineConfig:
 
     @property
     def launch_speed(self) -> float:
-        """Speed the trajectory starts at, in m/s.
+        """Start speed in m/s (never ``None``).
 
-        ``initial_speed`` is the request: ``None`` means "whatever this event
-        starts at". This is the answer, and unlike the field it is never
-        ``None``, so callers do not have to re-narrow it at every use.
-
-        Derived on access for the same reason ``track_csv_path`` is. It used to
-        be written into ``initial_speed`` by ``__post_init__``, which needed a
-        private flag and a setter to survive being re-run after ``mode``
-        changed -- three pieces of machinery for what is one expression.
+        Uses ``initial_speed`` when set; otherwise 5.0 (trackdrive) or 3.0.
+        Computed on access so it stays consistent if ``mode`` changes.
         """
         if self.initial_speed is not None:
             return float(self.initial_speed)
@@ -174,17 +161,14 @@ class PipelineConfig:
 
     @property
     def track_csv_path(self) -> Path:
-        """The boundary CSV this run reads.
+        """Boundary CSV for this run.
 
-        Derived on every access rather than resolved once in ``__post_init__``,
-        which runs more than once: ``RunConfig.to_pipeline_config`` re-runs it
-        so a CLI flag can override the YAML. Anything derived there has to be
-        re-derivable, or a ``--track-id`` override renames the outputs while
-        still reading the previous id's CSV. ``launch_speed`` is the same.
+        Computed on access so CLI overrides of ``track_id`` / override path
+        stay consistent after ``__post_init__`` re-runs.
         """
         if self.track_csv_override is not None:
             return Path(self.track_csv_override)
-        assert self.repo_root is not None  # always resolved in __post_init__
+        assert self.repo_root is not None  # set in __post_init__
         return self.repo_root / "data" / "tracks" / f"{self.track_id}.csv"
 
     @property
@@ -344,21 +328,17 @@ def _splice_segment(
     side: Literal["before", "after"],
     timed: int,
 ) -> Dict:
-    """Stitch a prescribed, constant-speed segment onto a solved trajectory.
+    """Stitch a prescribed constant-speed segment onto a solved trajectory.
 
-    ``yaw_rate`` is filled as ``kappa * speed`` from the segment's own
-    curvature, because the exporter derives the reference curvature back out of
-    it. Zeros would export a curving lead-in as straight. The remaining dynamic
-    states stay at rest; nothing downstream reads them.
+    ``yaw_rate`` is ``kappa * speed`` (exporter recovers curvature from it);
+    other dynamic states are zero. ``decel_mask`` is extended with ``0``.
 
     Parameters
     ----------
     side:
-        ``"before"`` prepends the segment (a lead-in), ``"after"`` appends it
-        (a terminal pad).
+        ``"before"`` prepends; ``"after"`` appends.
     timed:
-        Value to extend ``timed_mask`` with. ``decel_mask``, where present, is
-        always extended with ``0``: no prescribed segment is a braking zone.
+        Value used to extend ``timed_mask``.
     """
     n = len(segment["arc_lengths"])
 
@@ -480,11 +460,10 @@ def _plan_ladder(
     track_data: Dict,
     model: VehicleModel,
 ) -> List[float]:
-    """Margins to solve on the way to the target, target included.
+    """Ladder margins up to and including the target.
 
-    A single value means "solve the target directly". The starting rung is the
-    largest margin at which the default centreline guess is still feasible, so
-    the first (cold) solve of the ladder is an easy one.
+    Starts at the largest margin where the centreline guess is still feasible.
+    A single value means solve the target directly.
     """
     from fast_lto.utils.corridor import critical_margin, describe_critical_margin
 
@@ -497,7 +476,7 @@ def _plan_ladder(
     print(f"  Warm start: {describe_critical_margin(crit, target)}")
 
     if crit.already_closed:
-        # No margin makes the centreline guess feasible; a ladder cannot help.
+        # Centreline never feasible; skip the ladder.
         return [target]
 
     start = max(crit.margin - 0.02, 0.0)
@@ -508,7 +487,7 @@ def _plan_ladder(
         return [start, target]
 
     step = max(float(config.warm_start_ladder_step), 1e-3)
-    # Drop a rung sitting on top of the target; solving it twice buys nothing.
+    # Skip a rung that would duplicate the target.
     rungs = [float(m) for m in np.arange(start, target, step) if target - m > 0.5 * step]
     rungs.append(target)
     return rungs
@@ -552,7 +531,7 @@ def _save_seed_quietly(
     solution: Dict,
     max_seeds: int,
 ) -> None:
-    """Store a seed, but never let a cache write throw away a good solve."""
+    """Save a seed; failures are logged and ignored."""
     try:
         ws.save_seed(seeds_root, signature, solution, max_seeds)
     except Exception as exc:  # noqa: BLE001
@@ -569,11 +548,9 @@ def _solve_with_warm_start(
     run_config: Dict,
     mode: EventMode,
 ) -> Dict:
-    """Solve the target problem, seeded from the store when that helps.
+    """Solve the target, choosing the initial guess from the seed store / ladder.
 
-    Never decides *whether* to solve — only what the solver starts from. With
-    ``warm_start='off'`` nothing here touches the disk and the solve is the cold
-    one.
+    ``warm_start='off'`` is a cold solve with no disk I/O.
     """
     import tempfile
 
@@ -589,7 +566,7 @@ def _solve_with_warm_start(
     }
 
     def finish(sol: Dict) -> Dict:
-        """Record how the solve was seeded, in the file as well as the dict."""
+        """Attach warm-start provenance and rewrite the solution file."""
         sol["warm_start"] = provenance
         with solution_path.open("w") as f:
             json.dump(sol, f, indent=2)
@@ -629,7 +606,7 @@ def _solve_with_warm_start(
 
     guess: Optional[Dict] = None
 
-    # 1. An explicitly requested seed always wins.
+    # 1. Explicit seed path.
     if config.warm_start_seed:
         seed_path = _resolve_path(config.repo_root, config.warm_start_seed)
         if seed_path is not None and Path(seed_path).is_file():
@@ -641,7 +618,7 @@ def _solve_with_warm_start(
         else:
             print(f"  Warm start: seed file not found: {config.warm_start_seed}")
 
-    # 2. Otherwise take the closest compatible solve out of the store.
+    # 2. Closest compatible store entry.
     if guess is None and config.warm_start != "ladder":
         match = ws.find_seed(seeds_root, signature, float(config.warm_start_max_margin_gap))
         if match is not None:
@@ -655,7 +632,7 @@ def _solve_with_warm_start(
                 )
                 provenance.update(match.as_provenance())
 
-    # 3. No seed: walk up to the target when a cold start would begin infeasible.
+    # 3. Ladder when no seed and a cold start would be infeasible.
     if guess is None:
         ladder = _plan_ladder(config, track_data, model)
         if len(ladder) > 1:
@@ -681,7 +658,7 @@ def _solve_with_warm_start(
                             initial_guess=guess,
                         )
                     except Exception as exc:  # noqa: BLE001
-                        # An optimisation, not a requirement.
+                        # Intermediate rungs are best-effort.
                         print(
                             f"  Warm start: intermediate solve at {rung:.2f} failed "
                             f"({type(exc).__name__}), continuing to the target"
@@ -725,7 +702,7 @@ def _print_mode_summary(
     track_data: Dict,
     time_weights: Optional[np.ndarray],
 ) -> None:
-    """Print what the mode did to the problem, if it had anything to say."""
+    """Print the mode's problem-setup summary lines."""
     for line in get_mode(config.mode).summary(config, track_data, time_weights):
         print(line)
 
@@ -759,7 +736,7 @@ def step_solve_ocp(
     config.solutions_dir.mkdir(parents=True, exist_ok=True)
     solution_path = config.solution_path
 
-    # The run configuration that uniquely characterises a solution.
+    # Run config stored with the solution.
     track_ds_m = float(
         track_data.get(
             "ds_m",
@@ -772,7 +749,7 @@ def step_solve_ocp(
     )
     track_num_points = int(track_data.get("num_points", len(track_data.get("arc_lengths", []))))
 
-    # Scalar case tested, not the sequence: Sequence is open-ended.
+    # Prefer scalar isinstance; Sequence is open-ended.
     reg_du_for_sig: Union[float, List[float]]
     if isinstance(config.reg_u, (int, float)):
         reg_du_for_sig = float(config.reg_u)
@@ -919,7 +896,7 @@ def step_visualize(
 
 
 # --------------------------------------------------------------------------- #
-#  The run plan -- every step runs every time; `start_from` is the only reuse
+# Run plan (`start_from` resumes from disk; otherwise every step runs)
 # --------------------------------------------------------------------------- #
 
 STEP_ORDER: Tuple[StepName, ...] = ("track", "spline", "bounds", "ocp", "export", "plot")
@@ -927,7 +904,7 @@ STEP_ORDER: Tuple[StepName, ...] = ("track", "spline", "bounds", "ocp", "export"
 
 @dataclass(frozen=True)
 class _Step:
-    """One stage of the pipeline: what it runs, and where its output lands."""
+    """One pipeline stage: runner, artifact path, and enable predicate."""
 
     name: StepName
     run: Callable[[PipelineConfig, Dict[str, Path]], Path]
@@ -936,7 +913,7 @@ class _Step:
 
 
 def _plot_source_csv(config: PipelineConfig) -> Path:
-    """The cone CSV the plots are drawn against."""
+    """Cone / boundary CSV used for plots."""
     if config.mode == "skidpad":
         if config.skidpad.map_csv is None:
             raise ValueError("mode='skidpad' requires skidpad_map_csv.")
@@ -957,7 +934,7 @@ def _step_spline(config: PipelineConfig, results: Dict[str, Path]) -> Path:
 
 
 def _step_bounds(config: PipelineConfig, results: Dict[str, Path]) -> Path:
-    # From disk, so this behaves the same whether or not the spline just ran.
+    # Always reload the spline from disk.
     step_compute_bounds(config, track=None, csv_path=results["track"])
     return config.track_with_widths_path
 
@@ -984,13 +961,10 @@ _SOLVE_AND_AFTER = (
 
 
 def _plan(config: PipelineConfig) -> List[_Step]:
-    """The steps this configuration runs, in order.
+    """Ordered steps for this configuration.
 
-    Skidpad reaches the same track-with-widths JSON by a different route -- its
-    path overlaps itself, so it cannot go through the generic spline and bounds
-    machinery -- and used to be a parallel copy of the whole function that took
-    ``end_at`` but quietly ignored ``start_from``. It is one entry in the plan
-    instead; everything from the solve onward is shared.
+    Skidpad builds track-with-widths directly (self-overlapping path); OCP
+    onward is shared with the generic track/spline/bounds path.
     """
     if config.mode == "skidpad" or config.track_type == "skidpad":
         upstream: List[_Step] = [
@@ -1019,11 +993,10 @@ def run_pipeline(
     start_from: StepName = "track",
     end_at: Optional[StepName] = None,
 ) -> Dict[str, Path]:
-    """Run the pipeline from ``start_from`` through ``end_at`` (both inclusive).
+    """Run from ``start_from`` through ``end_at`` (inclusive).
 
-    Steps before ``start_from`` are not run; their outputs must already exist,
-    and are reported in the result so the caller sees the full set of paths
-    either way.
+    Earlier steps are not run; their artifacts must already exist and are
+    included in the returned path map.
     """
     for name, value in (("start_from", start_from), ("end_at", end_at)):
         if value is not None and value not in STEP_ORDER:
@@ -1041,7 +1014,7 @@ def run_pipeline(
             continue
 
         if position < first:
-            # Skipped by request, so its output has to be there already.
+            # Resume: require existing artifact.
             artifact = step.artifact(config)
             if not artifact.exists():
                 raise FileNotFoundError(

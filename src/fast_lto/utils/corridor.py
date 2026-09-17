@@ -23,10 +23,7 @@ except ImportError:  # script-style imports without package context
     from fast_lto.vehicle_models.vehicle_base import CornerOffset  # type: ignore
 
 
-#: Smallest magnitude the Frenet Jacobian ``D_kappa = 1 - kappa*d`` is allowed
-#: to take in the NumPy corner geometry, clamped keeping its sign. Inside the
-#: OCP no clamp is needed: the models constrain ``D_kappa >= eps_D_kappa``, so
-#: the symbolic expression stays smooth for the solver.
+#: Floor on ``|1 - kappa*d|`` in NumPy corner geometry (sign-preserving).
 D_KAPPA_FLOOR = 1e-9
 
 

@@ -1,29 +1,13 @@
-"""
-Skidpad track generator for partially-timed lap-time optimization.
+"""Skidpad track-with-widths builder for partially timed LTO.
 
-Unlike the other generators in this package (which emit cone boundaries that are
-later spline-fit and bounds-computed), this module builds the *discretized
-track-with-widths dict* directly — the same schema produced by
-``DiscretizedTrack.to_dict()`` plus ``w_left``/``w_right`` — because the skidpad
-maneuver self-overlaps in XY (each circle is driven twice) and therefore cannot
-go through the generic single-pass spline/KD-tree bounds machinery.
+Builds the discretized track dict directly (same schema as
+``DiscretizedTrack.to_dict()`` plus widths). The path self-overlaps in XY, so
+it cannot use the generic spline / KD-tree bounds path.
 
-The whole maneuver is unrolled along arc length ``s`` as one centerline:
+Unrolled along ``s``: entry → right×2 → left×2 → exit. Extra fields:
+``timed_mask`` (scored intervals) and ``skidpad`` (geometry metadata).
 
-    entry straight -> right circle x2 -> left circle x2 -> exit straight
-
-so the OCP treats it like any other track. Two extra fields are added:
-
-    timed_mask : per-point 0/1 flag marking the intervals that are *scored*
-                 (the 2nd revolution on each circle, i.e. the FS timed laps).
-    skidpad    : geometry metadata (centers, radii, gate, lap structure).
-
-Inputs
-------
-map_csv : cone map, columns ``tag,x,y`` (unlabeled cones, two rings per circle).
-ref_csv : a controller-reference trajectory (``export.trajectory.CSV_COLUMNS``
-          layout); used to fit the circle centers, anchor the entry/exit
-          endpoints, and establish the lap order.
+Inputs: ``map_csv`` (``tag,x,y`` cones), ``ref_csv`` (reference trajectory).
 """
 
 from __future__ import annotations

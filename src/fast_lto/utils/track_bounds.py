@@ -1,12 +1,7 @@
-"""
-Lateral box constraints (``w_left``, ``w_right``) for a discretised track.
+"""Lateral box constraints (``w_left``, ``w_right``) for a discretised track.
 
-Casts a normal from every centreline sample and finds where it crosses the left
-and right boundary polylines. That distance, less the corridor margin, is the
-box the OCP constrains ``d`` to.
-
-The intersection search is O(N*M) over samples and boundary segments, which is
-a fraction of a second on a real track and has never been worth indexing.
+Ray-casts from each centreline sample to the boundary polylines; distance
+minus corridor margin is the box on ``d``.
 """
 
 from __future__ import annotations
@@ -208,11 +203,7 @@ def _compute_lateral_bounds_kdtree(
     def _prepare_side(
         s_samples: np.ndarray, d_samples: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Wrap into one period, sort, and merge samples at the same station.
-
-        Wrapping comes first because the projections are unwrapped and can fall
-        just outside [0, L); it is what makes the tiling below increasing.
-        """
+        """Wrap into one period, sort, and merge duplicate stations."""
         if s_samples.size == 0:
             return s_samples, d_samples
 
@@ -238,8 +229,7 @@ def _compute_lateral_bounds_kdtree(
     s_right, d_right = _prepare_side(s_right_raw, d_right_raw)
 
     def _tile_periodic(s_period: np.ndarray, d_period: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Repeat over three periods, so the spline has real data either side of
-        the start/finish seam instead of extrapolating into the gap."""
+        """Tile three periods so the spline has support across the seam."""
         s_tiled = np.concatenate([s_period - total_length, s_period, s_period + total_length])
         d_tiled = np.concatenate([d_period, d_period, d_period])
         return s_tiled, d_tiled

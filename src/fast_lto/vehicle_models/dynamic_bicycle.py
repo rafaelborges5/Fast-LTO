@@ -30,7 +30,7 @@ class DynamicBicycleModel(VehicleModel):
         return {
             "m": 170.0,
             "Iz": 250.0,
-            # To the FRONT axle, as in the other models and the configs.
+            # lf/lr: distances to front / rear axle (same convention as other models).
             "lf": 0.842,
             "lr": 0.689,
             "g": 9.81,
@@ -40,7 +40,7 @@ class DynamicBicycleModel(VehicleModel):
             "Br": 9.0,
             "Cr": 1.3,
             "Dmf_r": 1.4,
-            # Friction / safety envelope
+            # Friction envelope
             "mu": 1.4,
             "gamma_ellipse": 1.0,
             "use_friction_ellipse": True,
@@ -50,13 +50,13 @@ class DynamicBicycleModel(VehicleModel):
             "eps_s_dot": 1.0,
             "eps_D_kappa": 0.05,
             "rk4_max_ds_m": 2.5,
-            # Resistance and aero, not yet used in v_dot
+            # Aero (unused in dynamics)
             "C_d": 1.55,
             "C_r": 0.12,
             "C_l": 3.4,
             "rho": 1.225,
             "a_front": 1.2,
-            # Bounds, which must be finite for normalisation
+            # Bounds
             "d_max": 3.0,
             "psi_err_max": 1.2,
             "v_min": 0.4,
@@ -94,7 +94,7 @@ class DynamicBicycleModel(VehicleModel):
     def _pacejka_lateral_force(
         self, alpha: ca.MX, Fz: ca.MX, B: float, C: float, Dmf: float
     ) -> ca.MX:
-        # Simplified Magic Formula: peak force = Fz * Dmf.
+        # Magic Formula (peak = Fz * Dmf).
         return -Fz * Dmf * ca.sin(C * ca.atan(B * alpha))
 
     def get_dynamics(
@@ -115,11 +115,10 @@ class DynamicBicycleModel(VehicleModel):
         delta = inputs[1]
         kappa = curvature
 
-        # Smooth guard on v to avoid division by zero in slip angles.
         v_safe = smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
 
         D_kappa = 1 - kappa * d
-        # The dynamics keep the raw D_kappa; the constraints keep it positive.
+        # Raw D_kappa here; positivity is enforced in get_constraints.
         s_dot = (v * ca.cos(psi_err) - v_lat * ca.sin(psi_err)) / D_kappa
         d_dot = v * ca.sin(psi_err) + v_lat * ca.cos(psi_err)
         psi_err_dot = yaw_rate - kappa * s_dot
@@ -164,7 +163,6 @@ class DynamicBicycleModel(VehicleModel):
         delta = inputs[1]
         kappa = curvature
 
-        # Recomputed here because the guards need the same kinematics.
         v_safe = smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
         D_kappa = 1 - kappa * d
         s_dot = (v * ca.cos(psi_err) - v_lat * ca.sin(psi_err)) / D_kappa
@@ -228,11 +226,9 @@ class DynamicBicycleModel(VehicleModel):
     # ------------------------------------------------------------------ #
 
     def diagnostics(self, x_red: ca.MX, u: ca.MX) -> Dict[str, ca.MX]:
-        """Axle slip angles, lateral forces and the resulting lateral accel.
+        """Axle slip angles, lateral forces, and lateral accel (same as dynamics).
 
-        Same guard, loads and Magic-Formula coefficients as ``get_dynamics``,
-        so the plotted tire state is the one the solver worked with. Steering
-        is an input for this model, hence it is read from ``u``.
+        Steering is an input, so it is read from ``u``.
         """
         p = self.params
         v = x_red[2]

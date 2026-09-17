@@ -1,12 +1,7 @@
-"""Which panel figure to draw for a solved trajectory, and with what.
+"""Panel figure selection for a solved trajectory.
 
-Each vehicle model has its own state vector, so each needs its own panels and
-its own fields out of the solution JSON. A renderer owns that knowledge, and
-``PANEL_RENDERERS`` maps a ``model_name`` to one -- mirroring how
-``pipeline._make_model`` maps the same string to a model class.
-
-Adding a model means adding a renderer here and an entry in the registry. The
-pipeline does not change.
+``PANEL_RENDERERS`` maps ``model_name`` to a renderer (mirrors
+``pipeline._make_model``). Add a model by registering a renderer here.
 """
 
 from __future__ import annotations

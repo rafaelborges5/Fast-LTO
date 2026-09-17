@@ -1,26 +1,7 @@
-"""
-Ellipse track generator for Formula Student style tracks.
+"""Ellipse track generator (~75 m midline, L/M/R boundaries).
 
-The generator creates an approximately 75 m midline ellipse and produces
-three ordered boundaries with a consistent point density:
-
-- left boundary
-- middle line
-- right boundary
-
-The primary entrypoint is `generate_ellipse_track`, which returns the
-three boundaries as NumPy arrays and can also write them to a CSV file.
-
-CSV format
-----------
-The CSV has the following columns:
-
-    side,cone_id,x,y
-
-Where:
-- `side` is one of: "L" (left), "M" (middle), "R" (right)
-- `cone_id` is the ordered index along the track (0, 1, 2, ...)
-- `x`, `y` are coordinates in metres
+Entrypoint: ``generate_ellipse_track``. CSV columns: ``side,cone_id,x,y``
+with ``side`` in ``{L, M, R}``.
 """
 
 from __future__ import annotations

@@ -1,17 +1,11 @@
-"""
-Warm-start seed store for the global OCP.
+"""Warm-start seed store for the global OCP.
 
-The default guess is the car on the centreline at ``initial_speed``. On tight
-tracks that point is outside the feasible set, so seeding from a nearby solved
-problem is both faster and less likely to land in a worse local minimum.
+Seeds live under ``data/solutions/_seeds`` (gitignored). Compatibility:
 
-Compatibility is split in two: **hard keys** must match exactly because they
-define the node grid or the meaning of the variables; **soft keys** may differ
-and only rank the candidates, because they move the optimum within a basin
-without moving the corridor that creates the basins.
+- **hard keys** — exact match (node grid / variable meaning);
+- **soft keys** — ranking only (boundary margin, vehicle parameters).
 
-The store is a gitignored cache under ``data/solutions/_seeds``. An empty store
-just means every solve is cold.
+An empty store means every solve is cold.
 """
 
 from __future__ import annotations
@@ -31,8 +25,7 @@ from fast_lto.vehicle_models.vehicle_base import VehicleModel
 SEEDS_DIRNAME = "_seeds"
 INDEX_FILENAME = "index.json"
 
-# Keys of the solution/run description that must be identical for a seed to be
-# usable at all. Everything else is a ranking criterion.
+# Exact-match keys; everything else ranks candidates.
 HARD_KEYS = (
     "track_id",
     "mode",
@@ -54,7 +47,7 @@ HARD_KEYS = (
 
 @dataclass(frozen=True)
 class SeedMatch:
-    """A seed picked out of the store, with why it was picked."""
+    """A seed from the store, with ranking metadata."""
 
     path: Path
     margin: float
@@ -88,12 +81,7 @@ def _round_floats(obj: Any, ndigits: int = 12) -> Any:
 
 
 def geom_hash(track: Dict) -> str:
-    """Fingerprint of the track the OCP will actually see.
-
-    Covers the resampled centreline curvature and both half widths, so a
-    re-fitted, re-smoothed or re-bounded track — and any change to the autox
-    extension, which lengthens the node grid — produces a different hash.
-    """
+    """Fingerprint of the OCP track (curvature, widths, arc lengths)."""
     hasher = hashlib.blake2b(digest_size=16)
     for key in ("curvatures", "w_left", "w_right", "arc_lengths"):
         arr = np.round(np.asarray(track[key], dtype=float), 9)
@@ -174,10 +162,9 @@ def hard_keys_match(a: Dict, b: Dict) -> bool:
 
 
 def vehicle_distance(a: Dict, b: Dict) -> float:
-    """Worst relative change across the vehicle parameters (0 = identical).
+    """Worst relative change across vehicle parameters (0 = identical).
 
-    Non-numeric parameters that differ (``load_transfer_mode``, ``corners``)
-    count as a full unit of distance: still usable as a seed, heavily demoted.
+    Differing non-numeric params (``load_transfer_mode``, ``corners``) count as 1.0.
     """
     pa = a["soft"].get("model_params") or {}
     pb = b["soft"].get("model_params") or {}
@@ -301,9 +288,7 @@ def find_seed(
 ) -> Optional[SeedMatch]:
     """Best compatible seed for this problem, or None.
 
-    Candidates are ranked by ``(|margin gap|, vehicle distance, -recency)``:
-    the margin moves the corridor and therefore the local minima, so it
-    dominates; the vehicle knobs only move the optimum within a basin.
+    Ranked by ``(|margin gap|, vehicle distance, -recency)``.
     """
     directory = bucket_dir(seeds_root, signature)
     if not directory.is_dir():
@@ -354,9 +339,7 @@ def resample_guess(
 ) -> Dict[str, np.ndarray]:
     """Map a previous solution onto this OCP's node grid, in solver units.
 
-    Alignment is by arc length, not by index: an autox solution carries the
-    prepended lead-in (so it starts before s = 0 and has more nodes than the
-    OCP horizon), and a seed may come from a different node count entirely.
+    Alignment is by arc length (autox lead-in / differing node counts).
     """
     s_new = np.asarray(track["arc_lengths"], dtype=float)
     s_old = np.asarray(solution["arc_lengths"], dtype=float)
@@ -398,23 +381,10 @@ def corner_slacks(
     w_right: np.ndarray,
     corners: Sequence,
 ) -> List[np.ndarray]:
-    """Room left around each body corner, per node. Negative means outside.
+    """Room left around each body corner, per node (negative = outside).
 
-    The numeric twin of ``VehicleModel.get_corner_constraints``, which builds
-    the same geometry as CasADi expressions for the solver. Slack is the
-    negation of that constraint (``g <= 0`` there is ``slack >= 0`` here), and
-    ``tests/test_corner_geometry.py`` asserts the two agree -- the check that
-    was missing when this code and the symbolic version drifted apart.
-
-    The curvature term divides by the Frenet Jacobian ``D_kappa = 1 - kappa*d``,
-    which vanishes at the centre of the osculating circle. Inside the OCP that
-    never happens, because the models constrain ``D_kappa >= eps_D_kappa``, so
-    the symbolic version needs no guard and is left smooth for the solver. Here
-    the input is an arbitrary seed that no constraint has cleaned up, so the
-    denominator is clamped -- keeping its sign, so a seed that has crossed the
-    singularity still reports which way it is wrong. It used to clamp to
-    ``+1e-9`` regardless of sign, which silently flipped the curvature
-    correction exactly where a seed is most marginal.
+    NumPy twin of ``VehicleModel.get_corner_constraints``. Clamps
+    ``|D_kappa|`` with sign preserved (no OCP constraint on the seed).
     """
     sin_p, cos_p = np.sin(psi_err), np.cos(psi_err)
 
@@ -438,11 +408,9 @@ def validate_guess(
     corners: Optional[Sequence] = None,
     max_corner_violation_m: float = 0.5,
 ) -> Tuple[bool, str]:
-    """Cheap sanity check on a resampled seed.
+    """Sanity check on a resampled seed (shape / finite / corner slack).
 
-    Catches a corrupt or mismatched seed before it wastes a solve. A seed from a
-    smaller margin legitimately pokes outside the new, tighter corridor, so the
-    tolerance is generous — this is a smoke test, not a feasibility test.
+    Tolerance is generous: a tighter margin may legitimately poke outside.
     """
     n_nodes = len(track["arc_lengths"])
     for key in ("X", "U"):
@@ -457,7 +425,7 @@ def validate_guess(
     if not corners:
         return True, "ok"
 
-    # Asserted rather than assumed: the corner check needs physical d/psi_err.
+    # Corner check needs physical d / psi_err.
     names = list(model.reduced_state_names())
     if names[:2] != ["d", "psi_err"]:
         return True, "ok (no d/psi_err to check)"

@@ -66,17 +66,17 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
         if value is not None:
             setattr(pipeline, field_name, value)
 
-    # On their own block, so applied by attribute rather than the table above.
+    # Event-block overrides.
     for arg_name, field_name in _AUTOX_OVERRIDES.items():
         value = getattr(args, arg_name)
         if value is not None:
             setattr(pipeline.autox, field_name, value)
 
-    # Out of the tables above: unset, it follows whichever event is selected.
+    # Mode-dependent default when unset.
     if args.initial_speed is not None:
         pipeline.initial_speed = args.initial_speed
 
-    # --reg-du-vec beats --reg-u, per its own help text.
+    # --reg-du-vec overrides --reg-u.
     if args.reg_du_vec is not None:
         pipeline.reg_u = [float(x) for x in args.reg_du_vec.split(",") if x.strip() != ""]
     elif args.reg_u is not None:

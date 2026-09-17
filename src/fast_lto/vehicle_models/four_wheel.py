@@ -19,7 +19,7 @@ class FourWheelModel(VehicleModel):
     Inputs (normalized rates):
         [Fx_fl_dot_norm, Fx_fr_dot_norm, Fx_rr_dot_norm, Fx_rl_dot_norm, delta_dot_norm]
 
-    Internal wheel ordering: FL=1, FR=2, RR=3, RL=4 (cyclic, matching branch 141).
+    Wheel order: FL, FR, RR, RL.
     """
 
     def __init__(self, params: dict | None = None) -> None:
@@ -44,7 +44,7 @@ class FourWheelModel(VehicleModel):
             "C_d": 1.58,
             "C_r": 0.15,
             "A_f": 1.2,
-            # Per-wheel Pacejka tire params
+            # Per-wheel Pacejka
             "B_fl": 9.0,
             "C_fl": 1.3,
             "D_fl": 1.4,
@@ -57,7 +57,7 @@ class FourWheelModel(VehicleModel):
             "B_rl": 9.0,
             "C_rl": 1.3,
             "D_rl": 1.4,
-            # Actuator rate limits (physical)
+            # Actuator rate limits
             "dFxmax": 1000.0,
             "ddeltamax": 1.3,
             # State bounds
@@ -71,7 +71,7 @@ class FourWheelModel(VehicleModel):
             "eps_friction_den": 5.0,
             "smoothmax_eps": 1e-3,
             "rk4_max_ds_m": 2.5,
-            # CG-level acceleration limits (None = disabled)
+            # CG accel limits (None = disabled)
             "a_long_max": None,
             "a_lat_max": None,
             # Bounds
@@ -81,9 +81,9 @@ class FourWheelModel(VehicleModel):
             "v_max": 20.0,
             "v_lat_max": 4.0,
             "yaw_rate_max": 3.0,
-            # Load transfer mode
+            # Load transfer
             "load_transfer_mode": "current_quasistatic",
-            # Body corners for lateral constraints (total vehicle envelope)
+            # Body corners
             "corners": [
                 ("FL", 1.809, 0.750),
                 ("FR", 1.809, -0.750),
@@ -223,7 +223,7 @@ class FourWheelModel(VehicleModel):
         if mode == "static_aero":
             return Fz_fl, Fz_fr, Fz_rr, Fz_rl
 
-        # ---- current_quasistatic: solve A * Fz = b ----
+        # current_quasistatic: A * Fz = b
         p = self.params
         h = float(p["h"])
         l_f = float(p["lf"])
@@ -372,13 +372,11 @@ class FourWheelModel(VehicleModel):
         m = float(p["m"])
         Iz = float(p["Iz"])
 
-        # Kinematics
         D_kappa = 1 - kappa * d
         s_dot = (v_long * ca.cos(psi_err) - v_lat * ca.sin(psi_err)) / D_kappa
         d_dot = v_long * ca.sin(psi_err) + v_lat * ca.cos(psi_err)
         psi_err_dot = yaw_rate - kappa * s_dot
 
-        # Vertical loads
         Fz_fl, Fz_fr, Fz_rr, Fz_rl = self._compute_vertical_loads(
             v_long,
             v_lat,
@@ -390,7 +388,6 @@ class FourWheelModel(VehicleModel):
             delta,
         )
 
-        # Slip angles & lateral forces
         alpha_fl, alpha_fr, alpha_rr, alpha_rl = self._slip_angles(
             v_long,
             v_lat,
@@ -408,10 +405,8 @@ class FourWheelModel(VehicleModel):
         Fy_rr = -Fz_rr * f_rr
         Fy_rl = -Fz_rl * f_rl
 
-        # Aero resistance
         _, F_drag, F_roll = self._aero_forces(v_long)
 
-        # Body forces and moment
         Fx_total, Fy_total, Mz = self._body_forces_and_moment(
             Fx_fl,
             Fx_fr,
@@ -426,12 +421,10 @@ class FourWheelModel(VehicleModel):
             F_roll,
         )
 
-        # Vehicle dynamics
         v_long_dot = Fx_total / m + yaw_rate * v_lat
         v_lat_dot = Fy_total / m - yaw_rate * v_long
         yaw_rate_dot = Mz / Iz
 
-        # Actuator dynamics
         dFxmax = float(p["dFxmax"])
         ddeltamax = float(p["ddeltamax"])
 
@@ -528,7 +521,7 @@ class FourWheelModel(VehicleModel):
             cap_sq = (D_i * Fz_i) ** 2 + eps_den
             g_list.append(Fx_i**2 / cap_sq + Fy_i**2 / cap_sq - 1)
 
-        # Optional CG-level acceleration constraint
+        # Optional CG accel limits
         a_long_max = p.get("a_long_max")
         a_lat_max = p.get("a_lat_max")
         if a_long_max is not None or a_lat_max is not None:
@@ -606,14 +599,11 @@ class FourWheelModel(VehicleModel):
     # ------------------------------------------------------------------ #
 
     def diagnostics(self, x_red: ca.MX, u: ca.MX) -> Dict[str, ca.MX]:
-        """Per-wheel loads, slip angles, forces and friction usage.
+        """Per-wheel loads, slip angles, forces, and friction usage.
 
-        Built from the same helpers the dynamics and constraints use, so a
-        plot of these is a plot of what the solver actually saw. In particular
-        the slip angles carry the same low-speed guard: showing the unguarded
-        ones would draw a curve the optimiser never optimised.
+        All diagnostic inputs are states for this model, so ``u`` is unused.
         """
-        del u  # this model carries every diagnostic input as a state
+        del u
         p = self.params
         v_long = x_red[2]
         v_lat = x_red[3]
@@ -638,8 +628,7 @@ class FourWheelModel(VehicleModel):
         Fy_rl = -Fz_rl * f_rl
 
         def _utilisation(Fx: ca.MX, Fy: ca.MX, Fz: ca.MX, D_key: str) -> ca.MX:
-            """Percent of the friction ellipse in use, floored so the ratio
-            stays finite where a wheel is momentarily unloaded."""
+            """Friction-ellipse usage in percent; Fz floored for a finite ratio."""
             cap = ca.fmax(float(p[D_key]) * Fz, 1.0)
             return ca.sqrt(Fx**2 + Fy**2) / cap * 100.0
 
@@ -647,7 +636,7 @@ class FourWheelModel(VehicleModel):
             Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta, Fy_fl, Fy_fr, Fy_rr, Fy_rl, F_drag, F_roll
         )
 
-        # The longitudinal share of the yaw moment, i.e. torque vectoring.
+        # Longitudinal (torque-vectoring) share of yaw moment.
         l_f = float(p["lf"])
         a_l, a_r = float(p["a_l"]), float(p["a_r"])
         cd, sd = ca.cos(delta), ca.sin(delta)

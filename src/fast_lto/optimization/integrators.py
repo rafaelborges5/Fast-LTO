@@ -1,22 +1,8 @@
-"""
-Space-domain integrators for the OCP.
+"""Space-domain integrators for the OCP.
 
-All integrators advance the reduced state (excluding *s*) by one spatial step:
-
-    x_{i+1} = step(f_space, x_i, u_i, kappa_i, ds)
-
-and provide a matching time-quadrature estimate for the same interval:
-
-    dt_i = time_step(f_space, eval_at_point, x_i, u_i, kappa_i, ds)
-
-where ``f_space(x, u, kappa)`` returns dx/ds (space derivatives of the reduced
-state) and ``eval_at_point(x, u, kappa)`` returns ``(full_state, s_dot)``.
-
-Both methods accept optional ``kappa_half`` and ``kappa_next`` for integrators
-(like RK4) that evaluate the dynamics at intermediate spatial positions:
-  - kappa_half : curvature at s_i + ds/2   (midpoint of the interval)
-  - kappa_next : curvature at s_{i+1}      (right endpoint of the interval)
-When omitted they default to ``kappa`` (left-endpoint zero-order hold).
+Advance the reduced state one spatial step and estimate ``dt = ∫ ds / ṡ``.
+Optional ``kappa_half`` / ``kappa_next`` for mid- and right-endpoint evaluations
+(RK4); omitted values default to left-endpoint ``kappa``.
 """
 
 from __future__ import annotations
