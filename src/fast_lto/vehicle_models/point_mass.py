@@ -18,7 +18,7 @@ from .vehicle_base import VehicleModel
 
 
 class PointMassModel(VehicleModel):
-    def __init__(self, params: dict | None = None):
+    def __init__(self, params: dict | None = None) -> None:
         defaults = self.get_default_params()
         if params is not None:
             defaults.update(params)

@@ -74,10 +74,10 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
         if value is not None:
             setattr(pipeline.autox, field_name, value)
 
-    # Not part of the tables above: an explicitly requested launch speed has to
-    # be pinned, or a `--mode` on the same command line re-derives it.
+    # Not part of the tables above only because it reads as a pair with the
+    # mode: an unset initial_speed follows whatever event is selected.
     if args.initial_speed is not None:
-        pipeline.set_initial_speed(args.initial_speed)
+        pipeline.initial_speed = args.initial_speed
 
     # --reg-du-vec beats --reg-u, per its own help text.
     if args.reg_du_vec is not None:

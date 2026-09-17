@@ -122,7 +122,7 @@ def load_boundaries(csv_path: Path) -> Dict[str, np.ndarray]:
     return out
 
 
-def _make_spline(s: np.ndarray, d: np.ndarray):
+def _make_spline(s: np.ndarray, d: np.ndarray) -> CubicSpline:
     """
     Internal fun for 1D splines d(s).
     """

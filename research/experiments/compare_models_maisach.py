@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import sys
 import time
-from pathlib import Path
 
 from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator
+from fast_lto.paths import default_data_root
 from fast_lto.vehicle_models import DynamicBicycleModel, FourWheelModel, PointMassModel
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = default_data_root()
 TRACK_PATH = REPO / "data" / "discretized" / "track_boundary_maisach_with_widths.json"
 SOLUTIONS_DIR = REPO / "data" / "experiments"
 

@@ -28,14 +28,17 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Literal, Tuple
+from typing import Literal, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import CubicSpline, make_interp_spline
+from scipy.interpolate import BSpline, CubicSpline, make_interp_spline
 from scipy.signal import savgol_filter
 
 from fast_lto.splines.discretized_track import DiscretizedTrack
+
+#: A fitted 1-D interpolator: CubicSpline for C2 fits, BSpline for C4.
+Spline1D = Union[CubicSpline, BSpline]
 
 ContinuityType = Literal["C2", "C4"]
 
@@ -234,7 +237,10 @@ def _fit_periodic_spline_c4(points: np.ndarray, t: np.ndarray) -> Tuple[object, 
 
 
 def _compute_arc_length_mapping(
-    spline_x, spline_y, t_max: float, num_integration_points: int = 10000
+    spline_x: Spline1D,
+    spline_y: Spline1D,
+    t_max: float,
+    num_integration_points: int = 10000,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute the mapping from parameter t to arc length s.
@@ -273,8 +279,8 @@ def _compute_arc_length_mapping(
 
 
 def _sample_at_arc_lengths(
-    spline_x,
-    spline_y,
+    spline_x: Spline1D,
+    spline_y: Spline1D,
     t_samples: np.ndarray,
     s_samples: np.ndarray,
     ds_m: float,
@@ -480,8 +486,8 @@ def fit_and_discretize(
 
 def _visualize_spline_fit(
     original_points: np.ndarray,
-    spline_x,
-    spline_y,
+    spline_x: Spline1D,
+    spline_y: Spline1D,
     t_max: float,
     track: DiscretizedTrack,
 ) -> None:

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -436,7 +436,7 @@ def _build_skidpad_lead_in(track_data: Dict, lead_in_m: float) -> Optional[Dict]
 
 
 def _autox_time_weights(
-    arc_lengths,
+    arc_lengths: Sequence[float] | np.ndarray,
     base_length_m: float,
     timing_offset_m: float,
     eps_time: float,
@@ -663,7 +663,7 @@ class AutoxMode(EventMode):
             plans.append(
                 SplicePlan(
                     segment=lead_in,
-                    speed=float(config.initial_speed),
+                    speed=config.launch_speed,
                     side="before",
                     # Sits before the timing gate, so it counts as timed under
                     # the same convention as the rest of the run-up.
@@ -746,13 +746,13 @@ class SkidpadMode(EventMode):
         return [
             SplicePlan(
                 segment=lead_in,
-                speed=float(config.initial_speed),
+                speed=config.launch_speed,
                 side="before",
                 # Sits before the gate, same as the entry straight it extends.
                 timed=0,
                 message=(
                     f"  Skidpad: prepended {config.skidpad.lead_in_m:.1f} m constant-speed "
-                    f"({config.initial_speed:.1f} m/s) lead-in "
+                    f"({config.launch_speed:.1f} m/s) lead-in "
                     f"({len(lead_in['arc_lengths'])} points, not part of the OCP solve)"
                 ),
             )

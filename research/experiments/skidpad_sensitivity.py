@@ -1,41 +1,37 @@
 from __future__ import annotations
 
 """
-One-at-a-time (OAT) lap-time sensitivity study for the trackdrive LTO.
+One-at-a-time (OAT) sensitivity study for the skidpad LTO.
 
-Track-agnostic: defaults to the FSCZ boundary but ``--track-id`` selects any
-track under ``data/tracks/{track_id}.csv``.  We perturb each parameter
-individually by a fixed relative amount around the baseline config, re-solve the
-four-wheel OCP (euler integrator, trackdrive mode), and measure how the lap time
-(``profiling.lap_time_s``) moves.  Cross-parameter ranking uses the dimensionless
-*elasticity*
+The objective of interest is the FS *score*: the average of the two timed-lap
+times (``profiling.skidpad_score_s``).  We perturb each parameter individually
+by a fixed relative amount around the baseline config, re-solve the four-wheel
+OCP, and measure how the score moves.  Cross-parameter ranking uses the
+dimensionless *elasticity*
 
-    E = (dlap / lap_base) / (dp / p_base)
+    E = (dscore / score_base) / (dp / p_base)
 
-estimated from a centred low/high pair, so a value of e.g. ``-0.8`` means a +1%
-increase in the parameter lowers the lap time by 0.8%.
-
-The absolute lap-time calculation is known to be slightly off, but that is
-irrelevant here: every solve uses the identical method, so relative
-sensitivities are consistent.
+estimated from a centred low/high pair, so a value of e.g. ``-0.8`` means a
++1% increase in the parameter lowers the average lap time by 0.8%.
 
 Parameters studied (four-wheel model only):
-    v_max            top-speed bound
-    D_front          front tyre peak-grip (D_fl and D_fr scaled together)
+    m                mass
+    Iz               yaw inertia
+    reg_u_l2         L2 input-magnitude regularisation weight
     D_rear           rear tyre peak-grip (D_rr and D_rl scaled together)
-    dFxmax           per-wheel longitudinal force-rate limit
     boundary_margin  corridor shrink margin on each side
+    C_l              aero downforce coefficient (baseline 5.54)
+    D_front          front tyre peak-grip (D_fl and D_fr) -- for front/rear contrast
+    C_d              aero drag coefficient
+    h                CG height (drives longitudinal/lateral load transfer)
 
 Usage (from repo root):
-    PYTHONPATH=src python src/experiments/fscz_sensitivity.py \
-        --config configs/trackdrive.yaml --track-id fscz25_track_boundary \
-        --delta 0.15 --jobs 4
+    PYTHONPATH=src python src/experiments/skidpad_sensitivity.py \
+        --config configs/skidpad.yaml --delta 0.15 --jobs 4
 
-Outputs (under data/sensitivity/ by default; {track_id} prefixes every file):
-    {track_id}_sensitivity.csv           one row per solve (baseline + perturbations)
-    {track_id}_sensitivity.png           tornado plot ranked by |swing|
-    {track_id}_sensitivity_curves.png    per-knob lap-time response curves
-    {track_id}_sensitivity_summary.json  machine-readable summary
+Outputs (under data/sensitivity/ by default):
+    skidpad_sensitivity.csv     one row per solve (baseline + perturbations)
+    skidpad_sensitivity.png     tornado plot ranked by |elasticity|
 """
 
 import argparse
@@ -53,14 +49,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fast_lto.config import RunConfig
-from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save
+from fast_lto.optimization.global_ocp import solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator
-from fast_lto.pipeline import PipelineConfig, run_pipeline
+from fast_lto.paths import default_data_root
+from fast_lto.pipeline import PipelineConfig, _resolve_path
 from fast_lto.vehicle_models.four_wheel import FourWheelModel
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return default_data_root()
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +68,7 @@ def _repo_root() -> Path:
 # where the value lives:
 #   "model"  -> override one or more keys in the four-wheel params dict
 #   "solve"  -> override a keyword argument to solve_ocp_and_save
-# ``keys`` lists every param the knob scales together (e.g. both front D's).
+# ``keys`` lists every param the knob scales together (e.g. both rear D's).
 
 
 @dataclass(frozen=True)
@@ -83,11 +80,15 @@ class Knob:
 
 
 KNOBS: List[Knob] = [
-    Knob("v_max", "model", ("v_max",), "top speed v_max"),
-    Knob("D_front", "model", ("D_fl", "D_fr"), "front grip D_front"),
+    Knob("m", "model", ("m",), "mass m"),
+    Knob("Iz", "model", ("Iz",), "yaw inertia Iz"),
+    Knob("reg_u_l2", "solve", ("reg_u_l2",), "reg_u_l2"),
     Knob("D_rear", "model", ("D_rr", "D_rl"), "rear grip D_rear"),
-    Knob("dFxmax", "model", ("dFxmax",), "force rate dFxmax"),
     Knob("boundary_margin", "solve", ("boundary_margin",), "margin"),
+    Knob("C_l", "model", ("C_l",), "downforce C_l"),
+    Knob("D_front", "model", ("D_fl", "D_fr"), "front grip D_front"),
+    Knob("C_d", "model", ("C_d",), "drag C_d"),
+    Knob("h", "model", ("h",), "CG height h"),
 ]
 
 
@@ -99,38 +100,56 @@ KNOBS: List[Knob] = [
 @dataclass
 class Baseline:
     track: Dict[str, Any]
+    time_weights: np.ndarray
     model_params: Dict[str, Any]
     integrator_name: str
     initial_speed: float
     reg_du: Any
     reg_u_l2: Optional[float]
     boundary_margin: float
+    terminal_speed: Optional[float]
     normalize: bool
 
 
-def _build_baseline(config_path: Path, track_id: str) -> Baseline:
-    """Build the track once and gather all baseline solve inputs."""
+def _build_baseline(config_path: Path) -> Baseline:
+    """Build the skidpad track once and gather all baseline solve inputs."""
+    from fast_lto.tracks.skidpad import build_skidpad_track
+
     rc = RunConfig.from_yaml(config_path)
     rc.validate_for_model()
     pc: PipelineConfig = rc.to_pipeline_config()
     pc.repo_root = _repo_root()
-    pc.track_id = track_id
     pc.__post_init__()
 
-    # Build the track-with-widths JSON once (track -> spline -> bounds).
-    run_pipeline(pc, start_from="track", end_at="bounds")
-    track = load_track_with_widths(pc.track_with_widths_path)
+    map_csv = _resolve_path(pc.repo_root, pc.skidpad_map_csv)
+    ref_csv = _resolve_path(pc.repo_root, pc.skidpad_reference_csv)
+    start_xy = (pc.skidpad_start_x, pc.skidpad_start_y) if pc.skidpad_start_x is not None else None
+    track = build_skidpad_track(
+        map_csv=map_csv,
+        ref_csv=ref_csv,
+        ds_m=pc.ds_m,
+        entry_exit_halfwidth=pc.entry_exit_halfwidth,
+        kappa_blend_m=pc.kappa_blend_m,
+        start_xy=start_xy,
+    )
+
+    mask = np.asarray(track["timed_mask"], dtype=float)
+    decel = np.asarray(track.get("decel_mask", np.zeros_like(mask)), dtype=float)
+    time_weights = np.where(mask > 0.5, 1.0, float(pc.eps_time))
+    time_weights = np.where(decel > 0.5, 0.0, time_weights)
 
     model_params = rc.vehicle.build_model_params("four_wheel")
 
     return Baseline(
         track=track,
+        time_weights=time_weights,
         model_params=model_params,
         integrator_name=pc.integrator_name,
         initial_speed=float(pc.initial_speed),
         reg_du=pc.reg_u,
         reg_u_l2=pc.reg_u_l2,
         boundary_margin=float(pc.boundary_margin),
+        terminal_speed=pc.terminal_speed,
         normalize=bool(pc.normalize_states_and_inputs),
     )
 
@@ -145,13 +164,14 @@ def _make_integrator(name: str):
 
 
 def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
-    """Solve one perturbed configuration and return the lap time + metadata.
+    """Solve one perturbed configuration and return the score + metadata.
 
     ``job`` carries the baseline payload plus the model/solve overrides for this
     run.  Runs as a worker process, so everything in it must be picklable.
     """
     base: Baseline = job["baseline"]
     model_overrides: Dict[str, Any] = job["model_overrides"]
+    reg_u_l2 = job["reg_u_l2"]
     boundary_margin = job["boundary_margin"]
     tag = job["tag"]
 
@@ -170,18 +190,19 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
             integrator=integrator,
             initial_speed=base.initial_speed,
             reg_du=base.reg_du,
-            reg_u_l2=base.reg_u_l2,
+            reg_u_l2=reg_u_l2,
             run_config={"tag": tag},
             use_normalization=base.normalize,
             solver_verbose=False,
             boundary_margin=boundary_margin,
-            mode="trackdrive",
-            time_weights=None,
-            terminal_speed=None,
+            mode="skidpad",
+            time_weights=base.time_weights,
+            terminal_speed=base.terminal_speed,
         )
         prof = sol.get("profiling", {})
         result = {
-            "score_s": prof.get("lap_time_s"),
+            "score_s": prof.get("skidpad_score_s"),
+            "timed_time_s": prof.get("pure_timed_time_s"),
             "full_time_s": prof.get("lap_time_s"),
             "status": prof.get("return_status"),
             "solve_time_s": prof.get("solve_time_s"),
@@ -190,6 +211,7 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:  # keep the sweep alive on a single failure
         result = {
             "score_s": None,
+            "timed_time_s": None,
             "full_time_s": None,
             "status": f"ERROR: {type(exc).__name__}: {exc}",
             "solve_time_s": None,
@@ -220,6 +242,8 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
 def _baseline_value(base: Baseline, knob: Knob) -> float:
     if knob.kind == "model":
         return float(base.model_params[knob.keys[0]])
+    if knob.name == "reg_u_l2":
+        return float(base.reg_u_l2 if base.reg_u_l2 is not None else 0.0)
     if knob.name == "boundary_margin":
         return float(base.boundary_margin)
     raise ValueError(f"Unhandled knob {knob.name}")
@@ -235,11 +259,14 @@ def _make_job(
     new_val = base_val * multiplier
 
     model_overrides: Dict[str, Any] = {}
+    reg_u_l2 = base.reg_u_l2
     boundary_margin = base.boundary_margin
 
     if knob.kind == "model":
         for k in knob.keys:
             model_overrides[k] = float(base.model_params[k]) * multiplier
+    elif knob.name == "reg_u_l2":
+        reg_u_l2 = new_val
     elif knob.name == "boundary_margin":
         boundary_margin = new_val
 
@@ -250,6 +277,7 @@ def _make_job(
         "param_value": new_val,
         "multiplier": multiplier,
         "model_overrides": model_overrides,
+        "reg_u_l2": reg_u_l2,
         "boundary_margin": boundary_margin,
         "scratch_dir": str(scratch_dir),
         "tag": tag,
@@ -263,6 +291,7 @@ def _baseline_job(base: Baseline, scratch_dir: Path) -> Dict[str, Any]:
         "param_value": float("nan"),
         "multiplier": 1.0,
         "model_overrides": {},
+        "reg_u_l2": base.reg_u_l2,
         "boundary_margin": base.boundary_margin,
         "scratch_dir": str(scratch_dir),
         "tag": "baseline",
@@ -289,6 +318,7 @@ def _write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
         "multiplier",
         "param_value",
         "score_s",
+        "timed_time_s",
         "full_time_s",
         "status",
         "solve_time_s",
@@ -306,7 +336,6 @@ def _tornado_plot(
     summary: List[Dict[str, Any]],
     score_base: float,
     delta: float,
-    track_id: str,
 ) -> None:
     # Rank by absolute lap-time swing (seconds), most influential at the top.
     summary = sorted(summary, key=lambda d: abs(d["swing_s"]), reverse=True)
@@ -333,10 +362,10 @@ def _tornado_plot(
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
     ax.invert_yaxis()
-    ax.set_xlabel(f"change in lap time [s]  (baseline = {score_base:.3f} s)")
+    ax.set_xlabel(f"change in average timed-lap score [s]  (baseline = {score_base:.3f} s)")
     ax.set_title(
-        f"{track_id} trackdrive lap-time sensitivity (OAT, +-{delta*100:.0f}% per parameter)\n"
-        "annotation E = elasticity (dlap%/dparam%); |swing| sets the ranking"
+        f"Skidpad score sensitivity (OAT, +-{delta*100:.0f}% per parameter)\n"
+        "annotation E = elasticity (dscore%/dparam%); |swing| sets the ranking"
     )
     ax.legend(loc="lower right")
     ax.grid(True, axis="x", ls="--", alpha=0.3)
@@ -346,48 +375,12 @@ def _tornado_plot(
     plt.close(fig)
 
 
-def _response_curves(
-    path: Path,
-    summary: List[Dict[str, Any]],
-    score_base: float,
-    delta: float,
-    track_id: str,
-) -> None:
-    """Small-multiples: lap time vs each param at lo/base/hi (linearity check)."""
-    n = len(summary)
-    ncols = min(3, n)
-    nrows = int(np.ceil(n / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows), squeeze=False)
-    for idx, d in enumerate(summary):
-        ax = axes[idx // ncols][idx % ncols]
-        base_val = d["base_value"]
-        xs = [base_val * (1.0 - delta), base_val, base_val * (1.0 + delta)]
-        ys = [d["score_lo"], score_base, d["score_hi"]]
-        ax.plot(xs, ys, "-o", color="tab:blue", zorder=2)
-        ax.scatter([base_val], [score_base], color="k", zorder=3, label="baseline")
-        ax.set_title(f"{d['label']}  (E={d['elasticity']:+.2f})", fontsize=10)
-        ax.set_xlabel("parameter value")
-        ax.set_ylabel("lap time [s]")
-        ax.grid(True, ls="--", alpha=0.3)
-        ax.legend(loc="best", fontsize=8)
-    # Hide any unused axes.
-    for j in range(n, nrows * ncols):
-        axes[j // ncols][j % ncols].axis("off")
-    fig.suptitle(
-        f"{track_id} lap-time response curves (OAT, +-{delta*100:.0f}%, baseline = {score_base:.3f} s)"
-    )
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=160)
-    plt.close(fig)
-
-
-def run(config_path: Path, track_id: str, delta: float, jobs: int, out_dir: Path) -> None:
+def run(config_path: Path, delta: float, jobs: int, out_dir: Path) -> None:
     scratch_dir = out_dir / "_scratch"
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Building track '{track_id}' and baseline from {config_path} ...")
-    base = _build_baseline(config_path, track_id)
+    print(f"Building skidpad track and baseline from {config_path} ...")
+    base = _build_baseline(config_path)
 
     multipliers = (1.0 - delta, 1.0 + delta)
     all_jobs: List[Dict[str, Any]] = [_baseline_job(base, scratch_dir)]
@@ -404,12 +397,12 @@ def run(config_path: Path, track_id: str, delta: float, jobs: int, out_dir: Path
     if jobs <= 1:
         for j in all_jobs:
             r = _solve_one(j)
-            print(f"  [{r['tag']:>22}] lap={r['score_s']} status={r['status']}")
+            print(f"  [{r['tag']:>22}] score={r['score_s']} status={r['status']}")
             results.append(r)
     else:
         with ProcessPoolExecutor(max_workers=jobs) as ex:
             for r in ex.map(_solve_one, all_jobs):
-                print(f"  [{r['tag']:>22}] lap={r['score_s']} status={r['status']}")
+                print(f"  [{r['tag']:>22}] score={r['score_s']} status={r['status']}")
                 results.append(r)
 
     by_tag = {r["tag"]: r for r in results}
@@ -439,29 +432,22 @@ def run(config_path: Path, track_id: str, delta: float, jobs: int, out_dir: Path
             }
         )
 
-    prefix = f"{track_id}_sensitivity"
-
     # CSV with every raw solve.
-    csv_path = out_dir / f"{prefix}.csv"
+    csv_path = out_dir / "skidpad_sensitivity.csv"
     _write_csv(csv_path, results)
 
     # Tornado plot.
-    png_path = out_dir / f"{prefix}.png"
-    _tornado_plot(png_path, summary, score_base, delta, track_id)
-
-    # Per-knob response curves.
-    curves_path = out_dir / f"{prefix}_curves.png"
-    _response_curves(curves_path, summary, score_base, delta, track_id)
+    png_path = out_dir / "skidpad_sensitivity.png"
+    _tornado_plot(png_path, summary, score_base, delta)
 
     # JSON summary for programmatic use.
-    json_path = out_dir / f"{prefix}_summary.json"
+    json_path = out_dir / "skidpad_sensitivity_summary.json"
     with json_path.open("w") as f:
         json.dump(
             {
                 "config": str(config_path),
-                "track_id": track_id,
                 "delta": delta,
-                "lap_time_base_s": score_base,
+                "score_base_s": score_base,
                 "knobs": summary,
             },
             f,
@@ -471,9 +457,9 @@ def run(config_path: Path, track_id: str, delta: float, jobs: int, out_dir: Path
     # Console ranking.
     ranked = sorted(summary, key=lambda d: abs(d["swing_s"]), reverse=True)
     print("\n" + "=" * 78)
-    print(f"Baseline lap time: {score_base:.4f} s   (+-{delta*100:.0f}% OAT, track={track_id})")
+    print(f"Baseline average timed-lap score: {score_base:.4f} s   (+-{delta*100:.0f}% OAT)")
     print("=" * 78)
-    hdr = f"{'parameter':<18}{'base':>10}{'lap-':>10}{'lap+':>10}{'swing[s]':>11}{'elasticity':>12}"
+    hdr = f"{'parameter':<18}{'base':>10}{'score-':>10}{'score+':>10}{'swing[s]':>11}{'elasticity':>12}"
     print(hdr)
     print("-" * 78)
     for d in ranked:
@@ -490,7 +476,7 @@ def run(config_path: Path, track_id: str, delta: float, jobs: int, out_dir: Path
         f"(|swing| = {abs(top['swing_s']):.4f} s over +-{delta*100:.0f}%, "
         f"elasticity = {top['elasticity']:+.3f})."
     )
-    print(f"\nWrote:\n  {csv_path}\n  {png_path}\n  {curves_path}\n  {json_path}")
+    print(f"\nWrote:\n  {csv_path}\n  {png_path}\n  {json_path}")
 
     # Tidy scratch.
     try:
@@ -505,13 +491,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--config", type=Path, default=_repo_root() / "configs" / "trackdrive.yaml")
-    ap.add_argument(
-        "--track-id",
-        type=str,
-        default="fscz25_track_boundary",
-        help="Track under data/tracks/{track_id}.csv. Default fscz25_track_boundary.",
-    )
+    ap.add_argument("--config", type=Path, default=_repo_root() / "configs" / "skidpad.yaml")
     ap.add_argument(
         "--delta",
         type=float,
@@ -526,7 +506,7 @@ def main() -> None:
         help="Output directory for CSV/PNG/JSON.",
     )
     args = ap.parse_args()
-    run(args.config, args.track_id, args.delta, args.jobs, args.out_dir)
+    run(args.config, args.delta, args.jobs, args.out_dir)
 
 
 if __name__ == "__main__":

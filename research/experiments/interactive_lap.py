@@ -17,7 +17,9 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-REPO = Path(__file__).resolve().parents[3]
+from fast_lto.paths import default_data_root
+
+REPO = default_data_root()
 
 
 def _compute_derived(sol, params):

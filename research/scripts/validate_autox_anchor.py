@@ -30,8 +30,9 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+from fast_lto.paths import default_data_root
 
+REPO = default_data_root()
 from fast_lto.config import RunConfig  # noqa: E402
 from fast_lto.optimization.global_ocp import load_track_with_widths  # noqa: E402
 from fast_lto.pipeline import _extend_track_for_autox, run_pipeline  # noqa: E402

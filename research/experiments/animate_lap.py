@@ -21,9 +21,9 @@ import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.transforms import Affine2D
 
-REPO = Path(__file__).resolve().parents[3]
+from fast_lto.paths import default_data_root
 
-
+REPO = default_data_root()
 # ── Racecar shape ────────────────────────────────────────────────────
 
 

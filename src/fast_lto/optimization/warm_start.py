@@ -29,11 +29,12 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
 from fast_lto.utils.corridor import D_KAPPA_FLOOR
+from fast_lto.vehicle_models.vehicle_base import VehicleModel
 
 SEEDS_DIRNAME = "_seeds"
 INDEX_FILENAME = "index.json"
@@ -81,7 +82,7 @@ class SeedMatch:
 # --------------------------------------------------------------------------- #
 #  Signatures
 # --------------------------------------------------------------------------- #
-def _round_floats(obj, ndigits: int = 12):
+def _round_floats(obj: Any, ndigits: int = 12) -> Any:
     """Recursively round floats so float noise never changes a signature."""
     if isinstance(obj, float):
         return round(obj, ndigits)
@@ -119,10 +120,10 @@ def seed_signature(
     normalize_states_and_inputs: bool,
     boundary_margin: float,
     track: Dict,
-    model,
+    model: VehicleModel,
     model_params: Optional[Dict] = None,
-    reg_u=None,
-    reg_u_l2=None,
+    reg_u: Union[float, Sequence[float], None] = None,
+    reg_u_l2: Union[float, Sequence[float], None] = None,
     initial_speed: Optional[float] = None,
     terminal_speed: Optional[float] = None,
     eps_time: Optional[float] = None,
@@ -364,7 +365,7 @@ def find_seed(
 def resample_guess(
     solution: Dict,
     track: Dict,
-    model,
+    model: VehicleModel,
     use_normalization: bool,
 ) -> Dict[str, np.ndarray]:
     """Map a previous solution onto this OCP's node grid, in solver units.
@@ -448,7 +449,7 @@ def corner_slacks(
 def validate_guess(
     guess: Dict[str, np.ndarray],
     track: Dict,
-    model,
+    model: VehicleModel,
     boundary_margin: float,
     corners: Optional[Sequence] = None,
     max_corner_violation_m: float = 0.5,

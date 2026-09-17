@@ -53,6 +53,7 @@ from fast_lto.optimization.global_ocp import (  # noqa: E402
 )
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator  # noqa: E402
 from fast_lto.optimization.warm_start import resample_guess  # noqa: E402
+from fast_lto.paths import default_data_root
 from fast_lto.pipeline import (  # noqa: E402
     PipelineConfig,
     _autox_time_weights,
@@ -61,7 +62,7 @@ from fast_lto.pipeline import (  # noqa: E402
 )
 from fast_lto.vehicle_models.four_wheel import FourWheelModel  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = default_data_root()
 OUT_DIR = REPO / "data" / "experiments" / "warm_start"
 
 

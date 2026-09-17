@@ -22,7 +22,20 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Literal, Optional, Tuple, get_args
+from types import ModuleType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    get_args,
+)
 
 import numpy as np
 
@@ -49,6 +62,11 @@ from fast_lto.vehicle_models import (
     VehicleModel,
 )
 from fast_lto.visualization.panels import render_panels
+
+if TYPE_CHECKING:
+    # Imported for typing only: config imports pipeline, so a runtime import
+    # here would be circular.
+    from fast_lto.config import VehicleConfig
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
 WarmStartPolicy = Literal["off", "auto", "ladder"]
@@ -94,8 +112,12 @@ class PipelineConfig:
 
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
-    reg_u: float = 600.0
+    # A scalar weight, or one per input (see --reg-du-vec).
+    reg_u: Union[float, Sequence[float]] = 600.0
     reg_u_l2: float | None = None
+    # None means "follow the mode" -- see the launch_speed property, which
+    # resolves it. Named as a request rather than a value because that is what
+    # it is: the resolved number is never None.
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
     # Per-event settings, each owned by its EventMode (see modes.py). Only the
@@ -124,23 +146,13 @@ class PipelineConfig:
     warm_start_max_seeds: int = 50
     warm_start_seed: Optional[str] = None
 
-    vehicle_config: Optional[object] = None
-
-    # True while `initial_speed` still holds a value derived from `mode` rather
-    # than one the caller asked for. Lets __post_init__ be re-run after a field
-    # changes (see RunConfig.to_pipeline_config) and re-derive the speed for the
-    # new mode, instead of silently keeping the old mode's default.
-    _initial_speed_from_mode: bool = field(default=False, repr=False)
+    vehicle_config: Optional["VehicleConfig"] = None
 
     def __post_init__(self) -> None:
         if self.mode not in ("autox", "trackdrive", "skidpad"):
             raise ValueError(
                 f"Unknown mode: {self.mode!r}. Must be 'autox', 'trackdrive' or 'skidpad'."
             )
-
-        if self.initial_speed is None or self._initial_speed_from_mode:
-            self.initial_speed = 5.0 if self.mode == "trackdrive" else 3.0
-            self._initial_speed_from_mode = True
 
         if self.warm_start not in WARM_START_POLICIES:
             raise ValueError(
@@ -158,17 +170,22 @@ class PipelineConfig:
         self.output_trajectories_dir = self.repo_root / "data" / "output_trajectories"
         self.plots_dir = self.repo_root / "ocp_plots"
 
-    def set_initial_speed(self, speed: float) -> None:
-        """Pin the launch speed to a value the caller chose.
+    @property
+    def launch_speed(self) -> float:
+        """Speed the trajectory starts at, in m/s.
 
-        Plain assignment to ``initial_speed`` is not enough when the config is
-        re-initialised afterwards (see ``RunConfig.to_pipeline_config``): if the
-        current value came from ``mode``, re-running ``__post_init__`` derives it
-        again and overwrites the assignment. Going through here says the value is
-        the caller's, so the mode never reclaims it.
+        ``initial_speed`` is the request: ``None`` means "whatever this event
+        starts at". This is the answer, and unlike the field it is never
+        ``None``, so callers do not have to re-narrow it at every use.
+
+        Derived on access for the same reason ``track_csv_path`` is. It used to
+        be written into ``initial_speed`` by ``__post_init__``, which needed a
+        private flag and a setter to survive being re-run after ``mode``
+        changed -- three pieces of machinery for what is one expression.
         """
-        self.initial_speed = float(speed)
-        self._initial_speed_from_mode = False
+        if self.initial_speed is not None:
+            return float(self.initial_speed)
+        return 5.0 if self.mode == "trackdrive" else 3.0
 
     @property
     def track_csv_path(self) -> Path:
@@ -183,7 +200,7 @@ class PipelineConfig:
         ``--track-id`` flag therefore renamed every output while still reading
         the *previous* id's CSV -- a silently wrong answer rather than an error.
 
-        The same hazard is why ``initial_speed`` needs ``set_initial_speed``:
+        ``launch_speed`` above is derived the same way, for the same reason:
         anything ``__post_init__`` derives must either be re-derivable or know
         it was set deliberately.
         """
@@ -319,7 +336,7 @@ def step_compute_bounds(
     return result
 
 
-def _make_model(model_name: str, vehicle_config=None) -> VehicleModel:
+def _make_model(model_name: str, vehicle_config: Optional["VehicleConfig"] = None) -> VehicleModel:
     if vehicle_config is not None:
         params = vehicle_config.build_model_params(model_name)
     else:
@@ -381,7 +398,7 @@ def _splice_segment(
     """
     n = len(segment["arc_lengths"])
 
-    def splice(existing, addition):
+    def splice(existing: Sequence[Any], addition: Sequence[Any]) -> List[Any]:
         if side == "before":
             return list(addition) + list(existing)
         return list(existing) + list(addition)
@@ -489,7 +506,7 @@ def _seed_signature_for(
         model=model,
         reg_u=config.reg_u,
         reg_u_l2=config.reg_u_l2,
-        initial_speed=config.initial_speed,
+        initial_speed=config.launch_speed,
         **mode.seed_kwargs(config),
     )
 
@@ -529,9 +546,9 @@ def _plan_ladder(
     step = max(float(config.warm_start_ladder_step), 1e-3)
     # Drop a rung that would sit right on top of the target: solving twice at
     # essentially the same margin buys nothing.
-    rungs = [m for m in np.arange(start, target, step) if target - m > 0.5 * step]
+    rungs = [float(m) for m in np.arange(start, target, step) if target - m > 0.5 * step]
     rungs.append(target)
-    return [float(m) for m in rungs]
+    return rungs
 
 
 def _solve_once(
@@ -539,7 +556,7 @@ def _solve_once(
     track_data: Dict,
     model: VehicleModel,
     integrator: SpaceIntegrator,
-    time_weights,
+    time_weights: Optional[np.ndarray],
     solution_path: Path,
     run_config: Optional[Dict],
     boundary_margin: float,
@@ -551,7 +568,7 @@ def _solve_once(
         model=model,
         solution_path=solution_path,
         integrator=integrator,
-        initial_speed=config.initial_speed,
+        initial_speed=config.launch_speed,
         reg_du=config.reg_u,
         reg_u_l2=config.reg_u_l2,
         run_config=run_config,
@@ -566,7 +583,11 @@ def _solve_once(
 
 
 def _save_seed_quietly(
-    ws, seeds_root: Path, signature: Dict, solution: Dict, max_seeds: int
+    ws: ModuleType,
+    seeds_root: Path,
+    signature: Dict,
+    solution: Dict,
+    max_seeds: int,
 ) -> None:
     """Store a seed, but never let a cache write throw away a good solve."""
     try:
@@ -580,7 +601,7 @@ def _solve_with_warm_start(
     track_data: Dict,
     model: VehicleModel,
     integrator: SpaceIntegrator,
-    time_weights,
+    time_weights: Optional[np.ndarray],
     solution_path: Path,
     run_config: Dict,
     mode: EventMode,
@@ -741,7 +762,7 @@ def _solve_with_warm_start(
 def _print_mode_summary(
     config: PipelineConfig,
     track_data: Dict,
-    time_weights,
+    time_weights: Optional[np.ndarray],
 ) -> None:
     """Print what the mode did to the problem, if it had anything to say."""
     for line in get_mode(config.mode).summary(config, track_data, time_weights):
@@ -790,11 +811,14 @@ def step_solve_ocp(
     )
     track_num_points = int(track_data.get("num_points", len(track_data.get("arc_lengths", []))))
 
-    # Note: reg_u may be a scalar or a sequence (for per-input weights).
-    if isinstance(config.reg_u, (list, tuple, np.ndarray)):
-        reg_du_for_sig = [float(v) for v in config.reg_u]
-    else:
+    # reg_u may be a scalar or one weight per input.
+    # Tested for the scalar case rather than the sequence one: a Sequence is
+    # open-ended, so excluding list/tuple/ndarray does not leave a float.
+    reg_du_for_sig: Union[float, List[float]]
+    if isinstance(config.reg_u, (int, float)):
         reg_du_for_sig = float(config.reg_u)
+    else:
+        reg_du_for_sig = [float(v) for v in config.reg_u]
 
     run_config = {
         "track_id": config.track_id,
@@ -805,7 +829,7 @@ def step_solve_ocp(
         "continuity": str(config.continuity),
         "integrator_name": config.integrator_name,
         "reg_du": reg_du_for_sig,
-        "initial_speed": float(config.initial_speed),
+        "initial_speed": config.launch_speed,
         "normalize_states_and_inputs": bool(config.normalize_states_and_inputs),
         "solver_verbose": bool(config.solver_verbose),
         "use_savgol_bounds": bool(config.use_savgol_bounds),

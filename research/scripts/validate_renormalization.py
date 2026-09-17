@@ -17,8 +17,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+from fast_lto.paths import default_data_root
 
+REPO_ROOT = default_data_root()
 from fast_lto.export.trajectory import export_reference_trajectory
 
 

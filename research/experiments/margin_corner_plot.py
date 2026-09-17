@@ -11,13 +11,13 @@ Usage:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
+from fast_lto.paths import default_data_root
 
+REPO = default_data_root()
 from fast_lto.optimization.global_ocp import solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator
 from fast_lto.splines.spline_fitter import fit_and_discretize

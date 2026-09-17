@@ -9,13 +9,13 @@ limited, so margin (track width) does not change its speed.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
+from fast_lto.paths import default_data_root
 
+REPO = default_data_root()
 SOL = REPO / "data" / "experiments" / "margin_sweep_corner_v27_clean"
 OUT = REPO / "ocp_plots" / "maisach_extras"
 MARGINS = [0.12, 0.25, 0.37, 0.50]

@@ -17,7 +17,9 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-REPO = Path(__file__).resolve().parents[1]
+from fast_lto.paths import default_data_root
+
+REPO = default_data_root()
 
 
 def corner_slacks(d, psi, kappa, w_left, w_right, corners):

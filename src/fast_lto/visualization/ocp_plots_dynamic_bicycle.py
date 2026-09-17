@@ -35,7 +35,7 @@ def plot_tire_and_yaw_diagnostics(
     diagnostics: Dict[str, np.ndarray],
     out_path: Optional[Path] = None,
     show: bool = True,
-):
+) -> None:
     """
     Compact diagnostics plot (3 stacked panels):
     1) slip angles alpha_f, alpha_r
@@ -90,7 +90,7 @@ def plot_inputs_dynamic_bicycle(
     show: bool = True,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
-):
+) -> None:
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(8, 3))
 
@@ -131,7 +131,7 @@ def plot_gg_dynamic_bicycle(
     show: bool = True,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
-):
+) -> None:
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(4, 4))
 
@@ -252,7 +252,7 @@ def plot_all_panels_dynamic_bicycle(
     timed_mask: Optional[np.ndarray] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
-):
+) -> None:
     a_lat = diagnostics["a_lat_tires"]
     mu = float(params.get("mu", 1.2))
     g_val = float(params.get("g", 9.81))

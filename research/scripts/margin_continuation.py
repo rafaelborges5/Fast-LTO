@@ -19,8 +19,9 @@ import json
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+from fast_lto.paths import default_data_root
 
+REPO = default_data_root()
 from fast_lto.config import RunConfig  # noqa: E402
 from fast_lto.optimization.global_ocp import (  # noqa: E402
     load_track_with_widths,

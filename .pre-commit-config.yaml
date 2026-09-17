@@ -21,5 +21,29 @@ repos:
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        # Only the package: research/ is analysis code, reviewed separately.
+        files: ^src/fast_lto/
+        additional_dependencies:
+          - numpy>=2.0.0
+          - types-PyYAML>=6.0.0
+
+  # The fast subset, so a commit stays quick. CI runs the full sweep including
+  # the golden solves marked `slow`.
+  - repo: local
+    hooks:
+      - id: pytest-fast
+        name: pytest (excluding slow solves)
+        entry: pytest -q -m "not slow"
+        language: system
+        pass_filenames: false
+        types: [python]
 
 

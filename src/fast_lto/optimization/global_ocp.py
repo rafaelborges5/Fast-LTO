@@ -4,7 +4,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, NamedTuple, Sequence, Tuple
 
 import casadi as ca
 import numpy as np
@@ -65,7 +65,7 @@ def _apply_terminal_window(
             opti.subject_to(X[i, idx] <= hi)
 
 
-def _safe_debug_value(opti: ca.Opti, expr) -> np.ndarray | float | None:
+def _safe_debug_value(opti: ca.Opti, expr: ca.MX) -> np.ndarray | float | None:
     """Return opti.debug.value(expr) as plain Python/numpy, or None on failure."""
     try:
         val = opti.debug.value(expr)
@@ -74,6 +74,49 @@ def _safe_debug_value(opti: ca.Opti, expr) -> np.ndarray | float | None:
     arr = np.array(val)
     if arr.size == 1:
         return float(arr.reshape(-1)[0])
+    return arr
+
+
+class BuiltOcp(NamedTuple):
+    """Everything ``build_ocp`` hands back.
+
+    Was a bare nine-tuple that the caller unpacked positionally, so the reader
+    had to count commas to find out which expression was which. Unpacks exactly
+    the same way.
+    """
+
+    opti: ca.Opti
+    X: ca.MX
+    U: ca.MX
+    params: Dict[str, ca.MX]
+    objective: ca.MX
+    total_time: ca.MX
+    objective_time: ca.MX
+    pure_timed_time: ca.MX
+    cumulative_time: ca.MX
+
+
+def _per_input_weights(
+    weight: float | Sequence[float] | np.ndarray | None,
+    nu: int,
+    name: str,
+    *,
+    default: float,
+) -> np.ndarray:
+    """Broadcast a regularisation weight to one value per input.
+
+    Accepts a scalar, a sequence of length ``nu``, or None for the default.
+    Replaces a pair of ``np.isscalar`` branches that duplicated the broadcast
+    and only length-checked one of the two weights.
+    """
+    if weight is None:
+        return np.full(nu, float(default))
+
+    arr = np.atleast_1d(np.asarray(weight, dtype=float)).reshape(-1)
+    if arr.size == 1:
+        return np.full(nu, float(arr[0]))
+    if arr.size != nu:
+        raise ValueError(f"{name} must be a scalar or have length {nu}, got {arr.size}")
     return arr
 
 
@@ -172,7 +215,7 @@ def _constraint_eval_points(
     ds: float,
     kappa_half: ca.MX | None = None,
     kappa_next: ca.MX | None = None,
-):
+) -> list[tuple[ca.MX, ca.MX]]:
     points = [(x, kappa)]
     if isinstance(integrator, RK4Integrator):
         kh = kappa_half if kappa_half is not None else kappa
@@ -191,8 +234,8 @@ def build_ocp(
     track: Dict,
     model: VehicleModel,
     integrator: SpaceIntegrator | None = None,
-    reg_du: float | np.ndarray | None = None,
-    reg_u_l2: float | np.ndarray | None = None,
+    reg_du: float | Sequence[float] | np.ndarray | None = None,
+    reg_u_l2: float | Sequence[float] | np.ndarray | None = None,
     use_normalization: bool = True,
     solver_verbose: bool = False,
     boundary_margin: float = 0.0,
@@ -204,7 +247,7 @@ def build_ocp(
     terminal_state_constraint: bool = False,
     terminal_window_nodes: int = 2,
     D_safe_braking: float | None = None,
-):
+) -> BuiltOcp:
     """
     Build a space-domain OCP over the full lap.
 
@@ -235,16 +278,7 @@ def build_ocp(
     nx = model.nx_reduced  # reduced state (no s)
     nu = model.nu
 
-    # Control dot regularization weight
-    if reg_du is None:
-        reg_du_arr = np.ones(nu, dtype=float) * 1e-4
-    else:
-        if np.isscalar(reg_du):
-            reg_du_arr = np.ones(nu, dtype=float) * float(reg_du)
-        else:
-            reg_du_arr = np.asarray(reg_du, dtype=float).reshape(-1)
-            if reg_du_arr.size != nu:
-                raise ValueError(f"reg_du must have length {nu}, got {reg_du_arr.size}")
+    reg_du_arr = _per_input_weights(reg_du, nu, "reg_du", default=1e-4)
 
     opti = ca.Opti()
 
@@ -337,8 +371,12 @@ def build_ocp(
         else:
             f_space_brake, eval_at_point_brake = build_space_dynamics(brake_model)
 
-    def _node_model(i: int):
+    def _node_model(i: int) -> Tuple[VehicleModel, Callable, Callable]:
+        # brake_zone_mask is only set alongside the three brake_* objects,
+        # so inside this branch none of them is None.
         if brake_zone_mask is not None and brake_zone_mask[i]:
+            assert brake_model is not None
+            assert f_space_brake is not None and eval_at_point_brake is not None
             return brake_model, f_space_brake, eval_at_point_brake
         return model, f_space, eval_at_point
 
@@ -564,10 +602,7 @@ def build_ocp(
         penalty = 0
 
     if reg_u_l2 is not None and N > 0:
-        if np.isscalar(reg_u_l2):
-            reg_u_l2_arr = np.ones(nu, dtype=float) * float(reg_u_l2)
-        else:
-            reg_u_l2_arr = np.asarray(reg_u_l2, dtype=float).reshape(-1)
+        reg_u_l2_arr = _per_input_weights(reg_u_l2, nu, "reg_u_l2", default=0.0)
         for j in range(nu):
             w_j = float(reg_u_l2_arr[j])
             if w_j != 0.0:
@@ -609,7 +644,7 @@ def build_ocp(
         {},
     )
 
-    return (
+    return BuiltOcp(
         opti,
         X,
         U,
@@ -634,8 +669,8 @@ def solve_ocp_and_save(
     solution_path: Path,
     integrator: SpaceIntegrator | None = None,
     initial_speed: float = 5.0,
-    reg_du: float | np.ndarray | None = None,
-    reg_u_l2: float | np.ndarray | None = None,
+    reg_du: float | Sequence[float] | np.ndarray | None = None,
+    reg_u_l2: float | Sequence[float] | np.ndarray | None = None,
     run_config: Dict | None = None,
     use_normalization: bool = True,
     solver_verbose: bool = False,

@@ -22,6 +22,11 @@ from typing import Callable, Dict, Optional
 import numpy as np
 
 
+def _as_array(values: Optional[list]) -> Optional[np.ndarray]:
+    """A solution field as an array, or None when the solve did not set it."""
+    return None if values is None else np.asarray(values)
+
+
 @dataclass(frozen=True)
 class PanelInputs:
     """The solved trajectory, plus everything shared by every panel figure."""
@@ -37,7 +42,7 @@ class PanelInputs:
     w_right: np.ndarray
     params: Dict
     profiling: Optional[Dict]
-    timed_mask: Optional[list]
+    timed_mask: Optional[np.ndarray]
     out_path: Path
     show: bool
 
@@ -187,7 +192,7 @@ def render_panels(
             w_right=np.array(data["w_right"], dtype=np.float64),
             params=data.get("model_params", {}),
             profiling=data.get("profiling"),
-            timed_mask=data.get("timed_mask"),
+            timed_mask=_as_array(data.get("timed_mask")),
             out_path=out_path,
             show=show,
         )

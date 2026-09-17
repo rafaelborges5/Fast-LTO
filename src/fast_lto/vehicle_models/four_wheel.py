@@ -22,7 +22,7 @@ class FourWheelModel(VehicleModel):
     Internal wheel ordering: FL=1, FR=2, RR=3, RL=4 (cyclic, matching branch 141).
     """
 
-    def __init__(self, params: dict | None = None):
+    def __init__(self, params: dict | None = None) -> None:
         defaults = self.get_default_params()
         if params is not None:
             defaults.update(params)
@@ -120,7 +120,7 @@ class FourWheelModel(VehicleModel):
     #  Aerodynamics
     # ------------------------------------------------------------------ #
 
-    def _aero_forces(self, v_long: ca.MX):
+    def _aero_forces(self, v_long: ca.MX) -> Tuple[ca.MX, ca.MX, ca.MX]:
         p = self.params
         q = 0.5 * float(p["rho"]) * float(p["A_f"]) * v_long**2
         F_down = float(p["C_l"]) * q
@@ -132,7 +132,9 @@ class FourWheelModel(VehicleModel):
     #  Slip angles
     # ------------------------------------------------------------------ #
 
-    def _slip_angles(self, v_long, v_lat, yaw_rate, delta):
+    def _slip_angles(
+        self, v_long: ca.MX, v_lat: ca.MX, yaw_rate: ca.MX, delta: ca.MX
+    ) -> Tuple[ca.MX, ca.MX, ca.MX, ca.MX]:
         p = self.params
         l_f = float(p["lf"])
         l_r = float(p["lr"])
@@ -145,7 +147,7 @@ class FourWheelModel(VehicleModel):
         vx_rr = v_long + a_r * yaw_rate
         vx_rl = v_long - a_l * yaw_rate
 
-        def _guard(vx):
+        def _guard(vx: ca.MX) -> ca.MX:
             return ca.sign(vx) * ca.sqrt(vx**2 + eps)
 
         vy_front = v_lat + l_f * yaw_rate
@@ -163,10 +165,12 @@ class FourWheelModel(VehicleModel):
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _pacejka_coeff(alpha, B, C, D):
+    def _pacejka_coeff(alpha: ca.MX, B: float, C: float, D: float) -> ca.MX:
         return D * ca.sin(C * ca.atan(B * alpha))
 
-    def _all_pacejka_coeffs(self, alpha_fl, alpha_fr, alpha_rr, alpha_rl):
+    def _all_pacejka_coeffs(
+        self, alpha_fl: ca.MX, alpha_fr: ca.MX, alpha_rr: ca.MX, alpha_rl: ca.MX
+    ) -> Tuple[ca.MX, ca.MX, ca.MX, ca.MX]:
         p = self.params
         f_fl = self._pacejka_coeff(alpha_fl, float(p["B_fl"]), float(p["C_fl"]), float(p["D_fl"]))
         f_fr = self._pacejka_coeff(alpha_fr, float(p["B_fr"]), float(p["C_fr"]), float(p["D_fr"]))
@@ -178,7 +182,7 @@ class FourWheelModel(VehicleModel):
     #  Vertical loads
     # ------------------------------------------------------------------ #
 
-    def _static_loads(self):
+    def _static_loads(self) -> Tuple[float, float, float, float]:
         p = self.params
         m, g = float(p["m"]), float(p["g"])
         l_f, l_r = float(p["lf"]), float(p["lr"])
@@ -194,15 +198,15 @@ class FourWheelModel(VehicleModel):
 
     def _compute_vertical_loads(
         self,
-        v_long,
-        v_lat,
-        yaw_rate,
-        Fx_fl,
-        Fx_fr,
-        Fx_rr,
-        Fx_rl,
-        delta,
-    ):
+        v_long: ca.MX,
+        v_lat: ca.MX,
+        yaw_rate: ca.MX,
+        Fx_fl: ca.MX,
+        Fx_fr: ca.MX,
+        Fx_rr: ca.MX,
+        Fx_rl: ca.MX,
+        delta: ca.MX,
+    ) -> Tuple[ca.MX, ca.MX, ca.MX, ca.MX]:
         mode = self.params.get("load_transfer_mode", "static")
 
         Fw_fl, Fw_fr, Fw_rr, Fw_rl = self._static_loads()
@@ -297,18 +301,18 @@ class FourWheelModel(VehicleModel):
 
     def _body_forces_and_moment(
         self,
-        Fx_fl,
-        Fx_fr,
-        Fx_rr,
-        Fx_rl,
-        delta,
-        Fy_fl,
-        Fy_fr,
-        Fy_rr,
-        Fy_rl,
-        F_drag,
-        F_roll,
-    ):
+        Fx_fl: ca.MX,
+        Fx_fr: ca.MX,
+        Fx_rr: ca.MX,
+        Fx_rl: ca.MX,
+        delta: ca.MX,
+        Fy_fl: ca.MX,
+        Fy_fr: ca.MX,
+        Fy_rr: ca.MX,
+        Fy_rl: ca.MX,
+        F_drag: ca.MX,
+        F_roll: ca.MX,
+    ) -> Tuple[ca.MX, ca.MX, ca.MX]:
         p = self.params
         l_f = float(p["lf"])
         l_r = float(p["lr"])
@@ -551,7 +555,7 @@ class FourWheelModel(VehicleModel):
                 )
             elif a_long_max is not None:
                 g_list.append((Fx_total / (m * float(a_long_max))) ** 2 - 1)
-            else:
+            elif a_lat_max is not None:
                 g_list.append((Fy_total / (m * float(a_lat_max))) ** 2 - 1)
 
         return g_list
@@ -633,7 +637,7 @@ class FourWheelModel(VehicleModel):
         Fy_rr = -Fz_rr * f_rr
         Fy_rl = -Fz_rl * f_rl
 
-        def _utilisation(Fx, Fy, Fz, D_key: str) -> ca.MX:
+        def _utilisation(Fx: ca.MX, Fy: ca.MX, Fz: ca.MX, D_key: str) -> ca.MX:
             # Percent of the friction ellipse in use. The floor keeps the ratio
             # finite where a wheel is momentarily unloaded.
             cap = ca.fmax(float(p[D_key]) * Fz, 1.0)

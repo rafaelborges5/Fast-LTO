@@ -25,7 +25,7 @@ def plot_path_with_speed(
     show: bool = True,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
-):
+) -> None:
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(6, 8))
     ax.scatter(cones_left[:, 0], cones_left[:, 1], c="tab:blue", s=12, label="left cones")
@@ -72,7 +72,7 @@ def plot_speed_profile(
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
     timed_mask: Optional[np.ndarray] = None,
-):
+) -> None:
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(8, 3))
     ax.plot(s, v, label="v(s)")
@@ -112,7 +112,7 @@ def plot_gg(
     show: bool = True,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
-):
+) -> None:
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(4, 4))
     ax.scatter(a_long, a_lat, s=8, alpha=0.7, label="samples")
@@ -159,7 +159,7 @@ def plot_offsets(
     show: bool = True,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
-):
+) -> None:
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(8, 3))
     ax.plot(s, d, label="d(s)")
@@ -189,7 +189,7 @@ def plot_inputs(
     show: bool = True,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
-):
+) -> None:
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(8, 3))
     ax.plot(s, a_long, label="a_long")
@@ -311,7 +311,7 @@ def plot_all_panels(
     timed_mask: Optional[np.ndarray] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
-):
+) -> None:
     fig, axes = plt.subplots(3, 2, figsize=(12, 12))
     axes = axes.flatten()
 

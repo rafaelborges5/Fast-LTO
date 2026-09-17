@@ -22,10 +22,18 @@ When omitted they default to ``kappa`` (left-endpoint zero-order hold).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Callable, Tuple
 
 import casadi as ca
 
 from fast_lto.utils.smooth import smoothmax
+
+#: Space-domain right-hand side: ``(x_reduced, u, kappa) -> dx_reduced/ds``.
+SpaceRhs = Callable[[ca.MX, ca.MX, ca.MX], ca.MX]
+
+#: Rebuilds the full state and its ``ds/dt`` at one point:
+#: ``(x_reduced, u, kappa) -> (full_state, s_dot)``.
+PointEval = Callable[[ca.MX, ca.MX, ca.MX], Tuple[ca.MX, ca.MX]]
 
 
 class SpaceIntegrator(ABC):
@@ -33,7 +41,7 @@ class SpaceIntegrator(ABC):
     @abstractmethod
     def step(
         self,
-        f_space: callable,
+        f_space: SpaceRhs,
         x: ca.MX,
         u: ca.MX,
         kappa: ca.MX,
@@ -71,8 +79,8 @@ class SpaceIntegrator(ABC):
     @abstractmethod
     def time_step(
         self,
-        f_space: callable,
-        eval_at_point: callable,
+        f_space: SpaceRhs,
+        eval_at_point: PointEval,
         x: ca.MX,
         u: ca.MX,
         kappa: ca.MX,
@@ -118,22 +126,31 @@ class SpaceIntegrator(ABC):
 
 class EulerIntegrator(SpaceIntegrator):
 
-    def step(self, f_space, x, u, kappa, ds, kappa_half=None, kappa_next=None):
+    def step(
+        self,
+        f_space: SpaceRhs,
+        x: ca.MX,
+        u: ca.MX,
+        kappa: ca.MX,
+        ds: float,
+        kappa_half: ca.MX | None = None,
+        kappa_next: ca.MX | None = None,
+    ) -> ca.MX:
         return x + ds * f_space(x, u, kappa)
 
     def time_step(
         self,
-        f_space,
-        eval_at_point,
-        x,
-        u,
-        kappa,
-        ds,
-        kappa_half=None,
-        kappa_next=None,
-        eps=1e-3,
-        smooth_eps=None,
-    ):
+        f_space: SpaceRhs,
+        eval_at_point: PointEval,
+        x: ca.MX,
+        u: ca.MX,
+        kappa: ca.MX,
+        ds: float,
+        kappa_half: ca.MX | None = None,
+        kappa_next: ca.MX | None = None,
+        eps: float = 1e-3,
+        smooth_eps: float | None = None,
+    ) -> ca.MX:
         _, s_dot = eval_at_point(x, u, kappa)
         smooth_eps = eps if smooth_eps is None else smooth_eps
         s_dot_safe = smoothmax(s_dot, ca.MX(eps), smooth_eps)
@@ -142,7 +159,16 @@ class EulerIntegrator(SpaceIntegrator):
 
 class RK4Integrator(SpaceIntegrator):
 
-    def step(self, f_space, x, u, kappa, ds, kappa_half=None, kappa_next=None):
+    def step(
+        self,
+        f_space: SpaceRhs,
+        x: ca.MX,
+        u: ca.MX,
+        kappa: ca.MX,
+        ds: float,
+        kappa_half: ca.MX | None = None,
+        kappa_next: ca.MX | None = None,
+    ) -> ca.MX:
         kh = kappa_half if kappa_half is not None else kappa
         kn = kappa_next if kappa_next is not None else kappa
         k1 = f_space(x, u, kappa)
@@ -153,17 +179,17 @@ class RK4Integrator(SpaceIntegrator):
 
     def time_step(
         self,
-        f_space,
-        eval_at_point,
-        x,
-        u,
-        kappa,
-        ds,
-        kappa_half=None,
-        kappa_next=None,
-        eps=1e-3,
-        smooth_eps=None,
-    ):
+        f_space: SpaceRhs,
+        eval_at_point: PointEval,
+        x: ca.MX,
+        u: ca.MX,
+        kappa: ca.MX,
+        ds: float,
+        kappa_half: ca.MX | None = None,
+        kappa_next: ca.MX | None = None,
+        eps: float = 1e-3,
+        smooth_eps: float | None = None,
+    ) -> ca.MX:
         kh = kappa_half if kappa_half is not None else kappa
         kn = kappa_next if kappa_next is not None else kappa
         smooth_eps = eps if smooth_eps is None else smooth_eps

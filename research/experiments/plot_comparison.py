@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
+from fast_lto.paths import default_data_root
+
+REPO = default_data_root()
 EXP_DIR = REPO / "data" / "experiments"
 OUT_DIR = REPO / "ocp_plots" / "model_comparison"
 

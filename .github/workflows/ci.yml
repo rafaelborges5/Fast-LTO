@@ -62,13 +62,8 @@ jobs:
           if-no-files-found: error
 
   types:
-    name: Types (advisory)
+    name: Types
     runs-on: ubuntu-latest
-    # Not blocking yet: mypy currently reports errors that Phase 5 of the
-    # open-source cleanup clears (the Optional-field cleanup retires most of
-    # them at once). Flip `continue-on-error` off in that phase -- the job is
-    # here now so the count is visible on every PR and cannot grow unnoticed.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

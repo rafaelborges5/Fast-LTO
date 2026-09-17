@@ -49,20 +49,20 @@ ACTIVITY_ROWS = (
 
 def _compute_constraint_activity_four_wheel(
     *,
-    d,
-    w_left,
-    w_right,
-    v,
-    Fx_fl,
-    Fx_fr,
-    Fx_rr,
-    Fx_rl,
-    util_fl,
-    util_fr,
-    util_rr,
-    util_rl,
-    params,
-):
+    d: np.ndarray,
+    w_left: np.ndarray,
+    w_right: np.ndarray,
+    v: np.ndarray,
+    Fx_fl: np.ndarray,
+    Fx_fr: np.ndarray,
+    Fx_rr: np.ndarray,
+    Fx_rl: np.ndarray,
+    util_fl: np.ndarray,
+    util_fr: np.ndarray,
+    util_rr: np.ndarray,
+    util_rl: np.ndarray,
+    params: Dict,
+) -> Dict[str, float]:
     n = len(d)
     if n == 0:
         return {}
@@ -102,21 +102,21 @@ def _compute_constraint_activity_four_wheel(
 
 
 def plot_all_panels_four_wheel(
-    cones_left,
-    cones_right,
-    path_xy,
-    v,
-    s,
-    d,
-    w_left,
-    w_right,
-    Fx_fl,
-    Fx_fr,
-    Fx_rr,
-    Fx_rl,
-    delta,
-    v_lat,
-    yaw_rate,
+    cones_left: np.ndarray,
+    cones_right: np.ndarray,
+    path_xy: np.ndarray,
+    v: np.ndarray,
+    s: np.ndarray,
+    d: np.ndarray,
+    w_left: np.ndarray,
+    w_right: np.ndarray,
+    Fx_fl: np.ndarray,
+    Fx_fr: np.ndarray,
+    Fx_rr: np.ndarray,
+    Fx_rl: np.ndarray,
+    delta: np.ndarray,
+    v_lat: np.ndarray,
+    yaw_rate: np.ndarray,
     params: Dict,
     diagnostics: Dict[str, np.ndarray],
     profiling: Optional[Dict] = None,
@@ -124,7 +124,7 @@ def plot_all_panels_four_wheel(
     timed_mask: Optional[np.ndarray] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
-):
+) -> None:
     # Tire loads, slip angles and friction usage come from the model itself
     # (VehicleModel.diagnostics), so this figure shows the solve rather than a
     # second opinion about it.
@@ -224,21 +224,21 @@ def plot_all_panels_four_wheel(
 
 def plot_diagnostics_four_wheel(
     *,
-    s,
-    v,
-    v_lat,
-    yaw_rate,
-    Fx_fl,
-    Fx_fr,
-    Fx_rr,
-    Fx_rl,
-    delta,
-    forces,
-    params,
+    s: np.ndarray,
+    v: np.ndarray,
+    v_lat: np.ndarray,
+    yaw_rate: np.ndarray,
+    Fx_fl: np.ndarray,
+    Fx_fr: np.ndarray,
+    Fx_rr: np.ndarray,
+    Fx_rl: np.ndarray,
+    delta: np.ndarray,
+    forces: Dict[str, np.ndarray],
+    params: Dict,
     input_data: Optional[Dict] = None,
     out_path: Optional[Path] = None,
     show: bool = True,
-):
+) -> None:
     Mz_Fx = forces["Mz_Fx"]
     Mz_total = forces["Mz_total"]
 

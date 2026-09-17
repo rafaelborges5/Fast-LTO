@@ -39,7 +39,7 @@ class VehicleModel(ABC):
     reduced state (everything except s) and for the inputs
     """
 
-    def __init__(self, params: dict):
+    def __init__(self, params: dict) -> None:
         self.params = params
 
         # Normalisation metadata for reduced states [d, ...] and inputs [u].

@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
@@ -23,8 +23,12 @@ from fast_lto.pipeline import PipelineConfig
 from fast_lto.vehicle_models.dynamic_bicycle import DynamicBicycleModel
 from fast_lto.vehicle_models.four_wheel import FourWheelModel
 from fast_lto.vehicle_models.point_mass import PointMassModel
+from fast_lto.vehicle_models.vehicle_base import VehicleModel
 
-_MODEL_CLASSES = {
+# Annotated as concrete constructors rather than ``type[VehicleModel]``: the
+# values are instantiated here to read their defaults, and the base class is
+# abstract.
+_MODEL_CLASSES: Dict[str, Callable[..., VehicleModel]] = {
     "point_mass": PointMassModel,
     "dynamic_bicycle": DynamicBicycleModel,
     "four_wheel": FourWheelModel,

@@ -138,7 +138,7 @@ def detect_skidpad_geometry(
 class _Segment:
     """One centerline segment with constant curvature, parameterized by arc t."""
 
-    def __init__(self, length: float, kappa: float, timed: bool):
+    def __init__(self, length: float, kappa: float, timed: bool) -> None:
         self.length = float(length)
         self.kappa = float(kappa)
         self.timed = bool(timed)
@@ -148,7 +148,7 @@ class _Segment:
 
 
 class _Straight(_Segment):
-    def __init__(self, A: np.ndarray, B: np.ndarray, timed: bool = False):
+    def __init__(self, A: np.ndarray, B: np.ndarray, timed: bool = False) -> None:
         length = float(np.linalg.norm(B - A))
         super().__init__(length, 0.0, timed)
         self.A = A
@@ -163,7 +163,7 @@ class _Straight(_Segment):
 class _Arc(_Segment):
     def __init__(
         self, center: np.ndarray, R: float, theta0: float, d_theta: float, timed: bool = False
-    ):
+    ) -> None:
         length = R * abs(d_theta)
         super().__init__(length, np.sign(d_theta) / R, timed)
         self.center = center

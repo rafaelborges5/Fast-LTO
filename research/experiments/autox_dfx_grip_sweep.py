@@ -1,0 +1,403 @@
+from __future__ import annotations
+
+"""
+Autox dFxmax x tyre-grip x boundary-margin sweep on a real track.
+
+Sweeps the per-wheel longitudinal force rate limit (dFxmax), the tyre peak-grip D
+over a front/rear "staircase" evolution (same shape as
+fscz_skidpad_batch.py::d_sequence), and the corridor boundary margin, solving the
+four-wheel autox OCP for each combination on top of the current configs/autox.yaml
+braking profile (terminal_speed, autox_terminal_state_constraint,
+autox_terminal_window_nodes, autox_terminal_pad_m). Every run is exported as a
+controller-reference trajectory CSV whose name encodes dFxmax, the D combo and the
+margin, e.g.::
+
+    data/output_trajectories/<track_id>_dfx1000_F1.20_R1.20_m0.45.csv
+
+Track is always a required parameter (--track-id): this is meant to be re-run
+against whatever track you're currently working with, not just the one it was
+built for.
+
+Unlike fscz_skidpad_batch.py, this drives the real run_pipeline()/warm-start ladder
+(not a direct solve_ocp_and_save call): autox's target boundary_margin needs a
+margin-ladder continuation that skidpad doesn't, and that ladder depends only on
+track geometry + vehicle corner offsets (not on D, dFxmax or the target margin
+itself), so reusing the existing, already-tested path is both simpler and lets
+later combos warm-start from an adjacent (D, dFxmax or margin) neighbour.
+
+Run sequentially (not multiprocessed): warm-start chaining between neighbouring
+combos, and avoiding concurrent writes to the shared data/solutions/_seeds/ store,
+matter more here than solve-level parallelism.
+
+Usage (from repo root):
+    PYTHONPATH=src python src/experiments/autox_dfx_grip_sweep.py --track-id <new_track>
+    PYTHONPATH=src python src/experiments/autox_dfx_grip_sweep.py --track-id <new_track> \\
+        --dfx-values 1000,2000 --margins 0.45,0.50 --d-min 1.20 --d-max 1.30
+
+Outputs:
+    data/output_trajectories/<track_id>_dfx<N>_F*_R*_m*.csv        one per solve
+    data/output_trajectories/<track_id>_dfx_grip_sweep_times.csv     lap-time table
+    data/output_trajectories/<track_id>_dfx_grip_sweep.png            lap-time plot
+"""
+
+import argparse
+import copy
+import csv
+import json
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from fast_lto.config import RunConfig
+from fast_lto.paths import default_data_root
+from fast_lto.pipeline import run_pipeline
+
+DEFAULT_DFX_VALUES = (1000.0, 2000.0)
+DEFAULT_D_MIN = 1.20
+DEFAULT_D_MAX = 1.30
+EXTRA_MARGIN = 0.50
+
+
+def _repo_root() -> Path:
+    return default_data_root()
+
+
+def d_sequence(
+    d_min: float = DEFAULT_D_MIN, d_max: float = DEFAULT_D_MAX
+) -> List[Tuple[float, float]]:
+    """(D_front, D_rear) pairs: rear leads each 0.05 step from d_min to d_max.
+
+    Same "staircase" shape as fscz_skidpad_batch.py::d_sequence (without the
+    low-grip anchors, which don't apply here).
+    """
+    seq: List[Tuple[float, float]] = []
+    f = r = d_min
+    seq.append((f, r))
+    while f < d_max - 1e-9 or r < d_max - 1e-9:
+        if r <= f + 1e-9:  # equal -> bump rear first
+            r = round(r + 0.05, 2)
+        else:  # rear ahead -> front catches up
+            f = round(f + 0.05, 2)
+        seq.append((round(f, 2), round(r, 2)))
+    return seq
+
+
+def _tag(track_id: str, dfx: float, f: float, r: float, margin: float) -> str:
+    return f"{track_id}_dfx{dfx:.0f}_F{f:.2f}_R{r:.2f}_m{margin:.2f}"
+
+
+def _key(dfx: float, f: float, r: float, margin: float) -> Tuple[float, float, float, float]:
+    return (round(float(dfx), 1), round(float(f), 2), round(float(r), 2), round(float(margin), 2))
+
+
+def _load_table(
+    path: Path, out_dir: Path
+) -> Dict[Tuple[float, float, float, float], Dict[str, Any]]:
+    """Load prior results so completed solves can be skipped on re-run."""
+    done: Dict[Tuple[float, float, float, float], Dict[str, Any]] = {}
+    if not path.exists():
+        return done
+    with path.open() as fh:
+        for row in csv.DictReader(fh):
+            try:
+                key = _key(
+                    float(row["dFxmax"]),
+                    float(row["D_front"]),
+                    float(row["D_rear"]),
+                    float(row["margin"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (
+                row.get("status") == "Solve_Succeeded"
+                and row.get("csv")
+                and (out_dir / row["csv"]).exists()
+            ):
+                done[key] = dict(row)
+    return done
+
+
+def _write_table(path: Path, rows: List[Dict[str, Any]]) -> None:
+    cols = [
+        "dFxmax",
+        "D_front",
+        "D_rear",
+        "margin",
+        "csv",
+        "autox_lap_time_s",
+        "status",
+        "solve_time_s",
+    ]
+    with path.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c) for c in cols})
+
+
+def _print_table(rows: List[Dict[str, Any]], track_id: str) -> None:
+    margins = sorted({float(r["margin"]) for r in rows})
+    dfx_values = sorted({float(r["dFxmax"]) for r in rows})
+    combos = sorted({(float(r["D_front"]), float(r["D_rear"])) for r in rows})
+    by_key = {_key(r["dFxmax"], r["D_front"], r["D_rear"], r["margin"]): r for r in rows}
+
+    for margin in margins:
+        print("\n" + "=" * (18 + 12 * len(dfx_values)))
+        print(f"{track_id} autox lap time [s]  (margin = {margin:.2f} m)")
+        print("=" * (18 + 12 * len(dfx_values)))
+        hdr = f"{'D_front':>8}{'D_rear':>8}" + "".join(
+            f"{'dFx='+format(d,'.0f'):>12}" for d in dfx_values
+        )
+        print(hdr)
+        print("-" * len(hdr))
+        for f, r in combos:
+            line = f"{f:>8.2f}{r:>8.2f}"
+            for d in dfx_values:
+                res = by_key.get(_key(d, f, r, margin))
+                t = res.get("autox_lap_time_s") if res else None
+                line += f"{float(t):>12.4f}" if t not in (None, "") else f"{'fail':>12}"
+            print(line)
+        print("-" * len(hdr))
+
+
+# Categorical slots 1-3 (blue/orange/aqua) from the dataviz skill's validated
+# default palette -- fixed order, not cycled. This subset clears the CVD/
+# normal-vision floors pairwise (all-pairs, not just adjacent) in both light
+# and dark modes, which is what a small-multiples line chart needs.
+_SERIES_COLORS = ("#2a78d6", "#eb6834", "#1baf7a")
+_TEXT_SECONDARY = "#52514e"
+
+
+def _plot(rows: List[Dict[str, Any]], out_dir: Path, track_id: str) -> Optional[Path]:
+    margins = sorted({float(r["margin"]) for r in rows})
+    dfx_values = sorted({float(r["dFxmax"]) for r in rows})
+    combos = sorted({(float(r["D_front"]), float(r["D_rear"])) for r in rows})
+    by_key = {_key(r["dFxmax"], r["D_front"], r["D_rear"], r["margin"]): r for r in rows}
+    labels = [f"F{f:.2f}/R{r:.2f}" for f, r in combos]
+    x = list(range(len(combos)))
+
+    # One panel per margin (small multiples), not a second y-axis.
+    fig, axes = plt.subplots(1, len(margins), figsize=(6.5 * len(margins), 5), sharey=True)
+    if len(margins) == 1:
+        axes = [axes]
+
+    any_plotted = False
+    for ax, margin in zip(axes, margins):
+        for i, dfx in enumerate(dfx_values):
+            col = _SERIES_COLORS[i % len(_SERIES_COLORS)]
+            ys = []
+            for f, r in combos:
+                res = by_key.get(_key(dfx, f, r, margin))
+                t = res.get("autox_lap_time_s") if res else None
+                ys.append(float(t) if t not in (None, "") else None)
+            xs_valid = [xi for xi, yi in zip(x, ys) if yi is not None]
+            ys_valid = [yi for yi in ys if yi is not None]
+            if not ys_valid:
+                continue
+            any_plotted = True
+            ax.plot(
+                xs_valid,
+                ys_valid,
+                marker="o",
+                markersize=7,
+                color=col,
+                lw=2.0,
+                label=f"dFxmax={dfx:.0f}",
+            )
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=30, ha="right", color=_TEXT_SECONDARY)
+        ax.set_title(f"margin = {margin:.2f} m")
+        ax.grid(True, ls=":", alpha=0.4)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(colors=_TEXT_SECONDARY)
+        ax.legend(frameon=False)
+    if not any_plotted:
+        plt.close(fig)
+        return None
+    axes[0].set_ylabel("autox lap time [s]", color=_TEXT_SECONDARY)
+    fig.suptitle(f"{track_id}: autox lap time vs tyre grip, by dFxmax and margin")
+    fig.tight_layout()
+    out_png = out_dir / f"{track_id}_dfx_grip_sweep.png"
+    fig.savefig(out_png, dpi=160)
+    plt.close(fig)
+    return out_png
+
+
+def _solve_one(
+    base_rc: RunConfig,
+    track_id: str,
+    dfx: float,
+    d_front: float,
+    d_rear: float,
+    margin: float,
+    out_dir: Path,
+) -> Dict[str, Any]:
+    rc = copy.deepcopy(base_rc)
+    rc.vehicle.four_wheel["dFxmax"] = float(dfx)
+    rc.vehicle.four_wheel["D_fl"] = float(d_front)
+    rc.vehicle.four_wheel["D_fr"] = float(d_front)
+    rc.vehicle.four_wheel["D_rr"] = float(d_rear)
+    rc.vehicle.four_wheel["D_rl"] = float(d_rear)
+    rc.pipeline.boundary_margin = float(margin)
+
+    config = rc.to_pipeline_config()
+    config.plot_results = False
+    config.show_plots = False
+
+    tag = _tag(track_id, dfx, d_front, d_rear, margin)
+    out_csv = out_dir / f"{tag}.csv"
+    result: Dict[str, Any] = {
+        "dFxmax": dfx,
+        "D_front": d_front,
+        "D_rear": d_rear,
+        "margin": margin,
+        "csv": out_csv.name,
+    }
+
+    start = time.perf_counter()
+    try:
+        results = run_pipeline(config, start_from="track", end_at="export")
+        solve_time_s = time.perf_counter() - start
+
+        sol = json.loads(Path(results["ocp"]).read_text())
+        prof = sol.get("profiling", {})
+        status = prof.get("return_status")
+        lap_time = prof.get("autox_lap_time_s")
+        if lap_time is None:
+            lap_time = prof.get("pure_timed_time_s")
+
+        result.update(
+            autox_lap_time_s=lap_time,
+            status=status,
+            solve_time_s=round(solve_time_s, 2),
+        )
+        if status == "Solve_Succeeded":
+            Path(results["export"]).replace(out_csv)
+        else:
+            result["status"] = f"{status}; not exported"
+    except Exception as exc:  # keep the sweep alive on a single failure
+        result.update(
+            autox_lap_time_s=None,
+            status=f"ERROR: {type(exc).__name__}: {exc}",
+            solve_time_s=round(time.perf_counter() - start, 2),
+        )
+    return result
+
+
+def run(
+    config_path: Path,
+    track_id: str,
+    out_dir: Path,
+    dfx_values: Tuple[float, ...],
+    margins: Tuple[float, ...],
+    d_min: float,
+    d_max: float,
+    smooth_centerline: Optional[int] = None,
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Baseline config: {config_path}, track_id={track_id}")
+    base_rc = RunConfig.from_yaml(config_path)
+    base_rc.track_id = track_id
+    if smooth_centerline is not None:
+        print(f"  Overriding smooth_centerline: {base_rc.smooth_centerline} -> {smooth_centerline}")
+        base_rc.smooth_centerline = smooth_centerline
+
+    combos = d_sequence(d_min=d_min, d_max=d_max)
+    table_csv = out_dir / f"{track_id}_dfx_grip_sweep_times.csv"
+    done = _load_table(table_csv, out_dir)
+    results: List[Dict[str, Any]] = list(done.values())
+
+    total = len(margins) * len(dfx_values) * len(combos)
+    print(
+        f"{len(done)}/{total} already done; {total - len(done)} solves remaining "
+        f"(sequential, to allow warm-start chaining) ..."
+    )
+
+    for margin in margins:
+        for dfx in dfx_values:
+            for f, r in combos:
+                key = _key(dfx, f, r, margin)
+                if key in done:
+                    print(f"  [{_tag(track_id, dfx, f, r, margin)}] already done, skipping")
+                    continue
+                print(f"  [{_tag(track_id, dfx, f, r, margin)}] solving ...")
+                res = _solve_one(base_rc, track_id, dfx, f, r, margin, out_dir)
+                print(
+                    f"    -> lap_time={res['autox_lap_time_s']} status={res['status']} "
+                    f"solve_time_s={res['solve_time_s']}"
+                )
+                results.append(res)
+                _write_table(table_csv, results)  # persist after every solve (resumable)
+
+    _print_table(results, track_id)
+    png = _plot(results, out_dir, track_id)
+
+    print(f"\nWrote:\n  {table_csv}")
+    if png is not None:
+        print(f"  {png}")
+    n_ok = len([r for r in results if r.get("status") == "Solve_Succeeded"])
+    print(f"  {n_ok}/{total} trajectory CSVs in {out_dir}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--config", type=Path, default=_repo_root() / "configs" / "autox.yaml")
+    ap.add_argument(
+        "--track-id",
+        type=str,
+        required=True,
+        help="Track identifier, e.g. the new track's CSV stem under data/tracks/.",
+    )
+    ap.add_argument("--out-dir", type=Path, default=_repo_root() / "data" / "output_trajectories")
+    ap.add_argument(
+        "--dfx-values",
+        type=str,
+        default=",".join(f"{v:.0f}" for v in DEFAULT_DFX_VALUES),
+        help="Comma-separated dFxmax values, e.g. 1000,2000",
+    )
+    ap.add_argument(
+        "--margins",
+        type=str,
+        default=None,
+        help="Comma-separated boundary margins, e.g. 0.45,0.50. "
+        "Default: the --config's own boundary_margin plus 0.50.",
+    )
+    ap.add_argument("--d-min", type=float, default=DEFAULT_D_MIN)
+    ap.add_argument("--d-max", type=float, default=DEFAULT_D_MAX)
+    ap.add_argument(
+        "--smooth-centerline",
+        type=int,
+        default=None,
+        help="Override the config's Savgol centerline-smoothing window "
+        "(odd int >= 3). Useful for noisy logged-path tracks where "
+        "the default produces spurious sharp curvature spikes.",
+    )
+    args = ap.parse_args()
+    dfx_values = tuple(float(x) for x in args.dfx_values.split(","))
+    if args.margins is not None:
+        margins = tuple(float(x) for x in args.margins.split(","))
+    else:
+        base_margin = float(RunConfig.from_yaml(args.config).boundary_margin)
+        margins = tuple(sorted({round(base_margin, 2), EXTRA_MARGIN}))
+    run(
+        args.config,
+        args.track_id,
+        args.out_dir,
+        dfx_values,
+        margins,
+        args.d_min,
+        args.d_max,
+        smooth_centerline=args.smooth_centerline,
+    )
+
+
+if __name__ == "__main__":
+    main()

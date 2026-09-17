@@ -46,6 +46,7 @@ from fast_lto.config import RunConfig
 from fast_lto.export.trajectory import export_reference_trajectory
 from fast_lto.optimization.global_ocp import solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator
+from fast_lto.paths import default_data_root
 from fast_lto.pipeline import (
     PipelineConfig,
     _build_skidpad_lead_in,
@@ -60,7 +61,7 @@ DEFAULT_D_MAX = 1.50
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return default_data_root()
 
 
 def d_sequence(

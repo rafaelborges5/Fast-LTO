@@ -23,12 +23,13 @@ from typing import Any, Dict, List
 import matplotlib.pyplot as plt
 import numpy as np
 
+from fast_lto.paths import default_data_root
 from fast_lto.pipeline import PipelineConfig, run_pipeline
 
 
 def _get_repo_root() -> Path:
     """Infer repository root from this file location."""
-    return Path(__file__).resolve().parents[3]
+    return default_data_root()
 
 
 def _scaled_reg_u_l2(

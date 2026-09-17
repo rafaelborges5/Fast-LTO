@@ -17,11 +17,13 @@ from pathlib import Path
 
 import matplotlib
 
+from fast_lto.paths import default_data_root
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = default_data_root()
 
 
 def load(path):

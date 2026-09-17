@@ -112,6 +112,17 @@ def test_autox_ocp_lead_defaults_to_zero() -> None:
     assert pc.autox.ocp_lead_m == 0.0
 
 
+def test_launch_speed_is_never_none() -> None:
+    """The resolved value is a float for every mode, so callers need no guard.
+
+    The old field was ``Optional[float]``, which is why five call sites wrapped
+    it in ``float(...)`` to satisfy the type checker.
+    """
+    for mode in ("trackdrive", "autox", "skidpad"):
+        speed = PipelineConfig(mode=mode).launch_speed
+        assert isinstance(speed, float) and speed > 0.0
+
+
 def test_autox_start_defaults_to_origin() -> None:
     rc = RunConfig()
     assert rc.pipeline.autox.start_x == 0.0
@@ -243,15 +254,22 @@ def test_works_with_no_config_file() -> None:
     ],
 )
 def test_initial_speed_follows_mode_unless_pinned(argv, expected: float) -> None:
+    """``launch_speed`` resolves the request; ``initial_speed`` is the request.
+
+    They were one field, written in place by ``__post_init__`` behind a private
+    flag and a setter so that re-running it after ``mode`` changed did not
+    clobber a value the caller had chosen. Splitting the request from the
+    resolved value removed all three pieces.
+    """
     resolved = [a.replace("FIXTURE", str(FIXTURE_CONFIGS)) for a in argv]
-    assert _config_from_argv(*resolved).initial_speed == pytest.approx(expected)
+    assert _config_from_argv(*resolved).launch_speed == pytest.approx(expected)
 
 
 def test_yaml_initial_speed_survives_a_mode_override() -> None:
     """An explicit value in the file is the caller's too, not the mode's."""
     config = _config_from_argv("--config", str(CONFIGS_DIR / "trackdrive.yaml"), "--mode", "autox")
     assert config.mode == "autox"
-    assert config.initial_speed == pytest.approx(5.0)
+    assert config.launch_speed == pytest.approx(5.0)
 
 
 # ---------------------------------------------------------------------------

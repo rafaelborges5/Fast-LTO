@@ -8,12 +8,13 @@ Extra plots for the Maisach four-wheel solution:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
+from fast_lto.paths import default_data_root
+
+REPO = default_data_root()
 OUT = REPO / "ocp_plots" / "maisach_extras"
 
 
