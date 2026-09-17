@@ -27,10 +27,8 @@ class PointMassModel(VehicleModel):
     def get_default_params(self) -> dict:
         return {
             "m": 170.0,
-            # Declared so a shared vehicle config can set them, but unused by
-            # the point-mass dynamics. Kept in step with the other models so
-            # the three never describe different cars (see
-            # test_models_agree_on_the_car_they_describe).
+            # Unused by the point-mass dynamics, but declared so the three
+            # models never describe different cars.
             "lf": 0.842,
             "lr": 0.689,
             "mu": 1.4,
@@ -92,14 +90,10 @@ class PointMassModel(VehicleModel):
         inputs: Sequence[ca.MX],
         curvature: ca.MX,
     ) -> List[ca.MX]:
-        """
-        Return inequalities g(x,u) <= 0:
-          a_long - a_long_max <= 0
-          a_long_min - a_long <= 0
-          a_lat   - a_lat_max  <= 0
-          a_lat_min - a_lat    <= 0
-          friction circle: (a_long/(mu*g))^2 + (a_lat/(mu*g))^2 - 1 <= 0
-          speed bounds as soft/path constraints: v - v_max <=0, v_min - v <=0
+        """The friction circle, ``(a_long/mu g)^2 + (a_lat/mu g)^2 <= 1``.
+
+        The acceleration and speed limits are box bounds, not constraints, so
+        they are handled by ``input_bounds`` and ``state_bounds``.
         """
         a_long = inputs[0]
         a_lat = inputs[1]
@@ -114,7 +108,6 @@ class PointMassModel(VehicleModel):
 
     def state_bounds(self) -> Tuple[List[float], List[float]]:
         p = self.params
-        # s, d, psi_err, v
         lb = [-ca.inf, -float(p["d_max"]), -float(p["psi_err_max"]), p["v_min"]]
         ub = [ca.inf, float(p["d_max"]), float(p["psi_err_max"]), p["v_max"]]
         return lb, ub

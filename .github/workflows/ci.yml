@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Keep matplotlib headless; several modules import pyplot at import time.
+  # Several modules import pyplot at import time.
   MPLBACKEND: Agg
 
 jobs:
@@ -48,8 +48,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
 
-      # The golden solves are the safety net, so the full suite runs here --
-      # including the cases marked `slow`, which a local `-m "not slow"` skips.
+      # The full suite, including the `slow` golden solves a local run skips.
       - name: Run the suite
         run: pytest --cov --cov-report=term-missing --cov-report=xml
 
@@ -88,12 +87,10 @@ jobs:
       - run: python -m pip install --upgrade pip build
       - run: python -m build
 
-      # Installed into a bare venv, away from the source tree, so a missing
-      # package or an undeclared dependency shows up here rather than in
-      # someone else's terminal. It solves a real lap rather than only
-      # importing, because the interesting failure is where the outputs land:
-      # with no checkout to find, they must appear under the working directory
-      # and not inside site-packages.
+      # A bare venv away from the source tree, so a missing package or an
+      # undeclared dependency shows up here. It solves a real lap because the
+      # interesting failure is where the outputs land: with no checkout to
+      # find, they belong under the working directory, not in site-packages.
       - name: Install the wheel into a clean environment and solve a lap
         run: |
           python -m venv /tmp/wheel-env

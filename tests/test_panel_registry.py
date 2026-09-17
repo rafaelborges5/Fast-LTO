@@ -1,8 +1,7 @@
 """The panel registry must stay in step with the models the pipeline can build.
 
-Plots have no assertions on their pixels, so the failure this guards against is
-quiet: add a fourth vehicle model, forget the renderer, and the pipeline solves
-happily and then dies at the very last step — after the expensive part.
+Without this, adding a model and forgetting its renderer solves happily and
+then dies at the last step, after the expensive part.
 """
 
 from __future__ import annotations

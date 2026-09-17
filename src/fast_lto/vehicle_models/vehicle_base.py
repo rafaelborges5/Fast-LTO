@@ -42,8 +42,8 @@ class VehicleModel(ABC):
     def __init__(self, params: dict) -> None:
         self.params = params
 
-        # Normalisation metadata for reduced states [d, ...] and inputs [u].
-        # Stored as NumPy arrays (for post-processing) and as CasADi DM vectors
+        # Normalisation metadata, kept as both NumPy (for post-processing) and
+        # CasADi DM (for the graph).
         self._x_red_lb: Optional[np.ndarray] = None
         self._x_red_ub: Optional[np.ndarray] = None
         self._x_red_scale_np: Optional[np.ndarray] = None
@@ -147,6 +147,14 @@ class VehicleModel(ABC):
         w_left: ca.MX,
         w_right: ca.MX,
     ) -> List[ca.MX]:
+        """Corridor constraints for each corner of the car, not just its CoG.
+
+        A corner held at ``dx`` ahead of the CoG follows a centreline that has
+        bent away by ``0.5 * kappa / D_kappa * dx^2`` to second order, which is
+        why an outside front corner loses room in a turn even with the CoG
+        centred. Cross-checked against the NumPy form in ``warm_start`` by
+        ``tests/test_corner_geometry.py``.
+        """
         corners = self.get_corner_offsets()
         if not corners:
             return []
@@ -209,7 +217,7 @@ class VehicleModel(ABC):
             scale[near_zero] = 1.0
             shift[near_zero] = 0.0
 
-            # optimize symmetric bounds to reduce CasADi nodes
+            # Exactly symmetric bounds drop a term from every expression.
             symmetric = np.isclose(shift, 0.0, atol=1e-6)
             shift[symmetric] = 0.0
 

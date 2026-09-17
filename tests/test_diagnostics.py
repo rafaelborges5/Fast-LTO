@@ -1,13 +1,12 @@
 """Model diagnostics: the single source of physics the plots read from.
 
-Plots used to re-derive tire loads, slip angles and friction usage in NumPy,
-with their own hardcoded parameter fallbacks. Those copies disagreed with the
-model — most visibly by having ``lf``/``lr`` reversed — which meant the figure
-you would use to catch a physics regression was itself capable of drifting.
+A plot that re-derives tyre loads or friction usage in NumPy can drift from the
+model, which makes the figure you would use to catch a physics regression
+capable of being wrong itself.
 
-The tests below pin two things: the diagnostics obey physics that must hold
-regardless of the trajectory, and — the important one — the friction usage they
-report agrees with the constraint the solver actually enforced.
+Two things are pinned here: the diagnostics obey physics that holds regardless
+of the trajectory, and -- the important one -- the friction usage they report
+agrees with the constraint the solver actually enforced.
 """
 
 from __future__ import annotations

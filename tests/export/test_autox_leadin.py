@@ -6,9 +6,8 @@ reference curvature must reflect that geometry instead of being zeroed out. The
 exporter derives ``kappa = yaw_rate / v_path``, so the fill sets
 ``yaw_rate = kappa * initial_speed`` over the lead-in.
 
-``_splice_segment`` lives in ``pipeline`` whose import chain pulls in the
-OCP solver (casadi); this test only needs the pure stitching function, so it is
-skipped where casadi is unavailable. The exporter itself has no such dependency.
+Skipped where casadi is unavailable: ``_splice_segment`` lives in ``pipeline``,
+whose import chain pulls in the solver, though the exporter itself does not.
 """
 
 from __future__ import annotations
@@ -98,9 +97,7 @@ def _four_wheel_solution(tail_xy, tail_heading, ds: float, v0: float, n: int):
 
 
 def test_leadin_kappa_matches_path_geometry(tmp_path):
-    # ``_splice_segment`` lives in ``pipeline`` whose import chain pulls in
-    # the OCP solver (casadi). Import lazily so this module still collects where
-    # casadi is unavailable; the exporter itself has no such dependency.
+    # Imported lazily so this module still collects without casadi.
     pytest.importorskip("casadi", reason="pipeline import chain requires casadi")
     from fast_lto.pipeline import _splice_segment
 
@@ -125,15 +122,13 @@ def test_leadin_kappa_matches_path_geometry(tmp_path):
     x = np.array([float(r["x"]) for r in rows])
     y = np.array([float(r["y"]) for r in rows])
 
-    # 1. The lead-in must NOT export as straight (the bug being fixed).
+    # The lead-in must not export as straight.
     assert np.all(np.abs(kappa[:K]) > 1e-6)
 
-    # 2. Exported kappa must match the actual geometry of the exported (x, y):
-    #    the lead-in is a circular arc of curvature k0, so the three-point
-    #    curvature of the exported path equals k0 there.
+    # It is a circular arc of curvature k0, so the three-point curvature of
+    # the exported path must equal k0 there. Menger index i is path point i+1,
+    # so compare inside the lead-in, away from the junction at index K.
     kappa_geo = _menger_curvature(x, y)
-    # Menger index i corresponds to path point i+1; compare over the interior of
-    # the lead-in (away from the arc<->body junction at index K).
     interior = slice(1, K - 1)
     assert np.allclose(kappa[interior], k0, atol=1e-3)
     assert np.allclose(kappa_geo[: K - 2], k0, atol=1e-3)

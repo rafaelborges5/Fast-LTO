@@ -54,7 +54,7 @@ def _radial_profile(theta: np.ndarray, config: BeanTrackConfig) -> Tuple[np.ndar
         - 2.0 * config.double_lobe * np.sin(2.0 * theta)
     )
 
-    # Guard against very small radius values that could create sharp kinks.
+    # Guards a small radius from becoming a sharp kink.
     r = np.maximum(r, 0.35)
     return r, dr
 
@@ -103,7 +103,6 @@ def _arc_length_parameterisation(
     s = np.insert(s, 0, 0.0)
     theta = np.insert(theta, 0, 0.0)
 
-    # Normalise exactly to the target length.
     total_length = s[-1]
     s *= config.target_midline_length_m / total_length
     return theta, s

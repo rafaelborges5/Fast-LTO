@@ -1,27 +1,11 @@
 """
 Spline fitting and discretization for track centerlines.
 
-This module provides functions to:
-1. Load track middle line from CSV
-2. Fit a periodic spline (C² or C⁴) to the centerline
-3. Reparameterize by arc length
-4. Sample at uniform arc-length intervals
-5. Compute curvature at each sample point
-6. Optionally visualize the result
+A periodic spline through the CSV's midline cones, reparameterised by arc
+length and sampled at uniform spacing, giving the position, heading and
+curvature at every station the OCP will use as a node.
 
-The main entry point is `fit_and_discretize()`.
-
-Example
--------
-    from fast_lto.splines import fit_and_discretize
-
-    track = fit_and_discretize(
-        csv_path="data/tracks/ellipse.csv",
-        ds_m=0.1,
-        continuity="C2",
-        viz=True,
-    )
-    track.save("data/discretized/ellipse.json")
+Entry point ``fit_and_discretize``.
 """
 
 from __future__ import annotations
@@ -57,7 +41,7 @@ def _check_centerline_quality(points: np.ndarray) -> dict:
     min_seg = float(segs.min())
     seg_ratio = min_seg / median_seg if median_seg > 0 else 1.0
 
-    # 3-point Menger curvature at each interior point
+    # 3-point Menger curvature at each interior point.
     kappas = np.zeros(len(points) - 2)
     for i in range(1, len(points) - 1):
         p0, p1, p2 = points[i - 1], points[i], points[i + 1]
@@ -99,19 +83,7 @@ def _smooth_middle_line(points: np.ndarray, window: int, polyorder: int = 2) -> 
 
 
 def _load_middle_line(csv_path: Path) -> np.ndarray:
-    """
-    Load the middle line points from a track CSV.
-
-    Parameters
-    ----------
-    csv_path : Path
-        Path to the track CSV with columns: side, cone_id, x, y
-
-    Returns
-    -------
-    np.ndarray
-        Shape (N, 2) array of [x, y] points, ordered by cone_id.
-    """
+    """The (N, 2) midline points of a track CSV, ordered by ``cone_id``."""
     points: list[Tuple[int, float, float]] = []
 
     with csv_path.open("r", newline="") as f:
@@ -123,7 +95,6 @@ def _load_middle_line(csv_path: Path) -> np.ndarray:
                 y = float(row["y"])
                 points.append((idx, x, y))
 
-    # Sort by cone_id to ensure correct ordering
     points.sort(key=lambda p: p[0])
 
     if len(points) < 4:
@@ -131,7 +102,7 @@ def _load_middle_line(csv_path: Path) -> np.ndarray:
 
     arr = np.array([[p[1], p[2]] for p in points], dtype=np.float64)
 
-    # Strip closing duplicate if the track already repeats the first point
+    # Strip a closing duplicate, if the track repeats its first point.
     if np.linalg.norm(arr[0] - arr[-1]) < 1e-6:
         arr = arr[:-1]
 
@@ -139,27 +110,14 @@ def _load_middle_line(csv_path: Path) -> np.ndarray:
 
 
 def _compute_chord_params(points: np.ndarray) -> np.ndarray:
+    """Chord-length parameter values in ``[0, total_chord_length)``.
+
+    The initial parameterisation the spline is fitted against, before it is
+    reparameterised by true arc length.
     """
-    Compute chord-length parameterization for the points.
-
-    This gives a reasonable initial parameterization for spline fitting.
-    For a closed curve, we include the wrap-around distance.
-
-    Parameters
-    ----------
-    points : np.ndarray
-        Shape (N, 2) array of [x, y] points.
-
-    Returns
-    -------
-    np.ndarray
-        Shape (N,) array of parameter values in [0, total_chord_length).
-    """
-    # Compute distances between consecutive points
     diffs = np.diff(points, axis=0)
     segment_lengths = np.linalg.norm(diffs, axis=1)
 
-    # Cumulative chord length
     t = np.zeros(len(points))
     t[1:] = np.cumsum(segment_lengths)
 
@@ -167,27 +125,12 @@ def _compute_chord_params(points: np.ndarray) -> np.ndarray:
 
 
 def _fit_periodic_spline_c2(points: np.ndarray, t: np.ndarray) -> Tuple[CubicSpline, CubicSpline]:
-    """
-    Fit periodic cubic splines (C²) to x(t) and y(t).
-
-    Parameters
-    ----------
-    points : np.ndarray
-        Shape (N, 2) array of [x, y] points.
-    t : np.ndarray
-        Shape (N,) parameter values.
-
-    Returns
-    -------
-    spline_x, spline_y : CubicSpline
-        Periodic cubic splines for x(t) and y(t).
-    """
+    """Fit periodic cubic splines (C2) to x(t) and y(t)."""
     x = points[:, 0]
     y = points[:, 1]
 
-    # For periodic splines, we need to ensure the function values match at endpoints
-    # CubicSpline with bc_type='periodic' handles this, but requires f(t[0]) = f(t[-1])
-    # We append the first point to close the loop at t = t[-1] + wrap_distance
+    # bc_type="periodic" requires f(t[0]) == f(t[-1]), so close the loop by
+    # appending the first point one wrap distance on.
     wrap_distance = np.linalg.norm(points[0] - points[-1])
     t_periodic = np.append(t, t[-1] + wrap_distance)
     x_periodic = np.append(x, x[0])
@@ -200,36 +143,17 @@ def _fit_periodic_spline_c2(points: np.ndarray, t: np.ndarray) -> Tuple[CubicSpl
 
 
 def _fit_periodic_spline_c4(points: np.ndarray, t: np.ndarray) -> Tuple[object, object]:
-    """
-    Fit periodic quintic splines (C⁴) to x(t) and y(t).
-
-    Uses scipy's make_interp_spline with k=5 (quintic).
-    For periodic boundary conditions, we replicate points at the boundary.
-
-    Parameters
-    ----------
-    points : np.ndarray
-        Shape (N, 2) array of [x, y] points.
-    t : np.ndarray
-        Shape (N,) parameter values.
-
-    Returns
-    -------
-    spline_x, spline_y : BSpline
-        Periodic quintic splines for x(t) and y(t).
-    """
+    """Fit quintic splines (C4) to x(t) and y(t), closing the loop by hand."""
     x = points[:, 0]
     y = points[:, 1]
 
-    # Close the loop by appending the first point at t = t[-1] + wrap_distance
     wrap_distance = np.linalg.norm(points[0] - points[-1])
     t_periodic = np.append(t, t[-1] + wrap_distance)
     x_periodic = np.append(x, x[0])
     y_periodic = np.append(y, y[0])
 
-    # Use make_interp_spline with k=5 (quintic)
-    # Note: This uses not-a-knot BCs, not truly periodic.
-    # For most tracks this works well enough.
+    # Not-a-knot boundary conditions, not truly periodic -- close enough on a
+    # real track, where the seam is one sample out of several hundred.
     spline_x = make_interp_spline(t_periodic, x_periodic, k=5)
     spline_y = make_interp_spline(t_periodic, y_periodic, k=5)
 
@@ -242,35 +166,19 @@ def _compute_arc_length_mapping(
     t_max: float,
     num_integration_points: int = 10000,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute the mapping from parameter t to arc length s.
+    """The mapping from spline parameter t to arc length s, by quadrature.
 
-    Parameters
-    ----------
-    spline_x, spline_y : spline objects
-        Fitted splines for x(t) and y(t).
-    t_max : float
-        Maximum parameter value (corresponds to one full lap).
-    num_integration_points : int
-        Number of points for numerical integration.
-
-    Returns
-    -------
-    t_samples : np.ndarray
-        Parameter values used for integration.
-    s_samples : np.ndarray
-        Corresponding cumulative arc lengths.
+    Returns ``(t_samples, s_samples)``, a lookup table the caller inverts by
+    interpolation to place nodes at a uniform arc-length spacing.
     """
     t_samples = np.linspace(0, t_max, num_integration_points)
 
-    # Compute derivatives dx/dt, dy/dt
-    dx_dt = spline_x(t_samples, 1)  # First derivative
+    dx_dt = spline_x(t_samples, 1)
     dy_dt = spline_y(t_samples, 1)
 
-    # Speed = ds/dt = sqrt((dx/dt)² + (dy/dt)²)
     speed = np.sqrt(dx_dt**2 + dy_dt**2)
 
-    # Integrate to get arc length: s(t) = ∫₀ᵗ speed(τ) dτ
+    # s(t) = ∫₀ᵗ speed(τ) dτ
     dt = t_max / (num_integration_points - 1)
     s_samples = np.zeros_like(t_samples)
     s_samples[1:] = np.cumsum(speed[:-1] + speed[1:]) * dt / 2  # Trapezoidal rule
@@ -321,29 +229,24 @@ def _sample_at_arc_lengths(
     """
     total_length = s_samples[-1]
 
-    # For a closed track: choose N such that spacing is close to ds_m
-    # and points are evenly distributed around the full loop
+    # N is chosen so the spacing lands near ds_m and divides the loop evenly,
+    # which is why the achieved ds is returned rather than assumed.
     num_points = int(np.round(total_length / ds_m))
     actual_ds = total_length / num_points
 
-    # Sample at s = 0, L/N, 2L/N, ..., (N-1)*L/N
-    # (don't include s=L since that's the same as s=0 for a closed track)
+    # Excludes s = L, which is s = 0 again on a closed track.
     s_targets = np.linspace(0, total_length, num_points, endpoint=False)
 
-    # Interpolate to find t values corresponding to target s values
     t_at_targets = np.interp(s_targets, s_samples, t_samples)
 
-    # Evaluate splines at these t values
     x = spline_x(t_at_targets)
     y = spline_y(t_at_targets)
     positions = np.column_stack([x, y])
 
-    # First derivatives for heading
     dx_dt = spline_x(t_at_targets, 1)
     dy_dt = spline_y(t_at_targets, 1)
     headings = np.arctan2(dy_dt, dx_dt)
 
-    # Second derivatives for curvature at grid points
     d2x_dt2 = spline_x(t_at_targets, 2)
     d2y_dt2 = spline_y(t_at_targets, 2)
 
@@ -352,7 +255,7 @@ def _sample_at_arc_lengths(
     denominator = (dx_dt**2 + dy_dt**2) ** 1.5
     curvatures = numerator / denominator
 
-    # --- Midpoint curvatures for RK4 ---
+    # Midpoint curvatures, for RK4.
     s_mids = s_targets + actual_ds / 2.0
 
     t_at_mids = np.interp(s_mids, s_samples, t_samples)
@@ -409,12 +312,10 @@ def fit_and_discretize(
     """
     csv_path = Path(csv_path)
 
-    # 1. Load middle line points
     points = _load_middle_line(csv_path)
 
-    # 1b. Quality check — advisory only. An explicit smooth_centerline > 0
-    # is always honored; the heuristic here just warns when smoothing looks
-    # warranted but wasn't configured.
+    # Advisory only: an explicit smooth_centerline is always honoured, and the
+    # check just warns when smoothing looks warranted but was not configured.
     quality = _check_centerline_quality(points)
     if smooth_centerline > 0:
         print(
@@ -431,10 +332,8 @@ def fit_and_discretize(
             f"Consider setting smooth_centerline >= 3 in the config."
         )
 
-    # 2. Compute initial chord-length parameterization
     t = _compute_chord_params(points)
 
-    # 3. Fit periodic spline
     if continuity == "C2":
         spline_x, spline_y = _fit_periodic_spline_c2(points, t)
     elif continuity == "C4":
@@ -442,36 +341,31 @@ def fit_and_discretize(
     else:
         raise ValueError(f"Unknown continuity type: {continuity}. Use 'C2' or 'C4'.")
 
-    # The period is the parameter value at which we complete one lap
+    # The period: the parameter value at which the lap closes.
     t_max = t[-1] + np.linalg.norm(points[0] - points[-1])
 
-    # 4. Compute arc-length mapping
     t_samples, s_samples = _compute_arc_length_mapping(spline_x, spline_y, t_max)
 
-    # 5. Sample at uniform arc-length intervals
     positions, headings, curvatures, curvatures_half, arc_lengths, total_length, actual_ds = (
         _sample_at_arc_lengths(spline_x, spline_y, t_samples, s_samples, ds_m)
     )
 
-    # 6. Create the discretized track
     track = DiscretizedTrack(
         positions=positions,
         headings=headings,
         curvatures=curvatures,
         curvatures_half=curvatures_half,
         arc_lengths=arc_lengths,
-        ds_m=actual_ds,  # Use actual spacing (L/N), not requested ds_m
+        ds_m=actual_ds,  # the achieved spacing L/N, not the requested ds_m
         total_length_m=total_length,
         num_points=len(positions),
         continuity=continuity,
         source_file=str(csv_path),
     )
 
-    # 7. Optionally save
     if save_path is not None:
         track.save(save_path)
 
-    # 8. Optionally visualize
     if viz:
         _visualize_spline_fit(
             original_points=points,
@@ -502,18 +396,14 @@ def _visualize_spline_fit(
     """
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-    # --- Left plot: Track with spline and samples ---
     ax1 = axes[0]
 
-    # Dense spline evaluation for smooth curve
     t_dense = np.linspace(0, t_max, 1000)
     x_spline = spline_x(t_dense)
     y_spline = spline_y(t_dense)
 
-    # Plot smooth spline
     ax1.plot(x_spline, y_spline, "b-", linewidth=1.5, label="Fitted spline", alpha=0.7)
 
-    # Plot original points
     ax1.scatter(
         original_points[:, 0],
         original_points[:, 1],
@@ -525,7 +415,6 @@ def _visualize_spline_fit(
         zorder=5,
     )
 
-    # Plot discretized samples
     ax1.scatter(
         track.positions[:, 0],
         track.positions[:, 1],
@@ -537,7 +426,6 @@ def _visualize_spline_fit(
         alpha=0.8,
     )
 
-    # Mark start point
     ax1.scatter(
         track.positions[0, 0],
         track.positions[0, 1],
@@ -557,7 +445,6 @@ def _visualize_spline_fit(
     ax1.grid(True, linestyle="--", alpha=0.4)
     ax1.set_aspect("equal")
 
-    # --- Right plot: Curvature profile ---
     ax2 = axes[1]
 
     ax2.plot(track.arc_lengths, track.curvatures, "b-", linewidth=1.5)
@@ -568,7 +455,6 @@ def _visualize_spline_fit(
     ax2.set_title("Curvature Profile")
     ax2.grid(True, linestyle="--", alpha=0.4)
 
-    # Add statistics
     kappa_max = np.max(np.abs(track.curvatures))
     r_min = 1.0 / kappa_max if kappa_max > 0 else float("inf")
     stats_text = (

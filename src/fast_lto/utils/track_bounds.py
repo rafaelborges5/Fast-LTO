@@ -1,17 +1,12 @@
 """
-Compute lateral box constraints (w_left, w_right) for a discretized track.
+Lateral box constraints (``w_left``, ``w_right``) for a discretised track.
 
-Inputs:
-- DiscretizedTrack JSON (centerline samples with headings/normals)
-- Track CSV with left/right boundary polylines (progress-ordered)
+Casts a normal from every centreline sample and finds where it crosses the left
+and right boundary polylines. That distance, less the corridor margin, is the
+box the OCP constrains ``d`` to.
 
-Outputs:
-- Optional JSON with full track data plus widths (for downstream use)
-- Optional visualization overlaying normals and intersections
-
-Note: Current intersection search is O(N*M) over center samples (N) and
-boundary segments (M). # TODO: accelerate with spatial indexing / local
-windowing if needed.
+The intersection search is O(N*M) over samples and boundary segments, which is
+a fraction of a second on a real track and has never been worth indexing.
 """
 
 from __future__ import annotations
@@ -58,7 +53,7 @@ def _savgol_1d_periodic(
     if n <= polyorder + 2:
         return arr.copy()
 
-    # need odd window length
+    # savgol needs an odd window
     wl = min(window_length, n if n % 2 == 1 else n - 1)
     if wl <= polyorder:
         wl = polyorder + 2
@@ -126,10 +121,7 @@ def _make_spline(s: np.ndarray, d: np.ndarray) -> CubicSpline:
     """
     Internal fun for 1D splines d(s).
     """
-    # Cubic spline variant (C2 where possible)
     return CubicSpline(s, d, bc_type="natural")
-    # PCHIP alternative (monotone, shape-preserving)
-    # return PchipInterpolator(s, d)
 
 
 def _project_boundary_points_to_frenet(
@@ -192,10 +184,8 @@ def _compute_lateral_bounds_kdtree(
     headings = track.headings
     kappa = track.curvatures
 
-    # Wrap length for the closed loop. total_length_m is the true arc length of
-    # one full lap; the discretization ends one ds short of it, so this must
-    # equal arc_lengths[-1] + ds. Guard against a future generator (e.g. a
-    # skidpad-style open track) being routed through this closed-loop path.
+    # The discretisation ends one ds short of the full lap, so the wrap length
+    # must equal arc_lengths[-1] + ds. Guards an open track being routed here.
     total_length = float(track.total_length_m)
     ds = float(s[1] - s[0]) if s.size > 1 else total_length
     assert abs(total_length - (float(s[-1]) + ds)) < 1e-6, (
@@ -222,11 +212,9 @@ def _compute_lateral_bounds_kdtree(
         if s_samples.size == 0:
             return s_samples, d_samples
 
-        # Wrap into one period [0, L) BEFORE sort/dedup. The cone projections
-        # s_cone = s[idx] + delta_s are unwrapped and can fall just outside
-        # [0, L); wrapping first lets the seam neighbourhood dedup against the
-        # CSV's repeated closing cone and guarantees the tiled sequence below is
-        # strictly increasing.
+        # Wrap into one period before sorting: the cone projections are
+        # unwrapped and can fall just outside [0, L), and wrapping first is
+        # what makes the tiled sequence below strictly increasing.
         s_samples = np.mod(s_samples, total_length)
 
         order = np.argsort(s_samples)
@@ -249,9 +237,8 @@ def _compute_lateral_bounds_kdtree(
     s_right, d_right = _prepare_side(s_right_raw, d_right_raw)
 
     def _tile_periodic(s_period: np.ndarray, d_period: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        # Tile the in-period samples over three periods (s-L, s, s+L) so the
-        # natural spline is flanked by real data across the start/finish seam
-        # instead of extrapolating linearly into the cone-free gap there.
+        # Tiled over three periods, so the natural spline is flanked by real
+        # data at the start/finish seam instead of extrapolating into the gap.
         s_tiled = np.concatenate([s_period - total_length, s_period, s_period + total_length])
         d_tiled = np.concatenate([d_period, d_period, d_period])
         return s_tiled, d_tiled

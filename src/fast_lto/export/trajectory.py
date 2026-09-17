@@ -46,21 +46,14 @@ def _analytic_path_geometry(
     yaw_rate_equiv: np.ndarray,
     v_path_eps: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute the vehicle's true path heading and curvature analytically.
+    """The vehicle's true path heading and curvature, without differentiating.
 
-    Both quantities follow directly from already-smooth OCP state
-    trajectories, with no differentiation of anything at all. Every vehicle
-    model here shares the Frenet-frame kinematic identity
-    ``psi_err_dot = yaw_rate_equiv - kappa_ref(s) * s_dot`` (``yaw_rate_equiv``
-    is the ``yaw_rate`` state for four_wheel/dynamic_bicycle, or ``a_lat/v``
-    for point_mass, which has no separate yaw state). From this, the actual
-    path-tangent heading works out to exactly ``vehicle_heading + beta``
-    (``beta`` = body slip angle), and the path curvature is exactly
-    ``yaw_rate_equiv / v_path`` -- a pure algebraic combination of states,
-    unlike differentiating a freshly re-interpolated (x, y) spline (or even
-    finite-differencing ``beta`` itself, which is ill-conditioned wherever
-    both ``v_long`` and ``v_lat`` are small, e.g. skidpad's terminal
-    deceleration).
+    Both follow algebraically from the solved states: the path tangent is
+    ``vehicle_heading + beta`` and the path curvature is
+    ``yaw_rate_equiv / v_path``. Differentiating a re-interpolated (x, y)
+    spline instead, or finite-differencing ``beta``, is ill-conditioned
+    wherever both velocity components are small -- skidpad's terminal
+    deceleration, for one.
 
     Parameters
     ----------
@@ -95,7 +88,6 @@ def _finite_diff_periodic(arr: np.ndarray, dt: np.ndarray) -> np.ndarray:
     Uses forward differences everywhere; the last element wraps to the first.
     ``dt[i]`` is the time step from point *i* to point *i+1*.
     """
-    # Shifted array: arr[1], arr[2], ..., arr[0]
     arr_next = np.roll(arr, -1)
     delta = arr_next - arr
     safe_dt = np.where(dt != 0, dt, 1.0)
@@ -143,7 +135,6 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     periodic = mode == "trackdrive"
     params = data.get("model_params", {})
 
-    # -- Common arrays --
     path_xy = np.array(data["path_xy"], dtype=np.float64)
     x = path_xy[:, 0]
     y = path_xy[:, 1]
@@ -169,13 +160,11 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
             v, v_eps
         )
 
-    # -- Arc lengths along the optimal path --
     path_diffs = np.diff(path_xy, axis=0)
     segment_lengths = np.linalg.norm(path_diffs, axis=1)
     arc_lengths = np.zeros(N, dtype=np.float64)
     arc_lengths[1:] = np.cumsum(segment_lengths)
 
-    # -- Arc-length steps --
     if periodic:
         ds = np.diff(arc_lengths, append=arc_lengths[0])
         wrap_len = np.linalg.norm(path_xy[0] - path_xy[-1])
@@ -185,15 +174,14 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         ds[:-1] = np.diff(arc_lengths)
         ds[-1] = ds[-2] if N > 1 else 1.0
 
-    # -- Time: cumulative sum of ds / v --
     dt = ds / np.maximum(v, 1e-6)
     time = np.zeros(N, dtype=np.float64)
     time[1:] = np.cumsum(dt[:-1])
 
-    # -- Finite-difference function for derivative signals --
     fdiff = _finite_diff_periodic if periodic else _finite_diff_open
 
-    # -- Renormalize: make optimal path the new reference --
+    # The optimal path becomes the new reference, so d goes to zero and the
+    # boundaries are re-expressed relative to it.
     boundary_left = w_left - d
     boundary_right = -(w_right + d)
 
@@ -207,7 +195,6 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     headings = heading_path
     d = np.zeros(N, dtype=np.float64)
 
-    # -- Model-specific fields --
     if model_name == "four_wheel":
         yaw_rate_arr = yaw_rate_equiv
         delta_arr = np.array(data["delta"], dtype=np.float64)
@@ -281,7 +268,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
     else:
         raise ValueError(f"Unknown model_name: {model_name!r}")
 
-    # -- Force distribution (static normal load, 4WD) --
+    # Static normal load, split four ways.
     if model_name == "four_wheel":
         pass  # forces already assigned above
     elif m is not None:
@@ -302,7 +289,6 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
         force_long_rl = np.zeros(N, dtype=np.float64)
         force_long_rr = np.zeros(N, dtype=np.float64)
 
-    # -- Write CSV --
     with output_path.open("w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(CSV_COLUMNS)

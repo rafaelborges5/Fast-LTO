@@ -1,10 +1,9 @@
 """The shared profiling panel, and the per-model rows each module feeds it.
 
-The panel looks up constraint activity by string key and renders a missing key
-as ``0.0%``. That is the right behaviour for a model that genuinely has no such
-constraint, but it means a typo in a row key is invisible: the panel just claims
-the constraint was never active. These tests tie each module's rows to the keys
-its own activity computer actually produces.
+The panel looks up constraint activity by string key and renders a missing one
+as ``0.0%`` -- right for a model that has no such constraint, but it makes a
+typo in a row key invisible. These tie each module's rows to the keys its own
+activity computer produces.
 """
 
 from __future__ import annotations

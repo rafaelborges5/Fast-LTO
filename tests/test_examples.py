@@ -1,14 +1,12 @@
 """The shipped examples must keep running.
 
-``experiments/`` decayed into three modules that no longer import, because
-nothing ever executed them: a refactor moved functions out from under them and
-no signal fired. Examples are documentation people are invited to run, so they
-earn a test rather than the same fate -- one that actually calls the entry
-point, and one that checks the property the example exists to demonstrate.
+An example is documentation people are invited to run, so a refactor that moves
+a function out from under one has to fail here. One test calls the entry point;
+the other checks the property the example exists to demonstrate.
 
-The example is loaded by path, not imported as a package: ``examples/`` is
-deliberately not importable library code, and giving it an ``__init__.py`` just
-to test it would undo the point of moving it out of ``src/``.
+Loaded by path rather than imported: ``examples/`` is deliberately not
+importable library code, and an ``__init__.py`` added just to test it would
+undo the point of keeping it out of ``src/``.
 """
 
 from __future__ import annotations

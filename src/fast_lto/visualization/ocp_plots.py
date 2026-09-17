@@ -36,7 +36,7 @@ def plot_path_with_speed(
     plt.colorbar(sc, ax=ax, label="speed [m/s]")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, linestyle="--", alpha=0.4)
-    # Place legend below the plot to avoid overlap with path or colorbar.
+    # Below the plot, so it clears the path and the colorbar.
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.08),
@@ -77,9 +77,8 @@ def plot_speed_profile(
         fig, ax = plt.subplots(figsize=(8, 3))
     ax.plot(s, v, label="v(s)")
     if timed_mask is not None:
-        # Shade only the LAST untimed block (e.g. autox's post-finish run-off,
-        # where the objective stops rewarding speed) -- not every place the
-        # car happens to be slowing down.
+        # Only the last untimed block -- where the objective stops rewarding
+        # speed -- not everywhere the car happens to be slowing down.
         mask = np.asarray(timed_mask)
         untimed_blocks = _contiguous_blocks(mask < 0.5)
         if untimed_blocks:
@@ -234,18 +233,16 @@ def _compute_constraint_activity(
             "v_bounds_active": 0.0,
         }
 
-    # Tolerances (heuristic, not critical)
+    # Heuristic tolerances: this drives shading, not a decision.
     tol_d = 0.05  # [m]
     tol_a = 0.5  # [m/s^2]
     tol_fc = 0.05
     tol_v = 0.5  # [m/s]
 
-    # Track bounds: near left or right limits
     near_left = np.isfinite(w_left) & (np.abs(d - w_left) < tol_d)
     near_right = np.isfinite(w_right) & (np.abs(d + w_right) < tol_d)
     track_bounds_active = float(np.count_nonzero(near_left | near_right) / n)
 
-    # Friction circle
     mu = params.get("mu", 1.2)
     g_val = params.get("g", 9.81)
     mu_g = mu * g_val
@@ -255,7 +252,6 @@ def _compute_constraint_activity(
     else:
         friction_circle_active = 0.0
 
-    # Acceleration box bounds
     a_long_min = params.get("a_long_min", -np.inf)
     a_long_max = params.get("a_long_max", np.inf)
     a_lat_min = params.get("a_lat_min", -np.inf)
@@ -269,7 +265,6 @@ def _compute_constraint_activity(
     a_long_bounds_active = float(np.count_nonzero(near_a_long_min | near_a_long_max) / n)
     a_lat_bounds_active = float(np.count_nonzero(near_a_lat_min | near_a_lat_max) / n)
 
-    # Speed bounds
     v_min = params.get("v_min", -np.inf)
     v_max = params.get("v_max", np.inf)
     near_v_min = np.isfinite(v_min) & (np.abs(v - v_min) < tol_v)

@@ -1,11 +1,8 @@
 """Where the pipeline reads its inputs and writes its outputs.
 
-The pipeline keeps everything under one root: ``data/tracks``, ``data/solutions``,
-``ocp_plots`` and so on all hang off it. Finding that root used to be a single
-line -- ``Path(__file__).resolve().parents[2]`` -- which is right in a source
-checkout and wrong everywhere else. Installed from a wheel, ``parents[2]`` is
-inside ``site-packages``, so a ``pip install``ed Fast-LTO wrote solutions and
-figures next to the installed package.
+Everything hangs off one data root: ``data/tracks``, ``data/solutions``,
+``ocp_plots``. In a source checkout that is the checkout; installed from a
+wheel there is no checkout to find, so it is the working directory.
 """
 
 from __future__ import annotations

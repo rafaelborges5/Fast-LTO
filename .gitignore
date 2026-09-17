@@ -20,21 +20,19 @@ dist/
 build/
 *.egg-info/
 
-# Research code. Allowlist, same reasoning as the tracks below: the four files
-# named here are parameterised and run on shipped data; everything else in
-# research/ is a one-off study tied to solutions and tracks that stay local.
+# Research code. An allowlist, same as the tracks below: the files named here
+# are parameterised and run on shipped data; the rest is a local one-off.
 research/**/*.py
 !research/experiments/skidpad_batch.py
 !research/experiments/autox_dfx_grip_sweep.py
 !research/experiments/animate_lap.py
 !research/experiments/interactive_lap.py
 
-# Track data. Allowlist rather than blocklist, so the default for anything
-# dropped into data/tracks/ is "stays on this machine" -- a boundary CSV off a
-# test day is the team's, not the repo's. The shipped set is the four public
-# event tracks plus what the generators produce, which is all a fresh clone
-# needs. gitignore does not govern already-tracked files, so anything added
-# here later also has to leave the index with `git rm --cached`.
+# Track data. An allowlist, so anything dropped into data/tracks/ stays on this
+# machine by default -- a boundary CSV off a test day is the team's, not the
+# repo's. Shipped: the four public event tracks plus what the generators write.
+# Already-tracked files are not governed by this, so removing one also needs
+# `git rm --cached`.
 data/tracks/*.csv
 !data/tracks/fscz_2025.csv
 !data/tracks/fscz_2026.csv

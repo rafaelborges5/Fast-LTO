@@ -7,23 +7,17 @@ the constraint set, the objective or the spline geometry moves these numbers
 well outside the tolerance, even though every other test in the suite still
 passes.
 
-One scenario per event mode, because the three modes exercise genuinely
-different machinery: trackdrive closes the loop, autox extends the track past a
-timing gate and pins a standing start, and skidpad builds its track from a cone
-map and weights the objective from a timed mask.  A refactor that only ever ran
-the trackdrive scenario would not notice breaking either of the others.
+One scenario per event mode, because the three exercise genuinely different
+machinery, and a refactor that only ran trackdrive would not notice breaking
+the others.
 
-Only solver-independent quantities are compared.  Solve time, iteration count
-and time-per-node are deliberately excluded: they are properties of the machine
-and the IPOPT build, not of the trajectory.
+Only solver-independent quantities are compared: solve time and iteration count
+are properties of the machine and the IPOPT build, not of the trajectory.
+``RTOL`` exists to absorb a different BLAS/IPOPT build and is still orders of
+magnitude tighter than any real behaviour change.
 
-The solve is bit-identical run to run on one machine; ``RTOL`` exists to absorb
-a different BLAS/IPOPT build, and is still ~3 orders of magnitude tighter than
-any real behaviour change.
-
-The full sweep is ~50 s, most of it the four-wheel skidpad solve.  It runs by
-default, because a safety net you have to opt into is not a safety net.  For a
-faster inner loop while iterating locally::
+The full sweep is ~50 s and runs by default, because a safety net you have to
+opt into is not one. For a faster inner loop::
 
     pytest -m "not slow"
 

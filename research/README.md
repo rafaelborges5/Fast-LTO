@@ -48,6 +48,4 @@ pip install -e ".[research]"
 ## Adding your own
 
 `.gitignore` here is an **allowlist** — a new file under `research/` is ignored
-unless it is named there. That is deliberate: this is where one-off analysis
-goes, and most of it is tied to data that never leaves the machine it was run
-on. Add a `!research/...` line when something becomes general enough to share.
+unless it is named there.

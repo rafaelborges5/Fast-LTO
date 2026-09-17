@@ -94,7 +94,7 @@ def plot_inputs_dynamic_bicycle(
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=(8, 3))
 
-    # Dual-axis plot: a_long on left axis, delta on right axis.
+    # a_long on the left axis, delta on the right.
     color_a = "tab:blue"
     color_d = "tab:orange"
 
@@ -110,7 +110,6 @@ def plot_inputs_dynamic_bicycle(
     ax.set_xlabel("s [m]")
     ax.grid(True, linestyle="--", alpha=0.4)
 
-    # Combined legend.
     ax.legend(handles=[ln1, ln2], loc="best")
     ax.set_title("Inputs vs s")
     if out_path is not None:
@@ -301,7 +300,7 @@ def plot_all_panels_dynamic_bicycle(
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(out_path, dpi=200)
-        # Save an additional diagnostics plot next to the main panels.
+        # A second figure, next to the main panels.
         plot_tire_and_yaw_diagnostics(
             s=s,
             v=v,

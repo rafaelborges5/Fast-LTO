@@ -1,9 +1,5 @@
 """
-Fast-LTO: Lap Time Optimization Pipeline
-
-Main entry points:
-    from fast_lto.pipeline import run_pipeline, PipelineConfig
-    from fast_lto.cli import main
+Fast-LTO: minimum-time trajectory optimisation for Formula Student Driverless.
 """
 
 from fast_lto.pipeline import (

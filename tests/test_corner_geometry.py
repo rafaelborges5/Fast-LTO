@@ -1,24 +1,17 @@
 """The corner-corridor geometry has two implementations. They must agree.
 
-The constraint that decides whether the car fits through a corner is written
-twice on purpose:
+Whether the car fits through a corner is written twice on purpose: symbolically
+in ``VehicleModel.get_corner_constraints``, because the solver differentiates
+it, and numerically in ``warm_start.corner_slacks``, because a seed has to be
+screened without building a CasADi graph. Two implementations of one formula
+drift, and these had -- in how each guarded the Frenet Jacobian near its
+singularity, not in the algebra.
 
-* symbolically, in ``VehicleModel.get_corner_constraints``, because the solver
-  differentiates it;
-* numerically, in ``warm_start.corner_slacks``, because a seed has to be
-  screened without building a CasADi graph.
+Proving they compute the same geometry catches more than merging them into one
+kernel would, which would only prove they run the same code.
 
-Two implementations of one formula is a standing invitation to drift, and they
-had already drifted -- not in the algebra, but in how each guarded the Frenet
-Jacobian ``D_kappa = 1 - kappa*d`` near the singularity. This module is the
-check that was missing. It is cheaper than merging them into one parameterised
-kernel, and it catches strictly more: a shared kernel proves the two callers run
-the same code, whereas this proves they compute the same geometry.
-
-``utils.corridor`` deliberately stays out of it. It answers a different
-question -- the widest feasible interval in ``d``, with no known ``d`` to
-evaluate at -- so it fixed-points ``D_kappa`` around the interval centre. That
-difference is a real one, not drift.
+``utils.corridor`` stays out of it: it answers a different question, the widest
+feasible interval in ``d`` with no known ``d`` to evaluate at.
 """
 
 from __future__ import annotations

@@ -1,10 +1,9 @@
 """Tests for RunConfig <-> PipelineConfig plumbing.
 
 Value assertions run against fixtures in ``tests/data/configs``, never against
-the shipped ``configs/*.yaml`` — those are tuning artifacts that change with the
-car, and a test that pins their values breaks every time someone retunes.  The
-shipped configs are still covered here, but only by the contract that actually
-has to hold for them: they parse, and they validate against their own model.
+the shipped ``configs/*.yaml``: those are tuning artifacts, and pinning their
+values would break every retune. The shipped ones are covered only by the
+contract that has to hold -- they parse, and validate against their own model.
 """
 
 from __future__ import annotations

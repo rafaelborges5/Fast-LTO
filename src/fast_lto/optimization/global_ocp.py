@@ -13,11 +13,8 @@ from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, Sp
 from fast_lto.utils.smooth import smoothmax
 from fast_lto.vehicle_models import VehicleModel
 
-# Tolerances for the optional terminal centering/heading constraints (see
-# `_terminal_state_bounds` in `build_ocp`): how close to centered/aligned the
-# end of the trajectory must be -- skidpad's `terminal_straight_m` window, or
-# autox's short `terminal_state_constraint` window. Tight but not
-# exact-equality, to keep the discrete dynamics from being over-determined.
+# How close to centred and aligned the end of the trajectory has to be. Tight
+# but not exact, so the discrete dynamics are not over-determined.
 _TERMINAL_D_TOL_M = 0.05
 _TERMINAL_PSI_TOL_RAD = 0.03
 _TERMINAL_YAW_RATE_TOL = 0.15
@@ -27,11 +24,8 @@ _TERMINAL_V_LAT_TOL = 0.15
 def _terminal_state_bounds(
     model: VehicleModel, use_normalization: bool
 ) -> list[tuple[int, float, float]]:
-    """(state_idx, lo, hi) triples enforcing the terminal tolerances (d,
-    psi_err, and yaw_rate/v_lat where the model has them) in solver units --
-    shared by skidpad's terminal-straight window and autox's terminal-state
-    constraint (see their call sites in `build_ocp`).
-    """
+    """(state_idx, lo, hi) triples enforcing the terminal tolerances in solver
+    units, for d, psi_err and yaw_rate/v_lat where the model has them."""
     reduced_names = model.reduced_state_names()
     if use_normalization:
         x_scale, x_shift = model.get_reduced_state_scaling()
@@ -78,12 +72,7 @@ def _safe_debug_value(opti: ca.Opti, expr: ca.MX) -> np.ndarray | float | None:
 
 
 class BuiltOcp(NamedTuple):
-    """Everything ``build_ocp`` hands back.
-
-    Was a bare nine-tuple that the caller unpacked positionally, so the reader
-    had to count commas to find out which expression was which. Unpacks exactly
-    the same way.
-    """
+    """Everything ``build_ocp`` hands back."""
 
     opti: ca.Opti
     X: ca.MX
@@ -106,8 +95,6 @@ def _per_input_weights(
     """Broadcast a regularisation weight to one value per input.
 
     Accepts a scalar, a sequence of length ``nu``, or None for the default.
-    Replaces a pair of ``np.isscalar`` branches that duplicated the broadcast
-    and only length-checked one of the two weights.
     """
     if weight is None:
         return np.full(nu, float(default))
@@ -299,10 +286,9 @@ def build_ocp(
     if mode in ("autox", "skidpad"):
         opti.subject_to(X[0, :] == x0_param.T)
     elif mode == "trackdrive":
-        # d(0) and psi_err(0) are left free: the closed-loop constraint below
-        # (X[N-1,:] == X[0,:]) already keeps the full state consistent across
-        # the wrap-around, so pinning them to x0_param would only force the
-        # lap through the centerline with zero heading error for no reason.
+        # The whole state is free: the closed-loop constraint below already
+        # keeps it consistent across the wrap-around, and pinning d(0) and
+        # psi_err(0) would force the lap through the centreline for no reason.
         pass
     else:
         raise ValueError(f"Unknown mode: {mode!r}")
@@ -321,24 +307,10 @@ def build_ocp(
         f_space, eval_at_point = build_space_dynamics(model)
     s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
 
-    # Optional conservative-D braking zone (autox): a second model instance,
-    # identical to `model` except D_fl/D_fr/D_rr/D_rl replaced outright by
-    # `D_safe_braking` (an absolute override, not a scale factor), swapped in
-    # for every node with no timing objective -- i.e. the untimed tail after
-    # the timing gate's second crossing, using the exact same boundary
-    # `_autox_time_weights`/`track["timed_mask"]` already define (see
-    # pipeline.py), not a separately-specified distance. This does NOT reach
-    # the constant-speed pad appended after the OCP solve
-    # (`autox_terminal_pad_m`): that pad isn't part of the OCP horizon at
-    # all, so there's nothing there to apply a model to.
-    #
-    # D is baked as a plain float into each node's constraint/dynamics
-    # expressions rather than carried as a CasADi parameter (see
-    # `_all_pacejka_coeffs`/`get_constraints` in four_wheel.py), so nothing
-    # stops different nodes from being built against different model
-    # instances -- the node loop below just picks which one per index.
-    # Off by default (D_safe_braking=None): zero extra nodes, identical
-    # graph to before this feature existed.
+    # Conservative-D braking zone (autox): a second model instance with the
+    # tyre Ds overridden, used on the untimed nodes past the gate. Tyre
+    # coefficients are baked into each node as plain floats, so different nodes
+    # can be built against different model instances.
     brake_model: VehicleModel | None = None
     f_space_brake = eval_at_point_brake = None
     brake_zone_mask: np.ndarray | None = None
@@ -353,7 +325,7 @@ def build_ocp(
         timed_arr = np.asarray(timed_mask_raw, dtype=float)
         if timed_arr.size != N:
             raise ValueError(f"track['timed_mask'] has {timed_arr.size} entries, expected {N}")
-        brake_zone_mask = timed_arr < 0.5  # untimed = no timing objective = braking zone
+        brake_zone_mask = timed_arr < 0.5
 
         d_keys = ("D_fl", "D_fr", "D_rr", "D_rl")
         missing = [k for k in d_keys if k not in model.params]
@@ -372,8 +344,7 @@ def build_ocp(
             f_space_brake, eval_at_point_brake = build_space_dynamics(brake_model)
 
     def _node_model(i: int) -> Tuple[VehicleModel, Callable, Callable]:
-        # brake_zone_mask is only set alongside the three brake_* objects,
-        # so inside this branch none of them is None.
+        # The mask is only set alongside the three brake_* objects.
         if brake_zone_mask is not None and brake_zone_mask[i]:
             assert brake_model is not None
             assert f_space_brake is not None and eval_at_point_brake is not None
@@ -383,9 +354,8 @@ def build_ocp(
     total_time = 0
     timed_time = 0
     pure_timed_time = 0
-    # Cumulative time at each node (node 0 = 0 s), used to measure elapsed time
-    # between two arbitrary arc-length points after the solve (e.g. an autox
-    # timing gate offset from the nominal start/finish line).
+    # Cumulative time per node, so elapsed time between two arbitrary
+    # arc-lengths can be measured after the solve (e.g. an autox timing gate).
     cumulative_time = [total_time]
 
     use_corner_constraints = len(model.get_corner_offsets()) > 0
@@ -504,21 +474,10 @@ def build_ocp(
         opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
         opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
 
-    # State-dependent constraints (friction circles, D_kappa/s_dot floors, ...)
-    # at the final node. The main loop above only evaluates get_constraints at
-    # x_i for i in range(N-1): Euler's constraint-eval point is x_i alone (see
-    # _constraint_eval_points), so X[N-1] is never checked by it. Without this,
-    # models whose friction limit depends on persistent state rather than the
-    # control input (e.g. four_wheel's per-wheel tire forces, which are states,
-    # not inputs) can land on a final state that violates their own physical
-    # limits -- normally harmless since nothing pins X[N-1] to an extreme
-    # value, but exploitable once `terminal_speed` forces a hard equality
-    # there (the solver can "cheat" at that one unchecked node to hit the
-    # target cheaply). mode == "trackdrive" doesn't need this: its closed-loop
-    # equality below already ties X[N-1] back to X[0], which the loop does
-    # check at i=0. enforce_terminal_constraints=False skips this (and thus
-    # tolerates a possibly-violated final-node friction circle) in exchange
-    # for a noticeably easier/faster solve -- useful for a quick draft pass.
+    # The node loop only evaluates the constraints at x_i for i < N-1, leaving
+    # the final node unchecked -- which a terminal speed target makes worth
+    # cheating at. Trackdrive needs no repeat: its closed-loop equality ties
+    # X[N-1] back to X[0], which the loop does check. See README.md.
     if mode != "trackdrive" and enforce_terminal_constraints:
         x_last = X[N - 1, :].T
         u_last = U[N - 1, :].T
@@ -535,12 +494,9 @@ def build_ocp(
     if mode == "trackdrive":
         opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
-    # Optional terminal speed (e.g. skidpad: come to ~rest after the finish line).
-    # An upper-bound inequality (v <= terminal_speed) rather than an equality:
-    # an exact equality forces the solver to land on one precise point via the
-    # discrete dynamics step, right where the friction-circle constraint above
-    # is also newly binding -- a much more tightly coupled (and slower to
-    # solve) system than just requiring "at or under" the target.
+    # An upper bound rather than an equality: landing on one exact point
+    # through the discrete dynamics, right where the friction circle is also
+    # newly binding, is a far more tightly coupled problem to solve.
     if terminal_speed is not None:
         reduced_names = model.reduced_state_names()
         v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
@@ -552,40 +508,18 @@ def build_ocp(
         else:
             opti.subject_to(X[N - 1, v_idx] <= terminal_speed)
 
-    # Optional terminal-straight window (skidpad): the controller tracks
-    # lat_deviation/yaw_angle_error directly, so force the last
-    # `terminal_straight_m` metres to stay centered (d) and heading-aligned
-    # (psi_err) within a tight tolerance, rather than just the exact final
-    # node -- otherwise the untimed exit stretch has no incentive to
-    # straighten out before the finish.
-    #
-    # Also bound yaw_rate and v_lat over the same window (wherever the model
-    # has them as states). Root cause found empirically: with terminal_speed
-    # active and no cost/constraint on state *shape* in the untimed exit
-    # zone, nothing stops the solver from taking a violent, cost-free
-    # excursion on the last step or two to land exactly on the speed target
-    # -- v_long itself decays smoothly, but yaw_rate and then (once yaw_rate
-    # alone was capped) v_lat were each seen spiking on the final node/two,
-    # dragging psi_err/the exported yaw_angle_error (which is essentially
-    # -atan2(v_lat, v_long), and blows up as v_long -> 0) along with them.
-    # Capping both removes the "cheat" instead of just capping one symptom
-    # at a time.
+    # Skidpad: hold the last `terminal_straight_m` metres centred and aligned,
+    # so the untimed exit has a reason to straighten out before the finish.
+    # The window also caps yaw_rate and v_lat, without which the solver takes
+    # a cost-free excursion on the last node or two to hit the speed target.
     if mode == "skidpad" and terminal_straight_m is not None and terminal_straight_m > 0.0:
         n_window = int(round(terminal_straight_m / ds))
         _apply_terminal_window(
             opti, X, N, n_window, _terminal_state_bounds(model, use_normalization)
         )
 
-    # Optional terminal-state constraint (autox): unlike skidpad, the path
-    # leading up to the finish is left free -- only the last
-    # `terminal_window_nodes` discrete steps have to land centered/
-    # heading-aligned (and yaw_rate/v_lat capped, same "cheat" rationale as
-    # above), since that's the state the prescribed, constant-speed terminal
-    # pad (see `_append_autox_terminal_pad` in pipeline.py) picks up from. A
-    # true single node (n_window=1) was tried first and found infeasible for
-    # rate-limited actuator models (four_wheel's dFxmax/ddeltamax): the state
-    # can't snap to the target in zero discrete steps, so a couple of nodes
-    # of slack are needed for the dynamics to actually converge into it.
+    # Autox: the same window, but only over the last few nodes -- the state the
+    # prescribed terminal pad picks up from. The approach stays free.
     if mode == "autox" and terminal_state_constraint:
         _apply_terminal_window(
             opti, X, N, terminal_window_nodes, _terminal_state_bounds(model, use_normalization)
@@ -637,8 +571,8 @@ def build_ocp(
             "print_time": 1 if solver_verbose else 0,
             "ipopt.sb": "yes",
             "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
-            # Safety cap so a pathological solve fails fast instead of hanging
-            # (a healthy fine-ds four-wheel lap converges in well under 300 s).
+            # A pathological solve should fail fast rather than hang; a healthy
+            # fine-ds four-wheel lap converges in well under this.
             "ipopt.max_cpu_time": 600.0,
         },
         {},
@@ -858,10 +792,9 @@ def solve_ocp_and_save(
     pure_timed_s = float(sol.value(pure_timed_expr)) if time_weights is not None else 0.0
     reg_term = obj_val - timed_time_s
 
-    # Autox: the real timing gate sits `autox_timing_offset_m` downstream of the
-    # nominal start/finish line (where the car begins the OCP). The accurate lap
-    # time is the elapsed time between the car passing that gate and passing it
-    # again one lap later — not from s=0 through the run-off extension.
+    # The real gate sits `autox_timing_offset_m` downstream of where the car
+    # starts, so the lap time runs gate to gate, not s=0 to the end of the
+    # run-off.
     autox_lap_time_s = None
     autox_timing_warning = None
     if autox_timing_offset_m is not None:
@@ -921,14 +854,12 @@ def solve_ocp_and_save(
         f"status={return_status}"
     )
     if use_normalization:
-        # Map solver variables back to physical reduced states/inputs.
         x_scale, x_shift = model.get_reduced_state_scaling()
         u_scale, u_shift = model.get_input_scaling()
         if x_scale is None or x_shift is None or u_scale is None or u_shift is None:
             raise RuntimeError(
                 "Normalisation scales/shifts are not defined for solution " "post-processing."
             )
-        # x_phys = x_norm * scale + shift  (broadcast over samples)
         x_scale_np = np.asarray(x_scale).astype(float).reshape(1, -1)
         x_shift_np = np.asarray(x_shift).astype(float).reshape(1, -1)
         u_scale_np = np.asarray(u_scale).astype(float).reshape(1, -1)

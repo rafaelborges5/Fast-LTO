@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Batch skidpad solves over a grid of tyre grip and corridor margin.
 
@@ -28,6 +26,8 @@ Outputs under --out-dir, named after --prefix (default: the config's track_id):
     <prefix>_times.csv                score table
     <prefix>_margin_trajectories.png
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
@@ -252,7 +252,7 @@ def _load_table(path: Path, out_dir: Path) -> Dict[Tuple[float, float, float], D
                 )
             except (KeyError, TypeError, ValueError):
                 continue
-            # Only treat as done if the solve succeeded and its CSV is present.
+            # Done only if the solve succeeded and its CSV is there.
             if (
                 row.get("status") == "Solve_Succeeded"
                 and row.get("csv")
@@ -451,8 +451,7 @@ def run(
     _write_table(table_csv, results)
     _print_table(results, prefix)
 
-    # Show a representative spread of grip levels (the balanced F==R points of
-    # the ramp) on the trajectory plot -- generalizes to any d_max/anchors.
+    # A representative spread: the balanced F == R points of the ramp.
     show = [c for c in combos if abs(c[0] - c[1]) < 1e-9]
     show = [c for c in show if c in set((r["D_front"], r["D_rear"]) for r in results)]
     png = _plot_margins(results, out_dir, base, show, prefix)

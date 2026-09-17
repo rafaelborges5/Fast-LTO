@@ -90,19 +90,16 @@ def _compute_scaled_axes(config: EllipseTrackConfig) -> Tuple[float, float, floa
     is approximately `config.target_midline_length_m`.
     """
 
-    # Start from an arbitrary base ellipse with the desired aspect ratio.
     b0 = 10.0
     a0 = config.aspect_ratio * b0
 
     n = config.integration_points
     theta = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
-    # Rotation does not change perimeter length, so we can use rotation 0 here.
+    # Rotation does not change the perimeter, so measure it unrotated.
     dx, dy = _ellipse_derivatives(theta, a0, b0, rotation_rad=0.0)
     speed = np.sqrt(dx * dx + dy * dy)  # ds/dtheta
-    # Numerical approximation of perimeter of the base ellipse.
     perimeter_base = float(speed.mean() * (2.0 * np.pi))
 
-    # Scale factor to match target midline length.
     scale = config.target_midline_length_m / perimeter_base
     a = a0 * scale
     b = b0 * scale
@@ -129,15 +126,13 @@ def _arc_length_parameterisation(
     theta = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
     dx, dy = _ellipse_derivatives(theta, a, b, rotation_rad=0.0)
     speed = np.sqrt(dx * dx + dy * dy)  # ds/dtheta
-
-    # Integrate using the trapezoidal rule over theta.
     dtheta = (2.0 * np.pi) / n
     ds = speed * dtheta
     s = np.cumsum(ds)
     s = np.insert(s, 0, 0.0)
     theta = np.insert(theta, 0, 0.0)
 
-    # Normalise so that the final arc length is exactly the total perimeter.
+    # Normalise away the quadrature's drift from the exact perimeter.
     total_length = s[-1]
     s *= config.target_midline_length_m / total_length
 
@@ -155,11 +150,10 @@ def _generate_theta_samples(
     total_length = s[-1]
     ds_nominal = config.nominal_spacing_m
 
-    # Arc-length positions along the midline.
     num_segments = int(np.floor(total_length / ds_nominal))
     s_targets = np.linspace(0.0, total_length, num_segments, endpoint=False)
 
-    # Invert s(theta) via interpolation to obtain theta(s).
+    # Invert s(theta) to get theta(s).
     theta_samples = np.interp(s_targets, s, theta)
     return theta_samples
 
@@ -176,12 +170,11 @@ def _compute_boundaries(
     x, y = _ellipse_xy(theta_samples, a, b, rotation_rad=config.rotation_rad)
     dx, dy = _ellipse_derivatives(theta_samples, a, b, rotation_rad=config.rotation_rad)
 
-    # Tangent vectors and unit tangents.
     tangents = np.stack((dx, dy), axis=1)
     speeds = np.linalg.norm(tangents, axis=1, keepdims=True)
     unit_tangents = tangents / speeds
 
-    # Left normal is a +90-degree rotation of the tangent.
+    # The left normal is the tangent rotated +90 degrees.
     left_normals = np.stack((-unit_tangents[:, 1], unit_tangents[:, 0]), axis=1)
 
     midline = np.stack((x, y), axis=1)
@@ -190,13 +183,11 @@ def _compute_boundaries(
     left = midline + half_width * left_normals
     right = midline - half_width * left_normals
 
-    # --- Global transform to make pose (0, 0, 0) "natural" ---
-    # Choose the first midline point as the reference pose.
+    # Put the first midline point at the origin, heading +y, so a solve on a
+    # generated track starts where a solve on a real one does.
     ref_point = midline[0]
     ref_tangent = unit_tangents[0]
 
-    # We want the vehicle heading at the reference point to align with +y.
-    # Current heading angle is atan2(vy, vx); target is +pi/2.
     import math
 
     current_angle = math.atan2(ref_tangent[1], ref_tangent[0])

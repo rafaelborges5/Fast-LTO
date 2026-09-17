@@ -1,15 +1,10 @@
 """Which steps a run executes, and what it does about the ones it skips.
 
-``run_pipeline`` used to decide per step whether cached output was still
-current. None of those checks ever passed (see the comment above ``STEP_ORDER``),
-so every run recomputed everything while carrying ninety lines that said
-otherwise. What remains is the part that was always real: ``start_from`` and
-``end_at`` bound the run, and anything before ``start_from`` has to exist
-already.
+``start_from`` and ``end_at`` bound the run, and anything before ``start_from``
+has to exist on disk already.
 
-These tests drive the plan directly rather than solving, so they are cheap and
-say something about control flow rather than about physics -- the golden suite
-covers the physics.
+These drive the plan directly rather than solving, so they are cheap and say
+something about control flow; the golden suite covers the physics.
 """
 
 from __future__ import annotations

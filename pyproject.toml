@@ -76,9 +76,8 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint.per-file-ignores]
-# Analysis entry points must select a headless matplotlib backend, or set
-# thread-count env vars for the solver, before importing anything that reads
-# them -- so imports legitimately follow a statement here.
+# Analysis entry points pick a headless matplotlib backend before importing
+# anything that reads it, so imports legitimately follow a statement there.
 "research/**/*.py" = ["E402"]
 
 [tool.pytest.ini_options]
@@ -90,8 +89,8 @@ markers = [
 [tool.coverage.run]
 source = ["fast_lto"]
 branch = true
-# research/ is outside the package, so it is already out of scope: coverage
-# reports on what `pip install fast-lto` actually delivers.
+# Coverage reports on what `pip install fast-lto` delivers; research/ is
+# outside the package and so already out of scope.
 
 [tool.coverage.report]
 exclude_also = [
@@ -105,9 +104,7 @@ exclude_also = [
 python_version = "3.10"
 warn_unused_configs = true
 ignore_missing_imports = true
-# Required everywhere now, rather than opted into module by module. The
-# previous per-module allowlist existed because the flag had been claimed
-# repo-wide before and never held; the count is zero, so it holds.
+# Everywhere, with no per-module allowlist.
 disallow_untyped_defs = true
 
 

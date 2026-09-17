@@ -1,9 +1,8 @@
-"""Tests for ``_splice_segment``, the one function that stitches prescribed
-segments onto a solved trajectory.
+"""Tests for ``_splice_segment``, which stitches prescribed segments onto a
+solved trajectory.
 
-It replaced three near-identical copies (autox lead-in, autox terminal pad,
-skidpad lead-in), so the cases they each covered are pinned here together —
-including the length invariant one of the copies quietly violated.
+One function serves all three cases -- autox lead-in, autox terminal pad,
+skidpad lead-in -- so all three are pinned here, including the length invariant.
 """
 
 from __future__ import annotations

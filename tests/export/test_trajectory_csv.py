@@ -6,8 +6,7 @@ discretization node, and finite values in every numeric cell.  A refactor that
 reorders or renames a column, or lets a NaN through, breaks the controller
 without breaking any solver test.
 
-Complements ``test_autox_leadin.py``, which checks one derived quantity
-(lead-in curvature) rather than the file contract.
+``test_autox_leadin.py`` checks one derived quantity instead of the contract.
 """
 
 from __future__ import annotations

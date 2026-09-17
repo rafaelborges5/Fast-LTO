@@ -125,9 +125,8 @@ def plot_all_panels_four_wheel(
     out_path: Optional[Path] = None,
     show: bool = True,
 ) -> None:
-    # Tire loads, slip angles and friction usage come from the model itself
-    # (VehicleModel.diagnostics), so this figure shows the solve rather than a
-    # second opinion about it.
+    # Tyre loads, slip angles and friction usage come from the model itself,
+    # so the figure shows the solve rather than a second opinion about it.
     forces = diagnostics
     a_x = diagnostics["a_long_body"]
     a_y = diagnostics["a_lat_body"]
@@ -245,7 +244,7 @@ def plot_diagnostics_four_wheel(
     dFxmax = float(params.get("dFxmax", 1000.0))
     ddeltamax = float(params.get("ddeltamax", 1.3))
 
-    # Physical rates from normalised inputs
+    # Physical rates, recovered from the normalised inputs.
     if input_data is not None:
         Fx_fl_dot = np.array(input_data.get("Fx_fl_dot_norm", np.zeros_like(s))) * dFxmax
         Fx_fr_dot = np.array(input_data.get("Fx_fr_dot_norm", np.zeros_like(s))) * dFxmax

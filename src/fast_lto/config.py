@@ -1,12 +1,12 @@
 """
-Unified YAML configuration for Fast-LTO.
+YAML configuration: the car, and what to do with it.
 
-Provides RunConfig (top-level) and VehicleConfig (shared + per-model vehicle
-parameters).  Load with ``RunConfig.from_yaml("path.yaml")``, save with
-``run_config.to_yaml("path.yaml")``.
+``VehicleConfig`` holds the shared vehicle parameters plus a per-model block;
+``RunConfig`` pairs one of those with a pipeline setup. Load with
+``RunConfig.from_yaml``, save with ``to_yaml``.
 
-Every key in the YAML is validated against known fields — typos and unused
-parameters raise ``ValueError`` rather than being silently ignored.
+Every key is validated against a known field, so a typo raises rather than
+being silently ignored. See ``configs/README.md``.
 """
 
 from __future__ import annotations
@@ -25,9 +25,8 @@ from fast_lto.vehicle_models.four_wheel import FourWheelModel
 from fast_lto.vehicle_models.point_mass import PointMassModel
 from fast_lto.vehicle_models.vehicle_base import VehicleModel
 
-# Annotated as concrete constructors rather than ``type[VehicleModel]``: the
-# values are instantiated here to read their defaults, and the base class is
-# abstract.
+# Concrete constructors rather than ``type[VehicleModel]``: they are
+# instantiated here to read their defaults, and the base class is abstract.
 _MODEL_CLASSES: Dict[str, Callable[..., VehicleModel]] = {
     "point_mass": PointMassModel,
     "dynamic_bicycle": DynamicBicycleModel,
@@ -118,13 +117,13 @@ class VehicleConfig:
         default_keys = _get_model_default_keys(model_name)
         defaults = copy.deepcopy(_MODEL_CLASSES[model_name](params=None).get_default_params())
 
-        # Layer shared vehicle params (only those the model knows about)
+        # Shared vehicle params, for the keys this model knows about.
         shared = self._shared_as_dict()
         for key, val in shared.items():
             if key in default_keys:
                 defaults[key] = val
 
-        # Layer model-specific overrides (strict — all must be known)
+        # Model-specific overrides, where every key must be known.
         overrides = getattr(self, model_name) or {}
         override_unknown = set(overrides.keys()) - default_keys
         if override_unknown:
@@ -149,7 +148,6 @@ class VehicleConfig:
                 f"Allowed keys: {sorted(allowed_keys)}"
             )
 
-        # Validate model-specific sub-dicts
         for model_name in _MODEL_NAMES:
             sub = d.get(model_name)
             if sub is not None and not isinstance(sub, dict):
@@ -183,9 +181,8 @@ class VehicleConfig:
 # RunConfig
 # ---------------------------------------------------------------------------
 
-# PipelineConfig fields that are runtime plumbing rather than YAML settings:
-# the caller supplies them (paths, the already-parsed vehicle config), so they
-# are not accepted in — nor written to — a config file.
+# Runtime plumbing rather than YAML settings: the caller supplies these, so
+# they are neither accepted in nor written to a config file.
 _NON_YAML_PIPELINE_FIELDS = frozenset(
     {
         "repo_root",
@@ -290,15 +287,9 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 def _load_yaml_with_extends(path: Path, _seen: Optional[List[Path]] = None) -> Dict[str, Any]:
     """Read a config, resolving an ``extends:`` chain from the bottom up.
 
-    The three event configs share a car. Before this, all of it was copied into
-    each of them -- 32 vehicle settings identical across all three, so a tyre
-    coefficient had to be edited in three places and could silently end up
-    describing three different cars. ``extends: vehicle.yaml`` puts the shared
-    description in one file and leaves each event with only what it genuinely
-    tunes.
-
-    The path is resolved relative to the file naming it, so a config directory
-    can be copied or moved as a unit.
+    The car is described once in ``vehicle.yaml``; each event config names it
+    and overrides only what it genuinely tunes. The path is resolved relative
+    to the file naming it, so a config directory moves as a unit.
     """
     path = Path(path).resolve()
     _seen = list(_seen or [])
@@ -385,8 +376,8 @@ class RunConfig:
         active = _MODE_BLOCKS.get(self.pipeline.mode)
         for name in sorted(_pipeline_yaml_fields()):
             if name in _ALL_MODE_BLOCKS:
-                # Only the event actually being run; the other block is at its
-                # defaults and would just be noise in the written file.
+                # Only the event being run; the other block is at its
+                # defaults and would be noise in the written file.
                 if name != active:
                     continue
                 pipeline[name] = asdict(getattr(self.pipeline, name))

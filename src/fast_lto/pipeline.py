@@ -1,20 +1,17 @@
 """
-Pipeline orchestrator for Fast-LTO.
+Pipeline orchestrator: track generation through to plots.
 
-This module provides a structured way to run the full pipeline from track generation
-to visualization, with the ability to start from any intermediate step.
+Six steps, each writing one artifact under the data root:
 
-Pipeline Steps
---------------
-1. Track generation        -> data/tracks/{track_id}.csv
-2. Spline fitting          -> data/discretized/{track_id}.json
-3. Bounds computation      -> data/discretized/{track_id}_with_widths.json
-4. OCP solving             -> data/solutions/{track_id}_{model_name}_{integrator_name}_{mode}.json
-5. Trajectory export       -> data/output_trajectories/{track_id}_{model}_{integrator}_{timestamp}.csv
-6. Visualization           -> ocp_plots/{timestamp}/panels.png
+1. ``track``   -> data/tracks/{track_id}.csv
+2. ``spline``  -> data/discretized/{track_id}.json
+3. ``bounds``  -> data/discretized/{track_id}_with_widths.json
+4. ``ocp``     -> data/solutions/{track_id}_{model}_{integrator}_{mode}.json
+5. ``export``  -> data/output_trajectories/{track_id}_{model}_{integrator}_{stamp}.csv
+6. ``plot``    -> ocp_plots/{stamp}/panels.png
 
-Each step can be run independently, and intermediate results are saved to disk
-for reuse in subsequent runs.
+``start_from`` resumes at any step, reading the previous step's artifact off
+disk. See ``README.md`` in this directory.
 """
 
 from __future__ import annotations
@@ -64,8 +61,7 @@ from fast_lto.vehicle_models import (
 from fast_lto.visualization.panels import render_panels
 
 if TYPE_CHECKING:
-    # Imported for typing only: config imports pipeline, so a runtime import
-    # here would be circular.
+    # Typing only: config imports pipeline, so a runtime import is circular.
     from fast_lto.config import VehicleConfig
 
 StepName = Literal["track", "spline", "bounds", "ocp", "export", "plot"]
@@ -73,9 +69,7 @@ WarmStartPolicy = Literal["off", "auto", "ladder"]
 WARM_START_POLICIES = get_args(WarmStartPolicy)
 
 TrackType = Literal["fsg", "ellipse", "bean", "skidpad"]
-# Derived from the type, not hand-listed beside it: the CLI's --track-type
-# choices read this, and a copy would be free to drift out of step (as the
-# --mode choices did, silently making skidpad unreachable from the CLI).
+# Derived, not hand-listed: the CLI's --track-type choices read this.
 TRACK_TYPES = get_args(TrackType)
 
 
@@ -91,9 +85,7 @@ class PipelineConfig:
     track_type: TrackType = "fsg"
 
     repo_root: Optional[Path] = None
-    # Reads a CSV somewhere other than data/tracks/{track_id}.csv. Normally
-    # unset -- see the track_csv_path property, which derives the usual location
-    # from track_id on every access.
+    #: Reads a CSV somewhere other than data/tracks/{track_id}.csv.
     track_csv_override: Optional[Path] = None
 
     generate_track: bool = False
@@ -112,17 +104,14 @@ class PipelineConfig:
 
     model_name: str = "point_mass"
     integrator_name: Literal["euler", "rk4"] = "euler"
-    # A scalar weight, or one per input (see --reg-du-vec).
+    #: A scalar weight, or one per input (see --reg-du-vec).
     reg_u: Union[float, Sequence[float]] = 600.0
     reg_u_l2: float | None = None
-    # None means "follow the mode" -- see the launch_speed property, which
-    # resolves it. Named as a request rather than a value because that is what
-    # it is: the resolved number is never None.
+    #: None follows the mode; the ``launch_speed`` property resolves it.
     initial_speed: Optional[float] = None
     boundary_margin: float = 0.0
-    # Per-event settings, each owned by its EventMode (see modes.py). Only the
-    # block matching `mode` is consulted; naming the other one in a config file
-    # is an error rather than a silent no-op.
+    #: Per-event settings, each owned by its ``EventMode``. Naming the block of
+    #: an event other than ``mode`` is an error rather than a silent no-op.
     autox: AutoxConfig = field(default_factory=AutoxConfig)
     skidpad: SkidpadConfig = field(default_factory=SkidpadConfig)
 
@@ -133,13 +122,10 @@ class PipelineConfig:
     normalize_states_and_inputs: bool = True
     solver_verbose: bool = False
 
-    # Warm start. "off" is a hard off: no seed is read, none is written and no
-    # extra solve is inserted, so the solve is bit for bit the cold one.
-    # "auto" seeds from the store when a compatible solution exists, and when
-    # none does but the target margin is past the critical margin (the point
-    # where the default centreline guess leaves the feasible set) it first
-    # solves one easier problem and continues from that. "ladder" always walks
-    # up from a safe margin, ignoring the store.
+    #: ``"off"`` reads and writes no seed, so the solve is bit for bit the cold
+    #: one. ``"auto"`` seeds from the store, and solves one easier problem first
+    #: when nothing fits and a cold start would begin infeasible. ``"ladder"``
+    #: always walks up from a safe margin, ignoring the store.
     warm_start: WarmStartPolicy = "auto"
     warm_start_max_margin_gap: float = 0.15
     warm_start_ladder_step: float = 0.05
@@ -191,18 +177,11 @@ class PipelineConfig:
     def track_csv_path(self) -> Path:
         """The boundary CSV this run reads.
 
-        Derived from ``track_id`` on every access rather than resolved once in
-        ``__post_init__``. It used to be a field filled in there behind an
-        ``is None`` guard, which made the derivation non-idempotent: re-running
-        ``__post_init__`` after a field changed (see
-        ``RunConfig.to_pipeline_config``, which does exactly that so a CLI flag
-        can override the YAML) left the already-resolved path alone. A
-        ``--track-id`` flag therefore renamed every output while still reading
-        the *previous* id's CSV -- a silently wrong answer rather than an error.
-
-        ``launch_speed`` above is derived the same way, for the same reason:
-        anything ``__post_init__`` derives must either be re-derivable or know
-        it was set deliberately.
+        Derived on every access rather than resolved once in ``__post_init__``,
+        which runs more than once: ``RunConfig.to_pipeline_config`` re-runs it
+        so a CLI flag can override the YAML. Anything derived there has to be
+        re-derivable, or a ``--track-id`` override renames the outputs while
+        still reading the previous id's CSV. ``launch_speed`` is the same.
         """
         if self.track_csv_override is not None:
             return Path(self.track_csv_override)
@@ -368,21 +347,10 @@ def _splice_segment(
 ) -> Dict:
     """Stitch a prescribed, constant-speed segment onto a solved trajectory.
 
-    Used for all three pieces that sit outside the OCP horizon: the autox
-    lead-in, the autox terminal pad and the skidpad lead-in. None of them is
-    optimized -- each is a constant-speed run along the centerline that gives
-    the physical car track before the start line, or reference margin past the
-    solved end in case the controller tracks a little further than planned.
-
     ``yaw_rate`` is filled as ``kappa * speed`` from the segment's own
-    curvature rather than zero-filled: the exporter derives the reference
-    curvature back out of it (``kappa = yaw_rate / v_path``), so zeros would
-    export a curving lead-in as straight (up to ~0.26 1/m on a real track) and
-    hand the tracker a wrong curvature reference at launch. On a straight
-    segment the same rule gives exactly zero, so the skidpad lead-in needs no
-    special case. Speed is held at ``speed``; the remaining dynamic states
-    (tire forces, steering, ...) stay at rest -- the tracker consumes speed,
-    lateral deviation and curvature, none of which depend on them.
+    curvature, because the exporter derives the reference curvature back out of
+    it. Zeros would export a curving lead-in as straight. The remaining dynamic
+    states stay at rest; nothing downstream reads them.
 
     Parameters
     ----------
@@ -390,11 +358,8 @@ def _splice_segment(
         ``"before"`` prepends the segment (a lead-in), ``"after"`` appends it
         (a terminal pad).
     timed:
-        Value to extend ``timed_mask`` with. The autox lead-in is ``1``: it
-        sits before the timing gate, and under ``_autox_time_weights`` only the
-        post-finish tail is untimed. The autox pad and the skidpad lead-in are
-        ``0``. ``decel_mask``, where present, is always extended with ``0`` --
-        no prescribed segment is a braking zone.
+        Value to extend ``timed_mask`` with. ``decel_mask``, where present, is
+        always extended with ``0``: no prescribed segment is a braking zone.
     """
     n = len(segment["arc_lengths"])
 
@@ -544,8 +509,7 @@ def _plan_ladder(
         return [start, target]
 
     step = max(float(config.warm_start_ladder_step), 1e-3)
-    # Drop a rung that would sit right on top of the target: solving twice at
-    # essentially the same margin buys nothing.
+    # Drop a rung sitting on top of the target; solving it twice buys nothing.
     rungs = [float(m) for m in np.arange(start, target, step) if target - m > 0.5 * step]
     rungs.append(target)
     return rungs
@@ -718,9 +682,8 @@ def _solve_with_warm_start(
                             initial_guess=guess,
                         )
                     except Exception as exc:  # noqa: BLE001
-                        # An intermediate solve is an optimisation, not a
-                        # requirement: fall through and solve the target with
-                        # whatever guess we have (possibly none).
+                        # An optimisation, not a requirement: fall through to
+                        # the target with whatever guess we have.
                         print(
                             f"  Warm start: intermediate solve at {rung:.2f} failed "
                             f"({type(exc).__name__}), continuing to the target"
@@ -798,7 +761,7 @@ def step_solve_ocp(
     config.solutions_dir.mkdir(parents=True, exist_ok=True)
     solution_path = config.solution_path
 
-    # Define the OCP run configuration that uniquely characterises a solution.
+    # The run configuration that uniquely characterises a solution.
     track_ds_m = float(
         track_data.get(
             "ds_m",
@@ -811,9 +774,9 @@ def step_solve_ocp(
     )
     track_num_points = int(track_data.get("num_points", len(track_data.get("arc_lengths", []))))
 
-    # reg_u may be a scalar or one weight per input.
-    # Tested for the scalar case rather than the sequence one: a Sequence is
-    # open-ended, so excluding list/tuple/ndarray does not leave a float.
+    # reg_u may be a scalar or one weight per input. Tested for the scalar
+    # case: Sequence is open-ended, so excluding the obvious types proves
+    # nothing.
     reg_du_for_sig: Union[float, List[float]]
     if isinstance(config.reg_u, (int, float)):
         reg_du_for_sig = float(config.reg_u)
@@ -866,7 +829,6 @@ def step_solve_ocp(
             json.dump(sol_dict, f, indent=2)
         print(plan.message)
 
-    # Optional concise profiling summary (single line)
     profiling = sol_dict.get("profiling", {})
     N = profiling.get("N")
     ds_m = profiling.get("ds_m")
@@ -961,26 +923,8 @@ def step_visualize(
 
 
 # --------------------------------------------------------------------------- #
-#  The run plan
+#  The run plan -- every step runs every time; `start_from` is the only reuse
 # --------------------------------------------------------------------------- #
-#
-# Steps used to decide for themselves whether their output was still current:
-# compare the cached spline's ds against the requested one, compare the stored
-# bounds settings against the current ones, and skip the step if they matched.
-# None of it ever fired. The spline check compared the *requested* ds against
-# the *achieved* one, and `fit_and_discretize` resamples to a whole number of
-# points, so the two agree only when the track length is an exact multiple of
-# ds -- which was true for none of the tracks in this repo. The bounds check
-# compared a stored four-key dict against a freshly built three-key one, so it
-# was never equal either, and it was unreachable regardless because the spline
-# always refit.
-#
-# It guarded 0.02 s of spline and bounds work in front of a solve measured in
-# minutes, so rather than repair it, it is gone. `start_from` remains: reuse is
-# something the caller asks for explicitly, and it cannot silently hand the
-# solver a track built under settings that have since changed -- which is what
-# a repaired cache would have done, since `smooth_centerline` was never part of
-# the comparison.
 
 STEP_ORDER: Tuple[StepName, ...] = ("track", "spline", "bounds", "ocp", "export", "plot")
 
@@ -1017,9 +961,8 @@ def _step_spline(config: PipelineConfig, results: Dict[str, Path]) -> Path:
 
 
 def _step_bounds(config: PipelineConfig, results: Dict[str, Path]) -> Path:
-    # Always reads the discretized track back from disk rather than taking it
-    # from the spline step: it costs milliseconds, and it means this step
-    # behaves the same whether or not the spline ran in this process.
+    # Read back from disk, so this step behaves the same whether or not the
+    # spline ran in this process.
     step_compute_bounds(config, track=None, csv_path=results["track"])
     return config.track_with_widths_path
 

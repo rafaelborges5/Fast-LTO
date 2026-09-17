@@ -1,12 +1,8 @@
 """
-Discretized track data structure for lap time optimization.
+The discretised centreline: one sample per OCP node.
 
-This module provides the `DiscretizedTrack` dataclass which holds the output
-of spline fitting and discretization: sampled positions, headings, curvatures,
-and arc lengths along the track centerline.
-
-The data can be serialized to JSON for standalone use and loaded back for
-optimization pipelines.
+``DiscretizedTrack`` holds what spline fitting produced -- positions, headings,
+curvatures and arc lengths -- and round-trips through JSON.
 """
 
 from __future__ import annotations

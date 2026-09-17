@@ -21,8 +21,7 @@ if TYPE_CHECKING:
 
 
 # argparse dest -> PipelineConfig field, for every flag that simply replaces a
-# value when given. Flags needing real logic (the store_true pairs, the two
-# regularisation flags) are handled explicitly in build_run_config below.
+# value. The rest are handled explicitly in build_run_config below.
 _VALUE_OVERRIDES = {
     "track_id": "track_id",
     "track_type": "track_type",
@@ -67,15 +66,15 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
         if value is not None:
             setattr(pipeline, field_name, value)
 
-    # Autox settings live on their own block (see modes.AutoxConfig), so these
-    # are applied by attribute rather than through the flat table above.
+    # Autox settings live on their own block, so they are applied by attribute
+    # rather than through the flat table above.
     for arg_name, field_name in _AUTOX_OVERRIDES.items():
         value = getattr(args, arg_name)
         if value is not None:
             setattr(pipeline.autox, field_name, value)
 
-    # Not part of the tables above only because it reads as a pair with the
-    # mode: an unset initial_speed follows whatever event is selected.
+    # Kept out of the tables above because an unset initial_speed follows
+    # whatever event is selected.
     if args.initial_speed is not None:
         pipeline.initial_speed = args.initial_speed
 
@@ -90,9 +89,8 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
     elif args.warm_start is not None:
         pipeline.warm_start = args.warm_start
 
-    # store_true/store_false flags carry no "unset" state, so each one is only
-    # applied when it differs from its default -- otherwise simply parsing the
-    # command line would silently override the config file.
+    # These flags carry no "unset" state, so each is applied only when it
+    # differs from its default; otherwise the CLI would override the YAML.
     if args.solver_verbose:
         pipeline.solver_verbose = True
     if args.no_normalization:
@@ -311,11 +309,8 @@ Examples:
         help="Shrink lateral bounds by this amount (m) on each side. Default: 0.0",
     )
 
-    # Tri-state on purpose. As a `store_false` flag this both read backwards
-    # (passing --savgol-bounds turned smoothing *on*, against its own help text)
-    # and offered no way to turn it off at all. BooleanOptionalAction gives both
-    # directions, and the None default keeps an unpassed flag from silently
-    # overriding the YAML.
+    # Tri-state on purpose: the flag works in both directions, and the None
+    # default keeps an unpassed flag from overriding the YAML.
     parser.add_argument(
         "--savgol-bounds",
         action=argparse.BooleanOptionalAction,

@@ -1,17 +1,13 @@
 """
 Geometric feasibility of the lateral corridor, for a given ``boundary_margin``.
 
-Mirrors ``VehicleModel.get_corner_constraints`` (see
-``src/vehicle_models/vehicle_base.py``) on a discretized track, so the pipeline
-can answer two questions before the solver ever runs:
+Mirrors ``VehicleModel.get_corner_constraints`` on a discretised track, so two
+questions can be answered before the solver runs: how wide the feasible
+interval in ``d`` is at each station, and at which margin the default guess
+(``d = 0``, ``psi_err = 0``) stops being feasible at all.
 
-* how wide is the feasible interval in ``d`` at each station, and
-* at which margin does the default initial guess (``d = 0``, ``psi_err = 0``)
-  stop being feasible.
-
-The second one matters because ``solve_ocp_and_save`` starts every cold solve
-from exactly that point: above the critical margin the solve begins outside the
-feasible set, which is slow and tends to land in a worse local minimum.
+The second is what the warm-start ladder climbs; above that margin a cold solve
+begins outside the feasible set.
 """
 
 from __future__ import annotations

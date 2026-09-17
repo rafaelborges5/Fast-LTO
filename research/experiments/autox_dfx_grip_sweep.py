@@ -1,44 +1,30 @@
-from __future__ import annotations
-
 """
-Autox dFxmax x tyre-grip x boundary-margin sweep on a real track.
+Autox force-rate x tyre-grip x corridor-margin sweep on a real track.
 
-Sweeps the per-wheel longitudinal force rate limit (dFxmax), the tyre peak-grip D
-over a front/rear "staircase" evolution (same shape as
-skidpad_batch.d_sequence), and the corridor boundary margin, solving the
-four-wheel autox OCP for each combination on top of the current configs/autox.yaml
-braking profile (terminal_speed, autox_terminal_state_constraint,
-autox_terminal_window_nodes, autox_terminal_pad_m). Every run is exported as a
-controller-reference trajectory CSV whose name encodes dFxmax, the D combo and the
-margin, e.g.::
+Three axes on top of a YAML config: the per-wheel longitudinal force rate limit
+``dFxmax``, tyre peak grip ``D`` as a front/rear staircase, and the corridor
+margin. Everything else -- track, mesh, braking profile, terminal conditions --
+comes from the config, so a bare run solves exactly what
+``fast-lto --config <that file>`` would.
 
-    data/output_trajectories/<track_id>_dfx1000_F1.20_R1.20_m0.45.csv
+Unlike ``skidpad_batch.py``, this drives the real ``run_pipeline`` so the
+warm-start ladder is available: autox needs a margin continuation that skidpad
+does not, and the ladder depends only on track geometry and corner offsets, so
+neighbouring combos also seed each other. Sequential for the same reason --
+warm-start chaining and one shared seed store beat solve-level parallelism.
 
-Track is always a required parameter (--track-id): this is meant to be re-run
-against whatever track you're currently working with, not just the one it was
-built for.
-
-Unlike fscz_skidpad_batch.py, this drives the real run_pipeline()/warm-start ladder
-(not a direct solve_ocp_and_save call): autox's target boundary_margin needs a
-margin-ladder continuation that skidpad doesn't, and that ladder depends only on
-track geometry + vehicle corner offsets (not on D, dFxmax or the target margin
-itself), so reusing the existing, already-tested path is both simpler and lets
-later combos warm-start from an adjacent (D, dFxmax or margin) neighbour.
-
-Run sequentially (not multiprocessed): warm-start chaining between neighbouring
-combos, and avoiding concurrent writes to the shared data/solutions/_seeds/ store,
-matter more here than solve-level parallelism.
-
-Usage (from repo root):
-    python research/experiments/autox_dfx_grip_sweep.py --track-id <new_track>
-    python research/experiments/autox_dfx_grip_sweep.py --track-id <new_track> \\
+Usage, from the repo root:
+    python research/experiments/autox_dfx_grip_sweep.py --track-id <track>
+    python research/experiments/autox_dfx_grip_sweep.py --track-id <track> \\
         --dfx-values 1000,2000 --margins 0.45,0.50 --d-max 1.30
 
-Outputs:
-    data/output_trajectories/<track_id>_dfx<N>_F*_R*_m*.csv        one per solve
-    data/output_trajectories/<track_id>_dfx_grip_sweep_times.csv     lap-time table
-    data/output_trajectories/<track_id>_dfx_grip_sweep.png            lap-time plot
+Outputs under data/output_trajectories:
+    <track_id>_dfx<N>_F*_R*_m*.csv        one trajectory per solve
+    <track_id>_dfx_grip_sweep_times.csv   lap-time table
+    <track_id>_dfx_grip_sweep.png         lap-time plot
 """
+
+from __future__ import annotations
 
 import argparse
 import copy
@@ -161,10 +147,8 @@ def _print_table(rows: List[Dict[str, Any]], track_id: str) -> None:
         print("-" * len(hdr))
 
 
-# Categorical slots 1-3 (blue/orange/aqua) from the dataviz skill's validated
-# default palette -- fixed order, not cycled. This subset clears the CVD/
-# normal-vision floors pairwise (all-pairs, not just adjacent) in both light
-# and dark modes, which is what a small-multiples line chart needs.
+# Fixed order, not cycled: these three stay distinguishable pairwise under
+# colour-vision deficiency, which a small-multiples line chart needs.
 _SERIES_COLORS = ("#2a78d6", "#eb6834", "#1baf7a")
 _TEXT_SECONDARY = "#52514e"
 
@@ -299,9 +283,8 @@ def run(
 
     print(f"Baseline config: {config_path}, track_id={track_id}")
     base_rc = RunConfig.from_yaml(config_path)
-    # RunConfig keeps the pipeline settings in `.pipeline`. Assigning to the
-    # RunConfig itself silently created an attribute nobody reads, so the sweep
-    # ran the config's own track while its help text promised --track-id.
+    # The pipeline settings live on `.pipeline`; assigning to the RunConfig
+    # itself would create an attribute nobody reads.
     base_rc.pipeline.track_id = track_id
     if smooth_centerline is not None:
         print(

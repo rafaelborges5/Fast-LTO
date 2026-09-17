@@ -1,14 +1,12 @@
 """Regression tests for track-width (corridor bound) extraction.
 
-Guards the periodic-spline fix in ``_compute_lateral_bounds_kdtree``: on a
-closed track the width spline must wrap the start/finish seam instead of
-extrapolating linearly into the cone-free gap there (which used to leave a
-~0.43 m width discontinuity at the seam).
+On a closed track the width spline has to wrap the start/finish seam rather
+than extrapolate into the cone-free gap there, which otherwise leaves a width
+discontinuity of tens of centimetres at the seam.
 
-The synthetic ellipse/bean generators build both boundaries as exact constant
-offsets of the centreline (``half_width = 0.5 * track_width_m``), so the analytic
-ground truth is ``w_left == w_right == half_width`` at every arc length,
-including across the seam.
+The synthetic generators build both boundaries as exact constant offsets of the
+centreline, so the ground truth is ``w_left == w_right == half_width`` at every
+arc length, including across the seam.
 """
 
 from __future__ import annotations

@@ -1,13 +1,9 @@
-"""The solver-profiling / constraint-activity text panel shared by every model.
+"""The solver-profiling and constraint-activity text panel, shared by every model.
 
-Each model's panel figure ends with the same summary block: how the solve went,
-how the objective split, and how often each constraint was active. It existed as
-three near-identical copies, one per model, and they had drifted — the
-four-wheel copy had lost the time-per-point and time-per-iteration lines, and
-worded the objective split differently, for no reason anyone chose.
-
-Only the constraint rows are genuinely per-model, because only the constraint
-set is: pass them as ``activity_rows``.
+Every panel figure ends with the same summary block: how the solve went, how
+the objective split, and how often each constraint was active. Only the
+constraint rows are per-model, because only the constraint set is -- pass them
+as ``activity_rows``.
 """
 
 from __future__ import annotations

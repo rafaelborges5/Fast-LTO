@@ -1,8 +1,6 @@
 """Tests for autox track extension and post-finish untimed weighting.
 
-``pipeline`` pulls in the OCP solver (casadi) at import time, so these tests
-are skipped where casadi is unavailable -- see
-``tests/export/test_autox_leadin.py`` for the same pattern.
+Skipped where casadi is unavailable, since ``pipeline`` imports the solver.
 """
 
 from __future__ import annotations
@@ -236,12 +234,9 @@ def test_extend_track_no_discontinuity_at_wrap_seam():
         start_node_offset=0,
     )
 
-    # No jump in consecutive-point spacing anywhere in the OCP horizon,
-    # including the backward-run-in<->core and core<->run-off seams that the
-    # rotation introduces. Points are sampled directly on the circle, so
-    # consecutive *chord* length is uniformly slightly under ds_m (the arc
-    # length) by construction -- compare spacings against each other, not
-    # against ds_m, so this only fails on a genuine seam discontinuity.
+    # No jump in spacing anywhere in the horizon, including the seams the
+    # rotation introduces. Spacings are compared against each other, not
+    # against ds_m: these are chords of a circle, so all are slightly short.
     ext_pos = np.asarray(extended["positions"])
     spacing = np.linalg.norm(np.diff(ext_pos, axis=0), axis=1)
     assert np.allclose(spacing, spacing[0], atol=1e-9)

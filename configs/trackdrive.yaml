@@ -3,7 +3,7 @@ extends: vehicle.yaml
 pipeline:
   ds_m: 0.5
   continuity: C2
-  smooth_centerline: 5      # samples, 0 = off
+  smooth_centerline: 5      # savgol window size, 0 = off
 
   mode: trackdrive
 

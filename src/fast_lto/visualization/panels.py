@@ -1,16 +1,12 @@
 """Which panel figure to draw for a solved trajectory, and with what.
 
-Each vehicle model exposes a different state vector, so each needs a different
-set of panels and a different set of arrays pulled out of the solution JSON.
-That wiring used to live in ``pipeline.step_visualize`` as a 95-line
-``if/elif`` that unpacked every model's fields by hand — one branch per model,
-next to nothing about plotting, and a fourth model meant editing the pipeline.
+Each vehicle model has its own state vector, so each needs its own panels and
+its own fields out of the solution JSON. A renderer owns that knowledge, and
+``PANEL_RENDERERS`` maps a ``model_name`` to one -- mirroring how
+``pipeline._make_model`` maps the same string to a model class.
 
-The renderers below own that per-model knowledge instead, and
-``PANEL_RENDERERS`` maps a ``model_name`` to one, mirroring how
-``pipeline._make_model`` maps the same string to a model class. Adding a model
-means adding a renderer here and an entry in the registry; the pipeline does
-not change.
+Adding a model means adding a renderer here and an entry in the registry. The
+pipeline does not change.
 """
 
 from __future__ import annotations

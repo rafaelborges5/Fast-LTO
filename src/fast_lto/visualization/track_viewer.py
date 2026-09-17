@@ -1,16 +1,7 @@
 """
-Track visualisation utilities.
+Plot a track CSV: the two boundaries and the midline between them.
 
-This module provides a simple way to visualise track CSVs produced by the
-`tracks` generators (ellipse and future layouts).
-
-Expected CSV format
--------------------
-Columns: side,cone_id,x,y
-
-- `side`: one of "L" (left), "M" (middle), "R" (right)
-- `cone_id`: integer ordering along the track
-- `x`, `y`: coordinates in metres (floating point)
+Input format: ``data/tracks/README.md``.
 """
 
 from __future__ import annotations
@@ -113,7 +104,7 @@ def plot_track_csv(
         x = points[:, 0]
         y = points[:, 1]
 
-        # Close the loop visually by repeating the first point at the end.
+        # Repeat the first point, to close the loop visually.
         x_line = np.concatenate([x, x[:1]])
         y_line = np.concatenate([y, y[:1]])
 

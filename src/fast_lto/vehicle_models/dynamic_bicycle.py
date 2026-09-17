@@ -30,11 +30,8 @@ class DynamicBicycleModel(VehicleModel):
         return {
             "m": 170.0,
             "Iz": 250.0,
-            # CoG-to-axle distances, same convention as four_wheel and the
-            # shipped configs: lf is to the FRONT axle, so the static front
-            # load share is lr / (lf + lr) = 45%. These were reversed here,
-            # which only ever showed up when the model was built without a
-            # config (its defaults model a 55%-front car that does not exist).
+            # lf is to the FRONT axle, so the static front load share is
+            # lr / (lf + lr). Same convention as the other models.
             "lf": 0.842,
             "lr": 0.689,
             "g": 9.81,
@@ -54,13 +51,13 @@ class DynamicBicycleModel(VehicleModel):
             "eps_s_dot": 1.0,
             "eps_D_kappa": 0.05,
             "rk4_max_ds_m": 2.5,
-            # Resistance / aero parameters (not yet used in v_dot; keep for v2)
+            # Resistance and aero, not yet used in v_dot
             "C_d": 1.55,
             "C_r": 0.12,
             "C_l": 3.4,
             "rho": 1.225,
             "a_front": 1.2,
-            # Bounds (finite for normalization)
+            # Bounds, which must be finite for normalisation
             "d_max": 3.0,
             "psi_err_max": 1.2,
             "v_min": 0.4,
@@ -91,7 +88,6 @@ class DynamicBicycleModel(VehicleModel):
         lf = float(p["lf"])
         lr = float(p["lr"])
         L = lf + lr
-        # Static distribution
         Fz_f = m * g * (lr / L)
         Fz_r = m * g * (lf / L)
         return ca.MX(Fz_f), ca.MX(Fz_r)
@@ -99,7 +95,7 @@ class DynamicBicycleModel(VehicleModel):
     def _pacejka_lateral_force(
         self, alpha: ca.MX, Fz: ca.MX, B: float, C: float, Dmf: float
     ) -> ca.MX:
-        # Simplified Magic Formula; peak force = Fz * Dmf
+        # Simplified Magic Formula: peak force = Fz * Dmf.
         return -Fz * Dmf * ca.sin(C * ca.atan(B * alpha))
 
     def get_dynamics(
@@ -124,7 +120,7 @@ class DynamicBicycleModel(VehicleModel):
         v_safe = smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
 
         D_kappa = 1 - kappa * d
-        # In dynamics we keep the raw D_kappa; constraints enforce positivity.
+        # The dynamics keep the raw D_kappa; the constraints keep it positive.
         s_dot = (v * ca.cos(psi_err) - v_lat * ca.sin(psi_err)) / D_kappa
         d_dot = v * ca.sin(psi_err) + v_lat * ca.cos(psi_err)
         psi_err_dot = yaw_rate - kappa * s_dot
@@ -169,17 +165,15 @@ class DynamicBicycleModel(VehicleModel):
         delta = inputs[1]
         kappa = curvature
 
-        # Recompute key kinematics for guard constraints.
+        # Recomputed here because the guards need the same kinematics.
         v_safe = smoothmax(v, ca.MX(float(p["v_eps"])), float(p["smoothmax_eps"]))
         D_kappa = 1 - kappa * d
         s_dot = (v * ca.cos(psi_err) - v_lat * ca.sin(psi_err)) / D_kappa
 
         g_list: List[ca.MX] = []
 
-        # Enforce D_kappa >= eps_D_kappa
         g_list.append(ca.MX(float(p["eps_D_kappa"])) - D_kappa)
 
-        # Enforce s_dot >= eps_s_dot
         g_list.append(ca.MX(float(p["eps_s_dot"])) - s_dot)
 
         if bool(p.get("use_friction_ellipse", True)):

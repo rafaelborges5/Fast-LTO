@@ -1,25 +1,17 @@
 """
 Warm-start seed store for the global OCP.
 
-The default initial guess is ``X = 0, U = 0, v = initial_speed`` — the car on the
-centreline with zero heading error. On tight tracks that point is outside the
-feasible set (see ``utils.corridor.critical_margin``) and the solve is both slow
-and prone to landing in a worse local minimum. Seeding from a previously solved,
-nearby problem avoids both.
+The default guess is the car on the centreline at ``initial_speed``. On tight
+tracks that point is outside the feasible set, so seeding from a nearby solved
+problem is both faster and less likely to land in a worse local minimum.
 
-The store is a local cache under ``data/solutions/_seeds`` (gitignored): an empty
-store simply means every solve is cold. It never decides *whether* to solve —
-only what to start from.
+Compatibility is split in two: **hard keys** must match exactly because they
+define the node grid or the meaning of the variables; **soft keys** may differ
+and only rank the candidates, because they move the optimum within a basin
+without moving the corridor that creates the basins.
 
-Seed compatibility is split in two:
-
-* **hard keys** must match exactly, because they define the node grid or the
-  meaning of the variables (track geometry, ds, mode, model, integrator,
-  normalisation, state/input names);
-* **soft keys** may differ and only rank the candidates — the boundary margin
-  and every vehicle parameter (``v_max``, ``dFxmax``, tyre ``D``s, …). Those
-  knobs move the optimum *within* a basin without moving the track corridor that
-  creates the basins, so a seed across them is still a good seed.
+The store is a gitignored cache under ``data/solutions/_seeds``. An empty store
+just means every solve is cold.
 """
 
 from __future__ import annotations
@@ -147,19 +139,16 @@ def seed_signature(
         "state_names": list(model.reduced_state_names()),
         "input_names": list(model.get_input_names()),
         "geom_hash": geom_hash(track),
-        # These add/remove hard constraints near the terminal region rather
-        # than just retuning the objective (unlike boundary_margin, which
-        # narrows the same corridor the ladder is built to climb), so a seed
-        # solved under a different value isn't just lower quality -- it may
-        # not even satisfy the target problem's constraints.
+        # These add or remove hard constraints near the terminal region, so
+        # a seed solved under a different value is not merely worse -- it may
+        # not satisfy the target problem's constraints at all.
         "terminal_straight_m": _round_floats(terminal_straight_m),
         "terminal_state_constraint": bool(terminal_state_constraint),
         "terminal_window_nodes": (
             int(terminal_window_nodes) if terminal_window_nodes is not None else None
         ),
-        # Also changes the feasible set (a different tyre D over the untimed
-        # tail of the horizon), not just the objective -- same reasoning as
-        # the terminal keys above.
+        # Also changes the feasible set, not just the objective: a different
+        # tyre D over the untimed tail of the horizon.
         "D_safe_braking": _round_floats(D_safe_braking),
     }
     soft = {
@@ -473,8 +462,8 @@ def validate_guess(
     if not corners:
         return True, "ok"
 
-    # The corner check needs physical d / psi_err; every model in the repo puts
-    # them first, but say so out loud rather than assuming it silently.
+    # The corner check needs physical d / psi_err, which every model in the
+    # repo puts first -- asserted rather than assumed.
     names = list(model.reduced_state_names())
     if names[:2] != ["d", "psi_err"]:
         return True, "ok (no d/psi_err to check)"
