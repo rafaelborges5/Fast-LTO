@@ -1,60 +1,44 @@
-# Skidpad: two timed circles each way, built from a cone map and a reference
-# line rather than from a track CSV.
-#
-# The `vehicle:` block is only the deltas from vehicle.yaml -- a low top speed
-# and uniform high grip, which is what a flat, dry pad asks for.
-
 extends: vehicle.yaml
 
 vehicle:
-  v_max: 14.0                      # the circles are the only thing here
+  v_max: 14.0               # m/s
   four_wheel:
-    rho: 1.115
-    D_fl: 1.3                      # uniform, higher grip than nominal
+    rho: 1.115              # kg/m^3
+    D_fl: 1.3
     D_fr: 1.3
     D_rr: 1.3
     D_rl: 1.3
-    dFxmax: 2000.0
+    dFxmax: 2000.0          # N/s
 
 pipeline:
-  # --- Track and discretization ---
   track_id: skidpad
   track_type: skidpad
   ds_m: 0.5
   continuity: C2
 
-  # --- Event ---
   mode: skidpad
 
-  # --- Model and solver ---
   model_name: four_wheel
   integrator_name: euler
 
-  # --- Objective ---
   reg_u: 0.0
-  reg_u_l2: 0.0055                 # higher than the road courses: the circles
-                                   # are steady-state, so chatter is all cost
+  reg_u_l2: 0.0055
 
-  # --- Corridor and launch ---
-  boundary_margin: 0.50
-  initial_speed: 2.0
+  boundary_margin: 0.50     # m per side
+  initial_speed: 2.0        # m/s
 
   skidpad:
-    # The geometry is built from these two files, not from data/tracks/<id>.csv
     map_csv: data/tracks/skidpad/skidpad_map.csv
     reference_csv: data/tracks/skidpad/skidpad_reference.csv
 
-    # How the pad is turned into a track
-    entry_exit_halfwidth: 1.5      # half-width of the entry and exit straights [m]
-    kappa_blend_m: 1.5             # metres to blend straight into circle
-    start_x: 0.0                   # entry point, overriding the reference's first row
-    start_y: 0.0
+    entry_exit_halfwidth: 1.5   # m
+    kappa_blend_m: 1.5
+    start_x: 0.0            # m
+    start_y: 0.0            # m
 
-    # Prescribed run-in before the optimised horizon
-    lead_in_m: 10.0                # constant-speed, not part of the solve
+    lead_in_m: 10.0
 
-    # Timing and how the trajectory ends
-    eps_time: 0.005                # time weight outside the timed circles
-    decel_hold_m: 4.0              # full weight held past the finish gate
-    terminal_speed: 1.0
-    terminal_straight_m: 5.0       # end centred and aligned over this distance
+    eps_time: 0.005
+    decel_hold_m: 4.0
+    terminal_speed: 1.0     # m/s
+    terminal_straight_m: 5.0

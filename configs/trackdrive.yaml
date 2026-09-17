@@ -1,32 +1,19 @@
-# Trackdrive: a closed flying lap. The fastest way round a loop, with the
-# final state tied back to the first.
-#
-# The nominal car needs no changes for this event, so there is no `vehicle:`
-# block here at all -- vehicle.yaml holds the values every other event is a
-# delta from.
-
 extends: vehicle.yaml
 
 pipeline:
-  # --- Track and discretization ---
-  ds_m: 0.5                        # node spacing along the centreline [m]
-  continuity: C2                   # centreline spline continuity
-  smooth_centerline: 5             # Savitzky-Golay window, 0 = off
+  ds_m: 0.5
+  continuity: C2
+  smooth_centerline: 5      # samples, 0 = off
 
-  # --- Event ---
   mode: trackdrive
 
-  # --- Model and solver ---
   model_name: four_wheel
   integrator_name: euler
 
-  # --- Objective ---
-  reg_u: 0.0                       # weight on input rate
-  reg_u_l2: 0.0005                 # weight on input magnitude
+  reg_u: 0.0
+  reg_u_l2: 0.0005
 
-  # --- Corridor and launch ---
-  boundary_margin: 0.45            # shrink the corridor by this much per side [m]
-  initial_speed: 5.0               # m/s; the closed loop leaves it free to adjust
+  boundary_margin: 0.45     # m per side
+  initial_speed: 5.0        # m/s
 
-  # --- Warm start: off | auto | ladder (see optimization/warm_start.py) ---
   warm_start: auto

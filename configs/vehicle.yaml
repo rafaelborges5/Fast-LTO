@@ -1,55 +1,33 @@
-# The car. Every event config inherits it with `extends: vehicle.yaml` and
-# overrides only what that event changes.
-#
-# This file is a complete, runnable description on its own: the values here are
-# the nominal ones, so an event file contains exactly its deltas and nothing
-# else. Settings are grouped by what they describe rather than sorted by name.
-
 vehicle:
-  # --- Mass and geometry -----------------------------------------------------
-  m: 165.0                  # kg, including driver
-  g: 9.81
-  lf: 0.842                 # CoG to front axle [m]
-  lr: 0.689                 # CoG to rear axle [m]
-
-  # The four body corners the corridor constraint keeps inside the track, as
-  # (name, dx, dy) from the CoG in metres. dx forward, dy left. These are the
-  # car's physical extents, so they do not vary by event.
-  corners:
+  m: 165.0                  # kg
+  g: 9.81                   # m/s^2
+  lf: 0.842                 # m
+  lr: 0.689                 # m
+  corners:                  # name, dx, dy from the CoG [m]
     - [FL, 1.809, 0.750]
     - [FR, 1.809, -0.750]
     - [RL, -0.850, 0.630]
     - [RR, -0.850, -0.630]
 
-  # --- Operating envelope ----------------------------------------------------
-  # Bounds on the optimised states, shared by every model.
-  v_min: 0.4                # m/s, kept above zero so ds/dt cannot vanish
+  v_min: 0.4                # m/s
   v_max: 25.0               # m/s
-  d_max: 3.0                # max lateral deviation from the centreline [m]
-  psi_err_max: 1.2          # max heading error vs the centreline [rad]
+  d_max: 3.0                # m
+  psi_err_max: 1.2          # rad
 
-  # --- Numerical guards ------------------------------------------------------
-  # Floors and smoothing widths that keep the solver away from singularities.
-  # See utils/smooth.py for why a rounded max is needed at all.
-  v_eps: 0.5                # speed floor inside slip-angle divisions [m/s]
-  smoothmax_eps: 0.001      # corner-rounding width of the smooth max
-  eps_s_dot: 1.0            # floor on ds/dt in the space-domain transform
-  eps_D_kappa: 0.05         # floor on the Frenet Jacobian 1 - kappa*d
+  v_eps: 0.5                # m/s
+  smoothmax_eps: 0.001
+  eps_s_dot: 1.0            # m/s
+  eps_D_kappa: 0.05
 
-  # --- point_mass ------------------------------------------------------------
-  # Acceleration commanded directly; the friction circle is the only limit.
   point_mass:
-    a_long_min: -13.73
-    a_long_max: 13.73
-    a_lat_min: -13.73
-    a_lat_max: 13.73
+    a_long_min: -13.73      # m/s^2
+    a_long_max: 13.73       # m/s^2
+    a_lat_min: -13.73       # m/s^2
+    a_lat_max: 13.73        # m/s^2
 
-  # --- dynamic_bicycle -------------------------------------------------------
   dynamic_bicycle:
-    # Inertia
-    Iz: 250.0               # yaw inertia [kg m^2]
+    Iz: 250.0               # kg m^2
 
-    # Tyres, per axle: Pacejka B (stiffness), C (shape), D (peak grip)
     Bf: 9.0
     Cf: 1.3
     Dmf_f: 1.4
@@ -57,32 +35,25 @@ vehicle:
     Cr: 1.3
     Dmf_r: 1.4
 
-    # Combined-slip limit
     use_friction_ellipse: true
     gamma_ellipse: 1.0
 
-    # Actuator limits
-    delta_max: 0.4          # steering [rad]
-    a_long_min: -15.0
-    a_long_max: 15.0
+    delta_max: 0.4          # rad
+    a_long_min: -15.0       # m/s^2
+    a_long_max: 15.0        # m/s^2
 
-  # --- four_wheel ------------------------------------------------------------
   four_wheel:
-    # Inertia and track width
-    Iz: 180.0               # yaw inertia [kg m^2]
-    a_l: 0.630              # CoG to left wheels [m]
-    a_r: 0.630              # CoG to right wheels [m]
-    h: 0.246                # CoG height, which sets load transfer [m]
+    Iz: 180.0               # kg m^2
+    a_l: 0.630              # m
+    a_r: 0.630              # m
+    h: 0.246                # m
 
-    # Aerodynamics
-    rho: 1.225              # air density [kg/m^3]
-    A_f: 1.2                # frontal reference area [m^2]
-    C_l: 5.54               # downforce coefficient
-    C_d: 1.58               # drag coefficient
-    C_r: 0.15               # rolling resistance coefficient
+    rho: 1.225              # kg/m^3
+    A_f: 1.2                # m^2
+    C_l: 5.54
+    C_d: 1.58
+    C_r: 0.15
 
-    # Tyres, per wheel: Pacejka B (stiffness), C (shape), D (peak grip).
-    # D is the one that moves with track surface and temperature.
     B_fl: 9.0
     C_fl: 1.3
     D_fl: 1.1
@@ -96,16 +67,12 @@ vehicle:
     C_rl: 1.3
     D_rl: 1.2
 
-    # Actuator limits
-    Fx_max: 1500.0          # per-wheel longitudinal force [N]
-    dFxmax: 1000.0          # per-wheel force rate [N/s]
-    delta_max: 0.4          # steering [rad]
-    ddeltamax: 1.3          # steering rate [rad/s]
+    Fx_max: 1500.0          # N
+    dFxmax: 1000.0          # N/s
+    delta_max: 0.4          # rad
+    ddeltamax: 1.3          # rad/s
 
-    # How vertical load is distributed
     load_transfer_mode: current_quasistatic
 
-    # Optional CG-level acceleration envelope on top of the per-wheel friction
-    # limits. null = off, which is the normal setting.
-    a_long_max: null
-    a_lat_max: null
+    a_long_max: null        # m/s^2
+    a_lat_max: null         # m/s^2

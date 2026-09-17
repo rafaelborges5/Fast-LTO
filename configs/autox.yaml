@@ -1,64 +1,48 @@
-# Autocross: one timed lap from a standing start, with run-off to brake into.
-#
-# The `vehicle:` block is only the deltas from vehicle.yaml -- a softer
-# aero-and-grip setup and a lower top speed. Everything else, including the
-# body corners, comes from the car.
-
 extends: vehicle.yaml
 
 vehicle:
-  v_max: 22.0                      # lower than trackdrive: shorter straights
+  v_max: 22.0               # m/s
   four_wheel:
-    rho: 1.115                     # warmer, thinner air than the nominal 1.225
-    C_l: 4.00                      # less downforce than the nominal 5.54
-    D_fl: 1.15                     # more grip front and rear than nominal
+    rho: 1.115              # kg/m^3
+    C_l: 4.00
+    D_fl: 1.15
     D_fr: 1.15
     D_rr: 1.25
     D_rl: 1.25
-    dFxmax: 2000.0                 # faster force build-up than nominal
+    dFxmax: 2000.0          # N/s
 
 pipeline:
-  # --- Track and discretization ---
   ds_m: 0.5
   continuity: C2
-  smooth_centerline: 9             # logged autox paths are noisier than a map
+  smooth_centerline: 9      # samples, 0 = off
 
-  # --- Event ---
   mode: autox
 
-  # --- Model and solver ---
   model_name: four_wheel
   integrator_name: euler
 
-  # --- Objective ---
   reg_u: 0.0
   reg_u_l2: 0.001
 
-  # --- Corridor and launch ---
-  boundary_margin: 0.45
-  initial_speed: 3.0               # pinned: the car really does start here
+  boundary_margin: 0.45     # m per side
+  initial_speed: 3.0        # m/s
 
-  # --- Warm start ---
   warm_start: auto
 
   autox:
-    # Where the lap starts and where it is timed from
-    start_x: 0.0                   # the car's real start pose in the map frame
-    start_y: 0.0
-    start_node_offset: 1           # pin one node ahead, never behind, the car
+    start_x: 0.0            # m
+    start_y: 0.0            # m
+    start_node_offset: 1    # nodes
 
-    # Prescribed run-in before the optimised horizon
-    lead_in_m: 8.0                 # constant-speed, not part of the solve
-    ocp_lead_m: 0.0                # metres of the approach to optimise instead
+    lead_in_m: 8.0
+    ocp_lead_m: 0.0
 
-    # Run-off past the finish
-    extension_m: 20.0              # horizon kept after the timing gate
-    eps_time: 0.05                 # time weight out there, vs 1.0 on the lap
-    decel_hold_m: 0.0              # metres of full weight held past the gate
+    extension_m: 20.0
+    eps_time: 0.05
+    decel_hold_m: 0.0
 
-    # How the trajectory ends
-    terminal_speed: 1.3            # m/s at or below by the final node
-    terminal_state_constraint: true  # end centred and heading-aligned
-    terminal_window_nodes: 2       # over this many nodes, not one
-    terminal_pad_m: 10.0           # prescribed pad appended after the solve
-    D_safe_braking: 1.075          # conservative tyre D over the untimed tail
+    terminal_speed: 1.3     # m/s
+    terminal_state_constraint: true
+    terminal_window_nodes: 2
+    terminal_pad_m: 10.0
+    D_safe_braking: 1.075
