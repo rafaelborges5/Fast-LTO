@@ -28,7 +28,7 @@ Parameters studied (four-wheel model only):
 
 Usage (from repo root):
     PYTHONPATH=src python src/experiments/fscz_sensitivity.py \
-        --config configs/trackdrive.yaml --track-id fscz25_track_boundary \
+        --config configs/trackdrive.yaml --track-id fscz_2025 \
         --delta 0.15 --jobs 4
 
 Outputs (under data/sensitivity/ by default; {track_id} prefixes every file):
@@ -510,8 +510,8 @@ def main() -> None:
     ap.add_argument(
         "--track-id",
         type=str,
-        default="fscz25_track_boundary",
-        help="Track under data/tracks/{track_id}.csv. Default fscz25_track_boundary.",
+        default="fscz_2025",
+        help="Track under data/tracks/{track_id}.csv. Default fscz_2025.",
     )
     ap.add_argument(
         "--delta",

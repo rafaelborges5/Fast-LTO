@@ -80,7 +80,7 @@ class Case:
 CASES: Tuple[Case, ...] = (
     Case("ipz", "ipz_august_3", "configs/autox.yaml", 0.30),
     Case("maisach", "track_boundary_maisach", "configs/trackdrive.yaml", 0.30),
-    Case("fscz25", "fscz25_track_boundary", "configs/trackdrive.yaml", 0.30),
+    Case("fscz25", "fscz_2025", "configs/trackdrive.yaml", 0.30),
 )
 
 # (axis, label, model overrides as multipliers, absolute margin)

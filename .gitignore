@@ -20,6 +20,21 @@ dist/
 build/
 *.egg-info/
 
+# Track data. Allowlist rather than blocklist, so the default for anything
+# dropped into data/tracks/ is "stays on this machine" -- a boundary CSV off a
+# test day is the team's, not the repo's. The shipped set is the four public
+# event tracks plus what the generators produce, which is all a fresh clone
+# needs. gitignore does not govern already-tracked files, so anything added
+# here later also has to leave the index with `git rm --cached`.
+data/tracks/*.csv
+!data/tracks/fscz_2025.csv
+!data/tracks/fscz_2026.csv
+!data/tracks/fsg_autox_2025.csv
+!data/tracks/fsg_autox_2026.csv
+!data/tracks/ellipse.csv
+!data/tracks/bean.csv
+!data/tracks/fsg_random.csv
+
 # Data / results
 data/raw/
 data/interim/
