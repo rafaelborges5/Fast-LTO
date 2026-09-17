@@ -5,7 +5,7 @@ Autox dFxmax x tyre-grip x boundary-margin sweep on a real track.
 
 Sweeps the per-wheel longitudinal force rate limit (dFxmax), the tyre peak-grip D
 over a front/rear "staircase" evolution (same shape as
-fscz_skidpad_batch.py::d_sequence), and the corridor boundary margin, solving the
+skidpad_batch.d_sequence), and the corridor boundary margin, solving the
 four-wheel autox OCP for each combination on top of the current configs/autox.yaml
 braking profile (terminal_speed, autox_terminal_state_constraint,
 autox_terminal_window_nodes, autox_terminal_pad_m). Every run is exported as a
@@ -30,9 +30,9 @@ combos, and avoiding concurrent writes to the shared data/solutions/_seeds/ stor
 matter more here than solve-level parallelism.
 
 Usage (from repo root):
-    PYTHONPATH=src python src/experiments/autox_dfx_grip_sweep.py --track-id <new_track>
-    PYTHONPATH=src python src/experiments/autox_dfx_grip_sweep.py --track-id <new_track> \\
-        --dfx-values 1000,2000 --margins 0.45,0.50 --d-min 1.20 --d-max 1.30
+    python research/experiments/autox_dfx_grip_sweep.py --track-id <new_track>
+    python research/experiments/autox_dfx_grip_sweep.py --track-id <new_track> \\
+        --dfx-values 1000,2000 --margins 0.45,0.50 --d-max 1.30
 
 Outputs:
     data/output_trajectories/<track_id>_dfx<N>_F*_R*_m*.csv        one per solve
@@ -57,32 +57,28 @@ from fast_lto.config import RunConfig
 from fast_lto.paths import default_data_root
 from fast_lto.pipeline import run_pipeline
 
-DEFAULT_DFX_VALUES = (1000.0, 2000.0)
-DEFAULT_D_MIN = 1.20
-DEFAULT_D_MAX = 1.30
-EXTRA_MARGIN = 0.50
+#: Step of the front/rear grip staircase.
+D_STEP = 0.05
 
 
 def _repo_root() -> Path:
     return default_data_root()
 
 
-def d_sequence(
-    d_min: float = DEFAULT_D_MIN, d_max: float = DEFAULT_D_MAX
-) -> List[Tuple[float, float]]:
-    """(D_front, D_rear) pairs: rear leads each 0.05 step from d_min to d_max.
+def d_sequence(d_min: float, d_max: float) -> List[Tuple[float, float]]:
+    """(D_front, D_rear) pairs: the rear leads each step from d_min to d_max.
 
-    Same "staircase" shape as fscz_skidpad_batch.py::d_sequence (without the
-    low-grip anchors, which don't apply here).
+    Same staircase shape as ``skidpad_batch.d_sequence``, without the low-grip
+    anchors.
     """
     seq: List[Tuple[float, float]] = []
     f = r = d_min
     seq.append((f, r))
     while f < d_max - 1e-9 or r < d_max - 1e-9:
         if r <= f + 1e-9:  # equal -> bump rear first
-            r = round(r + 0.05, 2)
+            r = round(r + D_STEP, 2)
         else:  # rear ahead -> front catches up
-            f = round(f + 0.05, 2)
+            f = round(f + D_STEP, 2)
         seq.append((round(f, 2), round(r, 2)))
     return seq
 
@@ -293,22 +289,46 @@ def run(
     config_path: Path,
     track_id: str,
     out_dir: Path,
-    dfx_values: Tuple[float, ...],
-    margins: Tuple[float, ...],
-    d_min: float,
-    d_max: float,
+    dfx_values: Optional[Tuple[float, ...]] = None,
+    margins: Optional[Tuple[float, ...]] = None,
+    d_min: Optional[float] = None,
+    d_max: Optional[float] = None,
     smooth_centerline: Optional[int] = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Baseline config: {config_path}, track_id={track_id}")
     base_rc = RunConfig.from_yaml(config_path)
-    base_rc.track_id = track_id
+    # RunConfig keeps the pipeline settings in `.pipeline`. Assigning to the
+    # RunConfig itself silently created an attribute nobody reads, so the sweep
+    # ran the config's own track while its help text promised --track-id.
+    base_rc.pipeline.track_id = track_id
     if smooth_centerline is not None:
-        print(f"  Overriding smooth_centerline: {base_rc.smooth_centerline} -> {smooth_centerline}")
-        base_rc.smooth_centerline = smooth_centerline
+        print(
+            f"  Overriding smooth_centerline: "
+            f"{base_rc.pipeline.smooth_centerline} -> {smooth_centerline}"
+        )
+        base_rc.pipeline.smooth_centerline = smooth_centerline
+
+    # Anything not being swept comes from the config, so a bare run solves
+    # exactly what `fast-lto --config <this>` would.
+    four_wheel = base_rc.vehicle.four_wheel or {}
+    grip = [float(four_wheel[k]) for k in ("D_fl", "D_fr", "D_rr", "D_rl")]
+    if d_min is None:
+        d_min = round(min(grip), 2)
+    if d_max is None:
+        d_max = round(max(grip), 2)
+    if dfx_values is None:
+        dfx_values = (float(four_wheel["dFxmax"]),)
+    if margins is None:
+        margins = (round(float(base_rc.pipeline.boundary_margin), 2),)
 
     combos = d_sequence(d_min=d_min, d_max=d_max)
+    print(
+        f"  dFxmax {', '.join(f'{v:.0f}' for v in dfx_values)} | "
+        f"grip D {d_min:.2f} -> {d_max:.2f} ({len(combos)} combination(s)) | "
+        f"margins {', '.join(f'{m:.2f}' for m in margins)}"
+    )
     table_csv = out_dir / f"{track_id}_dfx_grip_sweep_times.csv"
     done = _load_table(table_csv, out_dir)
     results: List[Dict[str, Any]] = list(done.values())
@@ -360,18 +380,29 @@ def main() -> None:
     ap.add_argument(
         "--dfx-values",
         type=str,
-        default=",".join(f"{v:.0f}" for v in DEFAULT_DFX_VALUES),
-        help="Comma-separated dFxmax values, e.g. 1000,2000",
+        default=None,
+        help="Comma-separated dFxmax values, e.g. 1000,2000. " "Default: the config's own dFxmax.",
     )
     ap.add_argument(
         "--margins",
         type=str,
         default=None,
         help="Comma-separated boundary margins, e.g. 0.45,0.50. "
-        "Default: the --config's own boundary_margin plus 0.50.",
+        "Default: the config's own boundary_margin.",
     )
-    ap.add_argument("--d-min", type=float, default=DEFAULT_D_MIN)
-    ap.add_argument("--d-max", type=float, default=DEFAULT_D_MAX)
+    ap.add_argument(
+        "--d-min",
+        type=float,
+        default=None,
+        help="Lower tyre-grip D for the staircase. Default: the config's own D.",
+    )
+    ap.add_argument(
+        "--d-max",
+        type=float,
+        default=None,
+        help="Upper tyre-grip D. Default: the config's own D, which makes the "
+        "grip axis a single point.",
+    )
     ap.add_argument(
         "--smooth-centerline",
         type=int,
@@ -381,12 +412,14 @@ def main() -> None:
         "the default produces spurious sharp curvature spikes.",
     )
     args = ap.parse_args()
-    dfx_values = tuple(float(x) for x in args.dfx_values.split(","))
-    if args.margins is not None:
-        margins = tuple(float(x) for x in args.margins.split(","))
-    else:
-        base_margin = float(RunConfig.from_yaml(args.config).boundary_margin)
-        margins = tuple(sorted({round(base_margin, 2), EXTRA_MARGIN}))
+
+    def _floats(raw: Optional[str]) -> Optional[Tuple[float, ...]]:
+        if raw is None:
+            return None
+        return tuple(float(x) for x in raw.split(",") if x.strip())
+
+    dfx_values = _floats(args.dfx_values)
+    margins = _floats(args.margins)
     run(
         args.config,
         args.track_id,

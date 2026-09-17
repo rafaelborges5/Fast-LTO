@@ -12,6 +12,7 @@ Layout:
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -420,13 +421,40 @@ def animate_lap(solution_path, output_path, stride=3, fps=20, track_csv=None):
     plt.close(fig)
 
 
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "solution",
+        type=Path,
+        help="Solution JSON, e.g. data/solutions/<track>_four_wheel_euler_trackdrive.json",
+    )
+    ap.add_argument(
+        "--track-csv",
+        type=Path,
+        default=None,
+        help="Cone CSV to draw the boundaries from. Default: none, path only.",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output GIF. Default: <solution stem>_animation.gif beside the solution.",
+    )
+    ap.add_argument("--stride", type=int, default=3, help="Keep every Nth node. Default: 3")
+    ap.add_argument("--fps", type=int, default=20, help="Frames per second. Default: 20")
+    args = ap.parse_args(argv)
+
+    out = args.out or args.solution.with_name(f"{args.solution.stem}_animation.gif")
+    animate_lap(
+        args.solution,
+        out,
+        stride=args.stride,
+        fps=args.fps,
+        track_csv=args.track_csv,
+    )
+
+
 if __name__ == "__main__":
-    sol_path = REPO / "data" / "solutions" / "track_boundary_maisach_four_wheel_euler.json"
-    csv_path = REPO / "data" / "tracks" / "track_boundary_maisach.csv"
-    out_dir = REPO / "ocp_plots" / "maisach_extras"
-
-    # Fast: stride=4, 24fps
-    animate_lap(sol_path, out_dir / "lap_animation_fast.gif", stride=4, fps=24, track_csv=csv_path)
-
-    # Slow: stride=1, 12fps
-    animate_lap(sol_path, out_dir / "lap_animation_slow.gif", stride=1, fps=12, track_csv=csv_path)
+    main()

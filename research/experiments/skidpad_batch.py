@@ -1,31 +1,32 @@
 from __future__ import annotations
 
 """
-Batch skidpad LTO generation.
+Batch skidpad solves over a grid of tyre grip and corridor margin.
 
-Sweeps the tyre peak-grip D over a front/rear evolution and a set of corridor
-margins, solving the four-wheel skidpad OCP for each combination.  Every run is
-exported as a controller-reference trajectory CSV whose name encodes the D
-parameters and the margin, e.g.::
+The YAML config is the baseline: track, mesh, integrator, launch speed,
+regularisation, terminal speed and lead-in all come from it, and so do the
+starting tyre-grip and margin values. Flags add sweep axes on top. With no
+flags the sweep is a single point -- exactly what the config already says -- so
+every difference between two outputs is a difference you asked for.
 
-    data/output_trajectories/fscz_skidpad_F1.30_R1.35_m0.50.csv
+Two axes:
 
-D evolution (rear leads each 0.05 step, 1.20 -> --d-max), plus two uniform
-low-grip anchors at F=R=1.10 and F=R=1.00 (unless --no-anchors).
-Margins, output prefix, and the D ceiling are all configurable; defaults
-reproduce the original FSCZ sweep (prefix fscz_skidpad, margins 0.40/0.50/0.60,
-d-max 1.50, anchors on).
+* tyre peak grip D, as a front/rear staircase between --d-min and --d-max, both
+  defaulting to the config's own D values;
+* corridor margin, from --margins, defaulting to the config's boundary_margin.
 
-Usage (from repo root):
-    PYTHONPATH=src python src/experiments/fscz_skidpad_batch.py --jobs 4
-    PYTHONPATH=src python src/experiments/fscz_skidpad_batch.py \\
-        --prefix ipz_skidpad_night_aug4 --margins 0.40,0.50 --d-max 1.45 \\
-        --no-anchors --jobs 4
+Each solve is exported as a controller-reference trajectory CSV named for its
+point in the grid, and the score table is rewritten after every solve, so an
+interrupted sweep resumes where it stopped.
 
-Outputs (named after --prefix, default fscz_skidpad):
-    data/output_trajectories/<prefix>_F*_R*_m*.csv   one per solve
-    data/output_trajectories/<prefix>_times.csv       score table
-    data/output_trajectories/<prefix>_margin_*.png    trajectory plots
+Usage, from the repo root:
+    python research/experiments/skidpad_batch.py
+    python research/experiments/skidpad_batch.py --d-max 1.45 --margins 0.40,0.50 --jobs 4
+
+Outputs under --out-dir, named after --prefix (default: the config's track_id):
+    <prefix>_F*_R*_m*.csv             one trajectory per solve
+    <prefix>_times.csv                score table
+    <prefix>_margin_trajectories.png
 """
 
 import argparse
@@ -44,20 +45,15 @@ import numpy as np
 
 from fast_lto.config import RunConfig
 from fast_lto.export.trajectory import export_reference_trajectory
+from fast_lto.modes import get_mode
 from fast_lto.optimization.global_ocp import solve_ocp_and_save
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator
 from fast_lto.paths import default_data_root
-from fast_lto.pipeline import (
-    PipelineConfig,
-    _build_skidpad_lead_in,
-    _prepend_skidpad_lead_in,
-    _resolve_path,
-)
+from fast_lto.pipeline import PipelineConfig, _resolve_path, _splice_segment
 from fast_lto.vehicle_models.four_wheel import FourWheelModel
 
-DEFAULT_MARGINS = (0.40, 0.50, 0.60)
-DEFAULT_PREFIX = "fscz_skidpad"
-DEFAULT_D_MAX = 1.50
+#: Step of the front/rear grip staircase.
+D_STEP = 0.05
 
 
 def _repo_root() -> Path:
@@ -65,38 +61,44 @@ def _repo_root() -> Path:
 
 
 def d_sequence(
-    d_min: float = 1.20, d_max: float = DEFAULT_D_MAX, include_anchors: bool = True
+    d_min: float, d_max: float, anchors: Tuple[float, ...] = ()
 ) -> List[Tuple[float, float]]:
-    """(D_front, D_rear) pairs: rear leads each 0.05 step from d_min to d_max,
-    then (if include_anchors) two uniform low-grip anchors."""
+    """(D_front, D_rear) pairs walking from d_min to d_max.
+
+    The rear leads the front by one step. That is the realistic direction to
+    explore -- a rear-limited car is stable, a front-limited one understeers
+    off the circle -- so the staircase bumps the rear first and lets the front
+    catch up. ``anchors`` appends uniform points (F == R) for a low-grip
+    comparison; empty unless asked for.
+    """
     seq: List[Tuple[float, float]] = []
     f = r = d_min
-    seq.append((f, r))
+    seq.append((round(f, 2), round(r, 2)))
     while f < d_max - 1e-9 or r < d_max - 1e-9:
-        if r <= f + 1e-9:  # equal -> bump rear first
-            r = round(r + 0.05, 2)
-        else:  # rear ahead -> front catches up
-            f = round(f + 0.05, 2)
+        if r <= f + 1e-9:  # equal -> bump the rear first
+            r = round(r + D_STEP, 2)
+        else:  # rear ahead -> the front catches up
+            f = round(f + D_STEP, 2)
         seq.append((round(f, 2), round(r, 2)))
-    if include_anchors:
-        seq.append((1.10, 1.10))
-        seq.append((1.00, 1.00))
+    for a in anchors:
+        seq.append((round(a, 2), round(a, 2)))
     return seq
 
 
 @dataclass
 class Baseline:
+    """What every point in the sweep shares, built once from the config.
+
+    Carries the ``PipelineConfig`` itself rather than a copy of the values
+    needed, so the mode can be asked for its own objective weights and
+    prescribed segments instead of this file re-deriving them. Re-deriving is
+    how it drifted out of step with ``modes.py``.
+    """
+
+    config: PipelineConfig
     track: Dict[str, Any]
     time_weights: np.ndarray
     model_params: Dict[str, Any]
-    integrator_name: str
-    initial_speed: float
-    reg_du: Any
-    reg_u_l2: Any
-    terminal_speed: Any
-    normalize: bool
-    lead_in: Optional[Dict[str, Any]]
-    terminal_straight_m: float
 
 
 def _build_baseline(config_path: Path) -> Baseline:
@@ -108,47 +110,41 @@ def _build_baseline(config_path: Path) -> Baseline:
     pc.repo_root = _repo_root()
     pc.__post_init__()
 
-    map_csv = _resolve_path(pc.repo_root, pc.skidpad_map_csv)
-    ref_csv = _resolve_path(pc.repo_root, pc.skidpad_reference_csv)
-    start_xy = (pc.skidpad_start_x, pc.skidpad_start_y) if pc.skidpad_start_x is not None else None
+    sk = pc.skidpad
+    map_csv = _resolve_path(pc.repo_root, sk.map_csv)
+    ref_csv = _resolve_path(pc.repo_root, sk.reference_csv)
+    start_xy = (sk.start_x, sk.start_y) if sk.start_x is not None else None
     track = build_skidpad_track(
         map_csv=map_csv,
         ref_csv=ref_csv,
         ds_m=pc.ds_m,
-        entry_exit_halfwidth=pc.entry_exit_halfwidth,
-        kappa_blend_m=pc.kappa_blend_m,
+        entry_exit_halfwidth=sk.entry_exit_halfwidth,
+        kappa_blend_m=sk.kappa_blend_m,
         start_xy=start_xy,
     )
 
-    mask = np.asarray(track["timed_mask"], dtype=float)
-    decel = np.asarray(track.get("decel_mask", np.zeros_like(mask)), dtype=float)
-    time_weights = np.where(mask > 0.5, 1.0, float(pc.eps_time))
-    time_weights = np.where(decel > 0.5, 0.0, time_weights)
-    # Keep the heavy timed weight for the first `decel_hold_m` metres of the exit
-    # (mirrors pipeline.step_solve_ocp), so the terminal brake starts after the
-    # finish gate instead of the solver losing all time-pressure immediately.
-    if pc.decel_hold_m > 0.0:
-        ds_hold = float(track.get("ds_m", pc.ds_m))
-        decel_idx = np.where(decel > 0.5)[0]
-        n_hold = min(int(round(pc.decel_hold_m / ds_hold)), decel_idx.size)
-        if n_hold > 0:
-            time_weights[decel_idx[:n_hold]] = 1.0
-
-    lead_in = _build_skidpad_lead_in(track, pc.skidpad_lead_in_m)
+    # Asked of the mode rather than recomputed, so the objective this sweep
+    # optimises is the one the pipeline optimises.
+    time_weights = get_mode("skidpad").time_weights(track, pc)
+    assert time_weights is not None  # skidpad always weights its objective
 
     return Baseline(
+        config=pc,
         track=track,
         time_weights=time_weights,
         model_params=rc.vehicle.build_model_params("four_wheel"),
-        integrator_name=pc.integrator_name,
-        initial_speed=float(pc.initial_speed),
-        reg_du=pc.reg_u,
-        reg_u_l2=pc.reg_u_l2,
-        terminal_speed=pc.terminal_speed,
-        normalize=bool(pc.normalize_states_and_inputs),
-        lead_in=lead_in,
-        terminal_straight_m=pc.skidpad_terminal_straight_m,
     )
+
+
+def _config_d_range(model_params: Dict[str, Any]) -> Tuple[float, float]:
+    """The config's own grip values, as the (min, max) of the four wheels.
+
+    Used as the default sweep range, which makes a bare run a single point:
+    the sweep starts from what the config says rather than from a grip range
+    that was chosen for one particular event.
+    """
+    ds = [float(model_params[k]) for k in ("D_fl", "D_fr", "D_rr", "D_rl")]
+    return round(min(ds), 2), round(max(ds), 2)
 
 
 def _make_integrator(name: str):
@@ -177,27 +173,30 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
         "csv": out_csv.name,
     }
     try:
+        pc = base.config
+        mode = get_mode("skidpad")
         sol = solve_ocp_and_save(
             track=base.track,
             model=model,
             solution_path=sol_json,
-            integrator=_make_integrator(base.integrator_name),
-            initial_speed=base.initial_speed,
-            reg_du=base.reg_du,
-            reg_u_l2=base.reg_u_l2,
+            integrator=_make_integrator(pc.integrator_name),
+            initial_speed=pc.launch_speed,
+            reg_du=pc.reg_u,
+            reg_u_l2=pc.reg_u_l2,
             run_config={
                 "tag": tag,
                 "model_name": "four_wheel",
                 "mode": "skidpad",
                 "boundary_margin": margin,
             },
-            use_normalization=base.normalize,
+            use_normalization=bool(pc.normalize_states_and_inputs),
             solver_verbose=False,
             boundary_margin=margin,
             mode="skidpad",
             time_weights=base.time_weights,
-            terminal_speed=base.terminal_speed,
-            terminal_straight_m=base.terminal_straight_m,
+            # The rest of the solver arguments the mode owns, so a new skidpad
+            # knob reaches this sweep without an edit here.
+            **mode.solver_kwargs(pc),
         )
         prof = sol.get("profiling", {})
         status = prof.get("return_status")
@@ -210,10 +209,14 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
         result["exported"] = False
         if status == "Solve_Succeeded":
             try:
-                if base.lead_in is not None:
-                    sol = _prepend_skidpad_lead_in(sol, base.lead_in, base.initial_speed)
-                    with sol_json.open("w") as f:
-                        json.dump(sol, f)
+                # Same prescribed segments the pipeline stitches on, asked of
+                # the mode rather than reimplemented.
+                for plan in mode.splices(pc, base.track, sol):
+                    sol = _splice_segment(
+                        sol, plan.segment, plan.speed, side=plan.side, timed=plan.timed
+                    )
+                with sol_json.open("w") as fh:
+                    json.dump(sol, fh)
                 export_reference_trajectory(sol_json, out_csv)
                 result["exported"] = True
             except Exception as exc:  # solve is still valid; just note it
@@ -369,12 +372,12 @@ def run(
     config_path: Path,
     jobs: int,
     out_dir: Path,
-    prefix: str = DEFAULT_PREFIX,
-    margins: Tuple[float, ...] = DEFAULT_MARGINS,
-    d_min: float = 1.20,
-    d_max: float = DEFAULT_D_MAX,
-    include_anchors: bool = True,
-    initial_speed: float | None = None,
+    prefix: Optional[str] = None,
+    margins: Optional[Tuple[float, ...]] = None,
+    d_min: Optional[float] = None,
+    d_max: Optional[float] = None,
+    anchors: Tuple[float, ...] = (),
+    initial_speed: Optional[float] = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     scratch = out_dir / "_scratch"
@@ -382,10 +385,27 @@ def run(
 
     print(f"Building skidpad baseline from {config_path} ...")
     base = _build_baseline(config_path)
+    pc = base.config
     if initial_speed is not None:
-        base.initial_speed = float(initial_speed)
+        pc.initial_speed = float(initial_speed)
 
-    combos = d_sequence(d_min=d_min, d_max=d_max, include_anchors=include_anchors)
+    # Anything not being swept comes from the config, so a bare run reproduces
+    # exactly what `fast-lto --config <this>` would solve.
+    config_d = _config_d_range(base.model_params)
+    if d_min is None:
+        d_min = config_d[0]
+    if d_max is None:
+        d_max = config_d[1]
+    if margins is None:
+        margins = (float(pc.boundary_margin),)
+    if prefix is None:
+        prefix = str(pc.track_id)
+
+    combos = d_sequence(d_min=d_min, d_max=d_max, anchors=anchors)
+    print(
+        f"  grip D {d_min:.2f} -> {d_max:.2f} in {D_STEP:.2f} steps "
+        f"({len(combos)} combination(s)), margins {', '.join(f'{m:.2f}' for m in margins)}"
+    )
     table_csv = out_dir / f"{prefix}_times.csv"
     done = _load_table(table_csv, out_dir)
     results: List[Dict[str, Any]] = list(done.values())
@@ -455,26 +475,39 @@ def main() -> None:
     ap.add_argument("--config", type=Path, default=_repo_root() / "configs" / "skidpad.yaml")
     ap.add_argument("--jobs", type=int, default=4, help="Parallel solve workers.")
     ap.add_argument("--out-dir", type=Path, default=_repo_root() / "data" / "output_trajectories")
-    ap.add_argument("--prefix", type=str, default=DEFAULT_PREFIX, help="Output filename prefix.")
+    ap.add_argument(
+        "--prefix",
+        type=str,
+        default=None,
+        help="Output filename prefix. Default: the config's track_id.",
+    )
     ap.add_argument(
         "--margins",
         type=str,
-        default=",".join(f"{m:.2f}" for m in DEFAULT_MARGINS),
-        help="Comma-separated boundary margins, e.g. 0.40,0.50",
+        default=None,
+        help="Comma-separated boundary margins, e.g. 0.40,0.50. "
+        "Default: the config's boundary_margin.",
     )
     ap.add_argument(
         "--d-min",
         type=float,
-        default=1.20,
-        help="Lower D value for the front/rear ramp (default 1.20).",
+        default=None,
+        help="Lower tyre-grip D for the front/rear staircase. "
+        "Default: the config's own D values.",
     )
     ap.add_argument(
-        "--d-max", type=float, default=DEFAULT_D_MAX, help="Upper D value for the front/rear ramp."
+        "--d-max",
+        type=float,
+        default=None,
+        help="Upper tyre-grip D. Default: the config's own D values, which "
+        "makes a bare run a single point.",
     )
     ap.add_argument(
-        "--no-anchors",
-        action="store_true",
-        help="Skip the uniform low-grip anchors (F=R=1.10, F=R=1.00).",
+        "--anchors",
+        type=str,
+        default=None,
+        help="Comma-separated uniform grip levels (F == R) to append, for a "
+        "low-grip comparison, e.g. 1.10,1.00",
     )
     ap.add_argument(
         "--initial-speed",
@@ -485,16 +518,21 @@ def main() -> None:
         "match the OCP's fixed starting velocity.",
     )
     args = ap.parse_args()
-    margins = tuple(float(x) for x in args.margins.split(","))
+
+    def _floats(raw: Optional[str]) -> Optional[Tuple[float, ...]]:
+        if raw is None:
+            return None
+        return tuple(float(x) for x in raw.split(",") if x.strip())
+
     run(
         args.config,
         args.jobs,
         args.out_dir,
         prefix=args.prefix,
-        margins=margins,
+        margins=_floats(args.margins),
         d_min=args.d_min,
         d_max=args.d_max,
-        include_anchors=not args.no_anchors,
+        anchors=_floats(args.anchors) or (),
         initial_speed=args.initial_speed,
     )
 

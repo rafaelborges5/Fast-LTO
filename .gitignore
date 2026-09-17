@@ -20,6 +20,15 @@ dist/
 build/
 *.egg-info/
 
+# Research code. Allowlist, same reasoning as the tracks below: the four files
+# named here are parameterised and run on shipped data; everything else in
+# research/ is a one-off study tied to solutions and tracks that stay local.
+research/**/*.py
+!research/experiments/skidpad_batch.py
+!research/experiments/autox_dfx_grip_sweep.py
+!research/experiments/animate_lap.py
+!research/experiments/interactive_lap.py
+
 # Track data. Allowlist rather than blocklist, so the default for anything
 # dropped into data/tracks/ is "stays on this machine" -- a boundary CSV off a
 # test day is the team's, not the repo's. The shipped set is the four public

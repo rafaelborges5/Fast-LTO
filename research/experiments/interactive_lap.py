@@ -10,6 +10,7 @@ Produces a self-contained HTML file with:
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -583,9 +584,32 @@ def build_interactive(solution_path, output_path, track_csv=None):
     print(f"Saved: {output_path} ({output_path.stat().st_size / 1e6:.1f} MB)")
 
 
-if __name__ == "__main__":
-    sol_path = REPO / "data" / "solutions" / "track_boundary_maisach_four_wheel_euler.json"
-    csv_path = REPO / "data" / "tracks" / "track_boundary_maisach.csv"
-    out_path = REPO / "ocp_plots" / "maisach_extras" / "maisach_interactive.html"
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "solution",
+        type=Path,
+        help="Solution JSON, e.g. data/solutions/<track>_four_wheel_euler_trackdrive.json",
+    )
+    ap.add_argument(
+        "--track-csv",
+        type=Path,
+        default=None,
+        help="Cone CSV to draw the boundaries from. Default: none, path only.",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output HTML. Default: <solution stem>.html beside the solution.",
+    )
+    args = ap.parse_args(argv)
 
-    build_interactive(sol_path, out_path, track_csv=csv_path)
+    out = args.out or args.solution.with_suffix(".html")
+    build_interactive(args.solution, out, track_csv=args.track_csv)
+
+
+if __name__ == "__main__":
+    main()
