@@ -167,7 +167,7 @@ def _compute_derived(sol, params):
     }
 
 
-def build_interactive(solution_path, output_path, track_csv=None):
+def build_interactive(solution_path, output_path, track_csv=None, title="Four-Wheel LTO"):
     with Path(solution_path).open() as f:
         sol = json.load(f)
     params = sol["model_params"]
@@ -555,7 +555,7 @@ def build_interactive(solution_path, output_path, track_csv=None):
 
     fig.update_layout(
         title=dict(
-            text=f"Four-Wheel LTO — Maisach Track (lap time: {lap_time:.2f}s)",
+            text=f"{title} (lap time: {lap_time:.2f}s)",
             font=dict(size=16),
         ),
         height=1600,
@@ -605,10 +605,15 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Output HTML. Default: <solution stem>.html beside the solution.",
     )
+    ap.add_argument(
+        "--title",
+        default="Four-Wheel LTO",
+        help="Figure title, before the lap time. Default: 'Four-Wheel LTO'",
+    )
     args = ap.parse_args(argv)
 
     out = args.out or args.solution.with_suffix(".html")
-    build_interactive(args.solution, out, track_csv=args.track_csv)
+    build_interactive(args.solution, out, track_csv=args.track_csv, title=args.title)
 
 
 if __name__ == "__main__":

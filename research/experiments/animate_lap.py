@@ -182,7 +182,9 @@ def _update_tall_pair(val_l, val_r, bar_l, bar_r, txt_l, txt_r, centered):
 # ── Animation ────────────────────────────────────────────────────────
 
 
-def animate_lap(solution_path, output_path, stride=3, fps=20, track_csv=None):
+def animate_lap(
+    solution_path, output_path, stride=3, fps=20, track_csv=None, title="Four-Wheel LTO"
+):
     with Path(solution_path).open() as f:
         sol = json.load(f)
     params = sol["model_params"]
@@ -268,7 +270,7 @@ def animate_lap(solution_path, output_path, stride=3, fps=20, track_csv=None):
     (trail_line,) = ax_track.plot([], [], "-", color="#e74c3c", lw=2.0, alpha=0.5)
     ax_track.set_aspect("equal")
     ax_track.grid(True, ls="--", alpha=0.1)
-    ax_track.set_title("Maisach — Four-Wheel LTO", fontsize=13, pad=8)
+    ax_track.set_title(title, fontsize=13, pad=8)
     pad = 5
     ax_track.set_xlim(path_xy[:, 0].min() - pad, path_xy[:, 0].max() + pad)
     ax_track.set_ylim(path_xy[:, 1].min() - pad, path_xy[:, 1].max() + pad)
@@ -442,6 +444,11 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Output GIF. Default: <solution stem>_animation.gif beside the solution.",
     )
+    ap.add_argument(
+        "--title",
+        default="Four-Wheel LTO",
+        help="Title over the track panel. Default: 'Four-Wheel LTO'",
+    )
     ap.add_argument("--stride", type=int, default=3, help="Keep every Nth node. Default: 3")
     ap.add_argument("--fps", type=int, default=20, help="Frames per second. Default: 20")
     args = ap.parse_args(argv)
@@ -453,6 +460,7 @@ def main(argv: list[str] | None = None) -> None:
         stride=args.stride,
         fps=args.fps,
         track_csv=args.track_csv,
+        title=args.title,
     )
 
 
