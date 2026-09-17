@@ -73,9 +73,8 @@ class AutoxConfig(TimedEventConfig):
     #: Metres of prescribed constant-speed pad appended after the horizon, held
     #: at the solved terminal speed. 0 = off.
     terminal_pad_m: float = 0.0
-    #: Replaces the tyre ``D`` coefficients outright (not a scale factor) on the
-    #: untimed nodes past the gate, to brake on a grip estimate the car can
-    #: trust. None = nominal grip everywhere.
+    #: Replaces the tyre ``D`` outright (not a scale) on the untimed nodes
+    #: past the gate. None = nominal grip everywhere.
     D_safe_braking: Optional[float] = None
 
 
@@ -182,8 +181,7 @@ def _extend_track_for_autox(
     w_left = np.array(track_data["w_left"], dtype=np.float64)
     w_right = np.array(track_data["w_right"], dtype=np.float64)
 
-    # A circular roll re-anchors s=0 while preserving every adjacency, so the
-    # wraparound arithmetic below is unaffected. Local copies only.
+    # A roll re-anchors s=0 and preserves every adjacency. Local copies only.
     idx_ref, start_snap_m = _resolve_autox_start_index(
         positions, start_x, start_y, start_node_offset
     )
@@ -454,8 +452,7 @@ class AutoxMode(EventMode):
             autox.eps_time,
             autox.decel_hold_m,
         )
-        # The same field skidpad's track carries: it reaches the solution JSON,
-        # tells D_safe_braking which nodes are untimed, and shades the plots.
+        # The same field skidpad's track carries; see the package README.
         track_data["timed_mask"] = (weights >= 1.0 - 1e-9).astype(int).tolist()
         return weights
 

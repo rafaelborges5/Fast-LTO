@@ -184,8 +184,7 @@ def _compute_lateral_bounds_kdtree(
     headings = track.headings
     kappa = track.curvatures
 
-    # The discretisation ends one ds short of the full lap, so the wrap length
-    # must equal arc_lengths[-1] + ds. Guards an open track being routed here.
+    # Guards an open track being routed down this closed-loop path.
     total_length = float(track.total_length_m)
     ds = float(s[1] - s[0]) if s.size > 1 else total_length
     assert abs(total_length - (float(s[-1]) + ds)) < 1e-6, (
@@ -209,12 +208,14 @@ def _compute_lateral_bounds_kdtree(
     def _prepare_side(
         s_samples: np.ndarray, d_samples: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
+        """Wrap into one period, sort, and merge samples at the same station.
+
+        Wrapping comes first because the projections are unwrapped and can fall
+        just outside [0, L); it is what makes the tiling below increasing.
+        """
         if s_samples.size == 0:
             return s_samples, d_samples
 
-        # Wrap into one period before sorting: the cone projections are
-        # unwrapped and can fall just outside [0, L), and wrapping first is
-        # what makes the tiled sequence below strictly increasing.
         s_samples = np.mod(s_samples, total_length)
 
         order = np.argsort(s_samples)
@@ -237,8 +238,8 @@ def _compute_lateral_bounds_kdtree(
     s_right, d_right = _prepare_side(s_right_raw, d_right_raw)
 
     def _tile_periodic(s_period: np.ndarray, d_period: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        # Tiled over three periods, so the natural spline is flanked by real
-        # data at the start/finish seam instead of extrapolating into the gap.
+        """Repeat over three periods, so the spline has real data either side of
+        the start/finish seam instead of extrapolating into the gap."""
         s_tiled = np.concatenate([s_period - total_length, s_period, s_period + total_length])
         d_tiled = np.concatenate([d_period, d_period, d_period])
         return s_tiled, d_tiled

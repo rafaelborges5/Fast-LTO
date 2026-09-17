@@ -42,8 +42,7 @@ class VehicleModel(ABC):
     def __init__(self, params: dict) -> None:
         self.params = params
 
-        # Normalisation metadata, kept as both NumPy (for post-processing) and
-        # CasADi DM (for the graph).
+        # Normalisation metadata, as NumPy and as CasADi DM.
         self._x_red_lb: Optional[np.ndarray] = None
         self._x_red_ub: Optional[np.ndarray] = None
         self._x_red_scale_np: Optional[np.ndarray] = None

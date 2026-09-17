@@ -66,15 +66,13 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
         if value is not None:
             setattr(pipeline, field_name, value)
 
-    # Autox settings live on their own block, so they are applied by attribute
-    # rather than through the flat table above.
+    # On their own block, so applied by attribute rather than the table above.
     for arg_name, field_name in _AUTOX_OVERRIDES.items():
         value = getattr(args, arg_name)
         if value is not None:
             setattr(pipeline.autox, field_name, value)
 
-    # Kept out of the tables above because an unset initial_speed follows
-    # whatever event is selected.
+    # Out of the tables above: unset, it follows whichever event is selected.
     if args.initial_speed is not None:
         pipeline.initial_speed = args.initial_speed
 
@@ -89,8 +87,7 @@ def build_run_config(args: argparse.Namespace) -> "RunConfig":
     elif args.warm_start is not None:
         pipeline.warm_start = args.warm_start
 
-    # These flags carry no "unset" state, so each is applied only when it
-    # differs from its default; otherwise the CLI would override the YAML.
+    # No "unset" state, so applied only when it differs from the default.
     if args.solver_verbose:
         pipeline.solver_verbose = True
     if args.no_normalization:
@@ -309,8 +306,7 @@ Examples:
         help="Shrink lateral bounds by this amount (m) on each side. Default: 0.0",
     )
 
-    # Tri-state on purpose: the flag works in both directions, and the None
-    # default keeps an unpassed flag from overriding the YAML.
+    # Tri-state: both directions work, and None keeps the YAML's value.
     parser.add_argument(
         "--savgol-bounds",
         action=argparse.BooleanOptionalAction,

@@ -147,7 +147,6 @@ def test_the_jacobian_clamp_keeps_its_sign() -> None:
     inside = corner_slacks(np.array([1.999]), np.array([0.0]), kappa, w, w, corners)
     outside = corner_slacks(np.array([2.001]), np.array([0.0]), kappa, w, w, corners)
 
-    # D_kappa flips sign between the two, so the curvature correction must too;
-    # with an unsigned clamp both landed on the same side.
+    # D_kappa flips sign between the two, so the correction must too.
     front_left = next(i for i, c in enumerate(corners) if c.dx > 0 and c.dy > 0)
     assert np.sign(inside[front_left][0]) != np.sign(outside[front_left][0])

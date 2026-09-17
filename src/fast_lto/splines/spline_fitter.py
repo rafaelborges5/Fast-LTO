@@ -129,8 +129,7 @@ def _fit_periodic_spline_c2(points: np.ndarray, t: np.ndarray) -> Tuple[CubicSpl
     x = points[:, 0]
     y = points[:, 1]
 
-    # bc_type="periodic" requires f(t[0]) == f(t[-1]), so close the loop by
-    # appending the first point one wrap distance on.
+    # bc_type="periodic" requires f(t[0]) == f(t[-1]).
     wrap_distance = np.linalg.norm(points[0] - points[-1])
     t_periodic = np.append(t, t[-1] + wrap_distance)
     x_periodic = np.append(x, x[0])
@@ -152,8 +151,7 @@ def _fit_periodic_spline_c4(points: np.ndarray, t: np.ndarray) -> Tuple[object, 
     x_periodic = np.append(x, x[0])
     y_periodic = np.append(y, y[0])
 
-    # Not-a-knot boundary conditions, not truly periodic -- close enough on a
-    # real track, where the seam is one sample out of several hundred.
+    # Not-a-knot, so not truly periodic; the seam is one sample in hundreds.
     spline_x = make_interp_spline(t_periodic, x_periodic, k=5)
     spline_y = make_interp_spline(t_periodic, y_periodic, k=5)
 
@@ -229,8 +227,7 @@ def _sample_at_arc_lengths(
     """
     total_length = s_samples[-1]
 
-    # N is chosen so the spacing lands near ds_m and divides the loop evenly,
-    # which is why the achieved ds is returned rather than assumed.
+    # Near ds_m, but dividing the loop evenly -- hence the achieved ds.
     num_points = int(np.round(total_length / ds_m))
     actual_ds = total_length / num_points
 
@@ -314,8 +311,7 @@ def fit_and_discretize(
 
     points = _load_middle_line(csv_path)
 
-    # Advisory only: an explicit smooth_centerline is always honoured, and the
-    # check just warns when smoothing looks warranted but was not configured.
+    # Advisory: an explicit smooth_centerline is always honoured.
     quality = _check_centerline_quality(points)
     if smooth_centerline > 0:
         print(

@@ -125,8 +125,7 @@ def plot_all_panels_four_wheel(
     out_path: Optional[Path] = None,
     show: bool = True,
 ) -> None:
-    # Tyre loads, slip angles and friction usage come from the model itself,
-    # so the figure shows the solve rather than a second opinion about it.
+    # Straight from the model, so the figure shows the solve itself.
     forces = diagnostics
     a_x = diagnostics["a_long_body"]
     a_y = diagnostics["a_lat_body"]

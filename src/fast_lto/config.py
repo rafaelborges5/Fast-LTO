@@ -376,8 +376,7 @@ class RunConfig:
         active = _MODE_BLOCKS.get(self.pipeline.mode)
         for name in sorted(_pipeline_yaml_fields()):
             if name in _ALL_MODE_BLOCKS:
-                # Only the event being run; the other block is at its
-                # defaults and would be noise in the written file.
+                # Only the event being run; the others are at their defaults.
                 if name != active:
                     continue
                 pipeline[name] = asdict(getattr(self.pipeline, name))

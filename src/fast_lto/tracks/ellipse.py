@@ -183,8 +183,7 @@ def _compute_boundaries(
     left = midline + half_width * left_normals
     right = midline - half_width * left_normals
 
-    # Put the first midline point at the origin, heading +y, so a solve on a
-    # generated track starts where a solve on a real one does.
+    # First midline point to the origin, heading +y, as on a real track.
     ref_point = midline[0]
     ref_tangent = unit_tangents[0]
 

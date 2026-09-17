@@ -122,10 +122,9 @@ class PipelineConfig:
     normalize_states_and_inputs: bool = True
     solver_verbose: bool = False
 
-    #: ``"off"`` reads and writes no seed, so the solve is bit for bit the cold
-    #: one. ``"auto"`` seeds from the store, and solves one easier problem first
-    #: when nothing fits and a cold start would begin infeasible. ``"ladder"``
-    #: always walks up from a safe margin, ignoring the store.
+    #: ``"off"`` reads and writes no seed, ``"auto"`` seeds from the store and
+    #: solves an easier problem first if nothing fits, ``"ladder"`` always
+    #: climbs from a safe margin. See the package README.
     warm_start: WarmStartPolicy = "auto"
     warm_start_max_margin_gap: float = 0.15
     warm_start_ladder_step: float = 0.05
@@ -682,8 +681,7 @@ def _solve_with_warm_start(
                             initial_guess=guess,
                         )
                     except Exception as exc:  # noqa: BLE001
-                        # An optimisation, not a requirement: fall through to
-                        # the target with whatever guess we have.
+                        # An optimisation, not a requirement.
                         print(
                             f"  Warm start: intermediate solve at {rung:.2f} failed "
                             f"({type(exc).__name__}), continuing to the target"
@@ -774,9 +772,7 @@ def step_solve_ocp(
     )
     track_num_points = int(track_data.get("num_points", len(track_data.get("arc_lengths", []))))
 
-    # reg_u may be a scalar or one weight per input. Tested for the scalar
-    # case: Sequence is open-ended, so excluding the obvious types proves
-    # nothing.
+    # Scalar case tested, not the sequence: Sequence is open-ended.
     reg_du_for_sig: Union[float, List[float]]
     if isinstance(config.reg_u, (int, float)):
         reg_du_for_sig = float(config.reg_u)
@@ -961,8 +957,7 @@ def _step_spline(config: PipelineConfig, results: Dict[str, Path]) -> Path:
 
 
 def _step_bounds(config: PipelineConfig, results: Dict[str, Path]) -> Path:
-    # Read back from disk, so this step behaves the same whether or not the
-    # spline ran in this process.
+    # From disk, so this behaves the same whether or not the spline just ran.
     step_compute_bounds(config, track=None, csv_path=results["track"])
     return config.track_with_widths_path
 

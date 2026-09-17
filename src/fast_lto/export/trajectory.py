@@ -180,8 +180,7 @@ def export_reference_trajectory(solution_path: Path | str, output_path: Path | s
 
     fdiff = _finite_diff_periodic if periodic else _finite_diff_open
 
-    # The optimal path becomes the new reference, so d goes to zero and the
-    # boundaries are re-expressed relative to it.
+    # The optimal path becomes the reference, so d goes to zero.
     boundary_left = w_left - d
     boundary_right = -(w_right + d)
 

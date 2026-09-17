@@ -638,8 +638,8 @@ class FourWheelModel(VehicleModel):
         Fy_rl = -Fz_rl * f_rl
 
         def _utilisation(Fx: ca.MX, Fy: ca.MX, Fz: ca.MX, D_key: str) -> ca.MX:
-            # Percent of the friction ellipse in use. The floor keeps the ratio
-            # finite where a wheel is momentarily unloaded.
+            """Percent of the friction ellipse in use, floored so the ratio
+            stays finite where a wheel is momentarily unloaded."""
             cap = ca.fmax(float(p[D_key]) * Fz, 1.0)
             return ca.sqrt(Fx**2 + Fy**2) / cap * 100.0
 
@@ -647,8 +647,7 @@ class FourWheelModel(VehicleModel):
             Fx_fl, Fx_fr, Fx_rr, Fx_rl, delta, Fy_fl, Fy_fr, Fy_rr, Fy_rl, F_drag, F_roll
         )
 
-        # The longitudinal-force share of the yaw moment, split out so the plot
-        # can show how much of the moment is torque vectoring rather than tires.
+        # The longitudinal share of the yaw moment, i.e. torque vectoring.
         l_f = float(p["lf"])
         a_l, a_r = float(p["a_l"]), float(p["a_r"])
         cd, sd = ca.cos(delta), ca.sin(delta)

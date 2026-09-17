@@ -77,8 +77,7 @@ def plot_speed_profile(
         fig, ax = plt.subplots(figsize=(8, 3))
     ax.plot(s, v, label="v(s)")
     if timed_mask is not None:
-        # Only the last untimed block -- where the objective stops rewarding
-        # speed -- not everywhere the car happens to be slowing down.
+        # Only the last untimed block, not every place the car slows down.
         mask = np.asarray(timed_mask)
         untimed_blocks = _contiguous_blocks(mask < 0.5)
         if untimed_blocks:

@@ -139,16 +139,11 @@ def seed_signature(
         "state_names": list(model.reduced_state_names()),
         "input_names": list(model.get_input_names()),
         "geom_hash": geom_hash(track),
-        # These add or remove hard constraints near the terminal region, so
-        # a seed solved under a different value is not merely worse -- it may
-        # not satisfy the target problem's constraints at all.
         "terminal_straight_m": _round_floats(terminal_straight_m),
         "terminal_state_constraint": bool(terminal_state_constraint),
         "terminal_window_nodes": (
             int(terminal_window_nodes) if terminal_window_nodes is not None else None
         ),
-        # Also changes the feasible set, not just the objective: a different
-        # tyre D over the untimed tail of the horizon.
         "D_safe_braking": _round_floats(D_safe_braking),
     }
     soft = {
@@ -462,8 +457,7 @@ def validate_guess(
     if not corners:
         return True, "ok"
 
-    # The corner check needs physical d / psi_err, which every model in the
-    # repo puts first -- asserted rather than assumed.
+    # Asserted rather than assumed: the corner check needs physical d/psi_err.
     names = list(model.reduced_state_names())
     if names[:2] != ["d", "psi_err"]:
         return True, "ok (no d/psi_err to check)"

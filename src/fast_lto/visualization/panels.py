@@ -121,8 +121,7 @@ def _render_four_wheel(p: PanelInputs) -> None:
     input_names = p.data.get("input_names", [])
     input_data = {name: p.data[name] for name in input_names if name in p.data}
 
-    # Rebuild the model from the parameters the solution was produced with, so
-    # the tire loads and slip angles plotted are the ones the solver used.
+    # Rebuilt from the solution's own parameters, so the plot matches the solve.
     diagnostics = evaluate_diagnostics(FourWheelModel(params=dict(p.params)), p.data)
 
     plot_all_panels_four_wheel(

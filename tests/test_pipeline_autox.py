@@ -62,10 +62,8 @@ def test_extension_measured_from_timing_gate():
 
     extension_m = 50.0
     timing_offset_m = 6.0
-    # start_node_offset=0 keeps this test's arithmetic anchored at index 0
-    # (positions[0] == (0, 0), the default start_x/start_y) -- production
-    # default is 1; see test_resolve_start_index_* / test_extend_track_*
-    # below for coverage of the anchor-resolution itself.
+    # start_node_offset=0 anchors the arithmetic at index 0; the production
+    # default of 1 is covered by the anchor-resolution tests below.
     extended = _extend_track_for_autox(
         track, extension_m, timing_offset_m=timing_offset_m, start_node_offset=0
     )
@@ -88,9 +86,8 @@ def test_extension_no_longer_requires_offset_le_extension():
     from fast_lto.modes import _extend_track_for_autox
 
     track = _closed_track()
-    # Previously this raised ValueError; now extension_m is measured past the
-    # gate, so an offset larger than the extension is no longer a conflict.
-    # start_node_offset=0: see comment in test_extension_measured_from_timing_gate.
+    # extension_m is measured past the gate, so an offset larger than the
+    # extension is not a conflict.
     extended = _extend_track_for_autox(
         track, extension_m=5.0, timing_offset_m=6.0, start_node_offset=0
     )
@@ -234,9 +231,8 @@ def test_extend_track_no_discontinuity_at_wrap_seam():
         start_node_offset=0,
     )
 
-    # No jump in spacing anywhere in the horizon, including the seams the
-    # rotation introduces. Spacings are compared against each other, not
-    # against ds_m: these are chords of a circle, so all are slightly short.
+    # No jump in spacing, including at the seams the rotation introduces.
+    # Compared against each other: these are chords, so all are slightly short.
     ext_pos = np.asarray(extended["positions"])
     spacing = np.linalg.norm(np.diff(ext_pos, axis=0), axis=1)
     assert np.allclose(spacing, spacing[0], atol=1e-9)

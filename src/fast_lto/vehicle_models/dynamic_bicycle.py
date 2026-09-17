@@ -30,8 +30,7 @@ class DynamicBicycleModel(VehicleModel):
         return {
             "m": 170.0,
             "Iz": 250.0,
-            # lf is to the FRONT axle, so the static front load share is
-            # lr / (lf + lr). Same convention as the other models.
+            # To the FRONT axle, as in the other models and the configs.
             "lf": 0.842,
             "lr": 0.689,
             "g": 9.81,

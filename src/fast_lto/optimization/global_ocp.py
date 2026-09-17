@@ -15,6 +15,10 @@ from fast_lto.vehicle_models import VehicleModel
 
 # How close to centred and aligned the end of the trajectory has to be. Tight
 # but not exact, so the discrete dynamics are not over-determined.
+#: The events ``build_ocp`` knows how to pose. Only trackdrive leaves node 0
+#: free: its closed-loop equality already ties the state across the wrap.
+OCP_MODES = ("trackdrive", "autox", "skidpad")
+
 _TERMINAL_D_TOL_M = 0.05
 _TERMINAL_PSI_TOL_RAD = 0.03
 _TERMINAL_YAW_RATE_TOL = 0.15
@@ -51,12 +55,52 @@ def _apply_terminal_window(
     n_window: int,
     bounds: list[tuple[int, float, float]],
 ) -> None:
-    """Bound each (idx, lo, hi) in `bounds` over the last `n_window` nodes."""
+    """Bound each (idx, lo, hi) in ``bounds`` over the last ``n_window`` nodes.
+
+    Holding the end of the horizon centred and heading-aligned is the visible
+    half. The other half is that ``bounds`` also caps ``yaw_rate`` and
+    ``v_lat``: with a speed target active and nothing costing state shape in an
+    untimed zone, the solver otherwise takes a cost-free excursion on the last
+    node or two to land exactly on the target.
+
+    ``n_window`` is never usefully 1 -- rate-limited actuators cannot reach the
+    target in zero steps.
+    """
     n_window = min(N, max(1, int(n_window)))
     for i in range(N - n_window, N):
         for idx, lo, hi in bounds:
             opti.subject_to(lo <= X[i, idx])
             opti.subject_to(X[i, idx] <= hi)
+
+
+def _autox_gate_lap_time(
+    track: Dict,
+    time_at_node_s: np.ndarray,
+    timing_offset_m: float,
+) -> Tuple[float | None, str | None]:
+    """Elapsed time between the two crossings of the autox timing gate.
+
+    The gate sits ``timing_offset_m`` downstream of where the car starts, so
+    the lap runs gate to gate rather than from s = 0 to the end of the run-off.
+
+    Returns ``(lap_time_s, warning)``, of which exactly one is None.
+    """
+    base_length_m = track.get("autox_base_length_m")
+    if base_length_m is None:
+        return None, "track has no 'autox_base_length_m' (not an autox-extended track)"
+
+    arc_arr = np.asarray(track["arc_lengths"], dtype=np.float64)
+    s_start = timing_offset_m
+    s_end = float(base_length_m) + timing_offset_m
+    if s_end > arc_arr[-1] + 1e-6 or s_start < arc_arr[0] - 1e-6:
+        return None, (
+            f"autox_extension_m too short to reach the timing gate "
+            f"(need s={s_end:.1f} m, horizon ends at {arc_arr[-1]:.1f} m)"
+        )
+
+    t_start = float(np.interp(s_start, arc_arr, time_at_node_s))
+    t_end = float(np.interp(s_end, arc_arr, time_at_node_s))
+    return t_end - t_start, None
 
 
 def _safe_debug_value(opti: ca.Opti, expr: ca.MX) -> np.ndarray | float | None:
@@ -105,6 +149,108 @@ def _per_input_weights(
     if arr.size != nu:
         raise ValueError(f"{name} must be a scalar or have length {nu}, got {arr.size}")
     return arr
+
+
+class _BrakeZone(NamedTuple):
+    """An alternative model, and the nodes it applies to."""
+
+    model: VehicleModel
+    f_space: Callable
+    eval_at_point: Callable
+    mask: np.ndarray
+
+
+def _build_brake_zone(
+    model: VehicleModel,
+    track: Dict,
+    N: int,
+    D_safe_braking: float,
+    use_normalization: bool,
+) -> _BrakeZone:
+    """A copy of ``model`` with its tyre D coefficients overridden outright.
+
+    Applied to the nodes with no timing objective, so the car brakes on a grip
+    estimate it can trust. Possible because tyre coefficients are baked into
+    each node as plain floats rather than carried as CasADi parameters.
+    """
+    timed_mask_raw = track.get("timed_mask")
+    if timed_mask_raw is None:
+        raise ValueError(
+            "D_safe_braking requires track['timed_mask'] to know which nodes "
+            "have no timing objective."
+        )
+    timed_arr = np.asarray(timed_mask_raw, dtype=float)
+    if timed_arr.size != N:
+        raise ValueError(f"track['timed_mask'] has {timed_arr.size} entries, expected {N}")
+
+    d_keys = ("D_fl", "D_fr", "D_rr", "D_rl")
+    missing = [k for k in d_keys if k not in model.params]
+    if missing:
+        raise ValueError(
+            f"D_safe_braking requires per-wheel D params {d_keys}, but "
+            f"{type(model).__name__} is missing {missing}."
+        )
+
+    brake_params = dict(model.params)
+    for k in d_keys:
+        brake_params[k] = float(D_safe_braking)
+    brake_model = type(model)(brake_params)
+
+    builder = build_space_dynamics_normalized if use_normalization else build_space_dynamics
+    f_space_brake, eval_at_point_brake = builder(brake_model)
+    return _BrakeZone(brake_model, f_space_brake, eval_at_point_brake, timed_arr < 0.5)
+
+
+def _apply_final_node_constraints(
+    opti: ca.Opti,
+    X: ca.MX,
+    U: ca.MX,
+    N: int,
+    kappa_last: ca.MX,
+    model_last: VehicleModel,
+    eval_at_point_last: Callable,
+    use_normalization: bool,
+) -> None:
+    """Apply the model's own constraints at the last node.
+
+    The node loop evaluates them at ``x_i`` for ``i < N-1`` only, so the final
+    node is otherwise unchecked -- which a terminal speed target makes worth
+    cheating at.
+    """
+    x_last = X[N - 1, :].T
+    u_last = U[N - 1, :].T
+    if use_normalization:
+        g_list = model_last.get_constraints_normalized(x_last, u_last, kappa_last)
+    else:
+        full_state_last, _ = eval_at_point_last(x_last, u_last, kappa_last)
+        g_list = model_last.get_constraints(full_state_last, u_last, kappa_last)
+    for g in g_list:
+        opti.subject_to(g <= 0)
+
+
+def _apply_terminal_speed(
+    opti: ca.Opti,
+    X: ca.MX,
+    N: int,
+    model: VehicleModel,
+    terminal_speed: float,
+    use_normalization: bool,
+) -> None:
+    """Require the final node to be at or under ``terminal_speed``.
+
+    An upper bound rather than an equality: landing on one exact point through
+    the discrete dynamics, where the friction circle is also newly binding, is
+    a far more tightly coupled problem to solve.
+    """
+    reduced_names = model.reduced_state_names()
+    v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
+    if use_normalization:
+        x_scale, x_shift = model.get_reduced_state_scaling()
+        v_scale = float(np.array(x_scale).reshape(-1)[v_idx])
+        v_shift = float(np.array(x_shift).reshape(-1)[v_idx])
+        opti.subject_to(X[N - 1, v_idx] <= (terminal_speed - v_shift) / v_scale)
+    else:
+        opti.subject_to(X[N - 1, v_idx] <= terminal_speed)
 
 
 def load_track_with_widths(path: Path) -> Dict:
@@ -250,6 +396,8 @@ def build_ocp(
         Input rate-regularisation weight(s) in the objective. If a scalar is
         given then make isotropic matrix.
     """
+    if mode not in OCP_MODES:
+        raise ValueError(f"Unknown mode: {mode!r}. Must be one of {sorted(OCP_MODES)}.")
     if integrator is None:
         integrator = EulerIntegrator()
 
@@ -283,15 +431,8 @@ def build_ocp(
     opti.set_value(w_left_param, w_left)
     opti.set_value(w_right_param, w_right)
 
-    if mode in ("autox", "skidpad"):
+    if mode != "trackdrive":
         opti.subject_to(X[0, :] == x0_param.T)
-    elif mode == "trackdrive":
-        # The whole state is free: the closed-loop constraint below already
-        # keeps it consistent across the wrap-around, and pinning d(0) and
-        # psi_err(0) would force the lap through the centreline for no reason.
-        pass
-    else:
-        raise ValueError(f"Unknown mode: {mode!r}")
 
     if time_weights is not None:
         time_weights = np.asarray(time_weights, dtype=float).reshape(-1)
@@ -307,55 +448,19 @@ def build_ocp(
         f_space, eval_at_point = build_space_dynamics(model)
     s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
 
-    # Conservative-D braking zone (autox): a second model instance with the
-    # tyre Ds overridden, used on the untimed nodes past the gate. Tyre
-    # coefficients are baked into each node as plain floats, so different nodes
-    # can be built against different model instances.
-    brake_model: VehicleModel | None = None
-    f_space_brake = eval_at_point_brake = None
-    brake_zone_mask: np.ndarray | None = None
+    brake_zone: _BrakeZone | None = None
     if mode == "autox" and D_safe_braking is not None:
-        timed_mask_raw = track.get("timed_mask")
-        if timed_mask_raw is None:
-            raise ValueError(
-                "D_safe_braking requires track['timed_mask'] (set by "
-                "step_solve_ocp's autox branch) to know which nodes have no "
-                "timing objective."
-            )
-        timed_arr = np.asarray(timed_mask_raw, dtype=float)
-        if timed_arr.size != N:
-            raise ValueError(f"track['timed_mask'] has {timed_arr.size} entries, expected {N}")
-        brake_zone_mask = timed_arr < 0.5
-
-        d_keys = ("D_fl", "D_fr", "D_rr", "D_rl")
-        missing = [k for k in d_keys if k not in model.params]
-        if missing:
-            raise ValueError(
-                f"D_safe_braking requires per-wheel D params {d_keys}, but "
-                f"{type(model).__name__} is missing {missing}."
-            )
-        brake_params = dict(model.params)
-        for k in d_keys:
-            brake_params[k] = float(D_safe_braking)
-        brake_model = type(model)(brake_params)
-        if use_normalization:
-            f_space_brake, eval_at_point_brake = build_space_dynamics_normalized(brake_model)
-        else:
-            f_space_brake, eval_at_point_brake = build_space_dynamics(brake_model)
+        brake_zone = _build_brake_zone(model, track, N, D_safe_braking, use_normalization)
 
     def _node_model(i: int) -> Tuple[VehicleModel, Callable, Callable]:
-        # The mask is only set alongside the three brake_* objects.
-        if brake_zone_mask is not None and brake_zone_mask[i]:
-            assert brake_model is not None
-            assert f_space_brake is not None and eval_at_point_brake is not None
-            return brake_model, f_space_brake, eval_at_point_brake
+        if brake_zone is not None and brake_zone.mask[i]:
+            return brake_zone.model, brake_zone.f_space, brake_zone.eval_at_point
         return model, f_space, eval_at_point
 
     total_time = 0
     timed_time = 0
     pure_timed_time = 0
-    # Cumulative time per node, so elapsed time between two arbitrary
-    # arc-lengths can be measured after the solve (e.g. an autox timing gate).
+    # Per node, so a gate-to-gate time can be measured after the solve.
     cumulative_time = [total_time]
 
     use_corner_constraints = len(model.get_corner_offsets()) > 0
@@ -474,52 +579,31 @@ def build_ocp(
         opti.subject_to(-w_right_param[N - 1] <= X[N - 1, 0])
         opti.subject_to(X[N - 1, 0] <= w_left_param[N - 1])
 
-    # The node loop only evaluates the constraints at x_i for i < N-1, leaving
-    # the final node unchecked -- which a terminal speed target makes worth
-    # cheating at. Trackdrive needs no repeat: its closed-loop equality ties
-    # X[N-1] back to X[0], which the loop does check. See README.md.
     if mode != "trackdrive" and enforce_terminal_constraints:
-        x_last = X[N - 1, :].T
-        u_last = U[N - 1, :].T
-        kappa_last = kappa_param[N - 1]
         model_last, _, eval_at_point_last = _node_model(N - 1)
-        if use_normalization:
-            g_list_last = model_last.get_constraints_normalized(x_last, u_last, kappa_last)
-        else:
-            full_state_last, _ = eval_at_point_last(x_last, u_last, kappa_last)
-            g_list_last = model_last.get_constraints(full_state_last, u_last, kappa_last)
-        for g in g_list_last:
-            opti.subject_to(g <= 0)
+        _apply_final_node_constraints(
+            opti,
+            X,
+            U,
+            N,
+            kappa_param[N - 1],
+            model_last,
+            eval_at_point_last,
+            use_normalization,
+        )
 
     if mode == "trackdrive":
         opti.subject_to(X[N - 1, :].T == X[0, :].T)
 
-    # An upper bound rather than an equality: landing on one exact point
-    # through the discrete dynamics, right where the friction circle is also
-    # newly binding, is a far more tightly coupled problem to solve.
     if terminal_speed is not None:
-        reduced_names = model.reduced_state_names()
-        v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
-        if use_normalization:
-            x_scale, x_shift = model.get_reduced_state_scaling()
-            v_scale = float(np.array(x_scale).reshape(-1)[v_idx])
-            v_shift = float(np.array(x_shift).reshape(-1)[v_idx])
-            opti.subject_to(X[N - 1, v_idx] <= (terminal_speed - v_shift) / v_scale)
-        else:
-            opti.subject_to(X[N - 1, v_idx] <= terminal_speed)
+        _apply_terminal_speed(opti, X, N, model, terminal_speed, use_normalization)
 
-    # Skidpad: hold the last `terminal_straight_m` metres centred and aligned,
-    # so the untimed exit has a reason to straighten out before the finish.
-    # The window also caps yaw_rate and v_lat, without which the solver takes
-    # a cost-free excursion on the last node or two to hit the speed target.
     if mode == "skidpad" and terminal_straight_m is not None and terminal_straight_m > 0.0:
         n_window = int(round(terminal_straight_m / ds))
         _apply_terminal_window(
             opti, X, N, n_window, _terminal_state_bounds(model, use_normalization)
         )
 
-    # Autox: the same window, but only over the last few nodes -- the state the
-    # prescribed terminal pad picks up from. The approach stays free.
     if mode == "autox" and terminal_state_constraint:
         _apply_terminal_window(
             opti, X, N, terminal_window_nodes, _terminal_state_bounds(model, use_normalization)
@@ -571,9 +655,7 @@ def build_ocp(
             "print_time": 1 if solver_verbose else 0,
             "ipopt.sb": "yes",
             "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
-            # A pathological solve should fail fast rather than hang; a healthy
-            # fine-ds four-wheel lap converges in well under this.
-            "ipopt.max_cpu_time": 600.0,
+            "ipopt.max_cpu_time": 600.0,  # fail fast rather than hang
         },
         {},
     )
@@ -792,33 +874,13 @@ def solve_ocp_and_save(
     pure_timed_s = float(sol.value(pure_timed_expr)) if time_weights is not None else 0.0
     reg_term = obj_val - timed_time_s
 
-    # The real gate sits `autox_timing_offset_m` downstream of where the car
-    # starts, so the lap time runs gate to gate, not s=0 to the end of the
-    # run-off.
-    autox_lap_time_s = None
-    autox_timing_warning = None
+    autox_lap_time_s: float | None = None
+    autox_timing_warning: str | None = None
     if autox_timing_offset_m is not None:
-        base_length_m = track.get("autox_base_length_m")
-        if base_length_m is None:
-            autox_timing_warning = (
-                "track has no 'autox_base_length_m' (not an autox-extended track)"
-            )
-        else:
-            arc_arr = np.asarray(track["arc_lengths"], dtype=np.float64)
-            time_at_node_s = np.asarray(sol.value(cumulative_time_expr), dtype=np.float64).reshape(
-                -1
-            )
-            s_start = float(autox_timing_offset_m)
-            s_end = float(base_length_m) + float(autox_timing_offset_m)
-            if s_end > arc_arr[-1] + 1e-6 or s_start < arc_arr[0] - 1e-6:
-                autox_timing_warning = (
-                    f"autox_extension_m too short to reach the timing gate "
-                    f"(need s={s_end:.1f} m, horizon ends at {arc_arr[-1]:.1f} m)"
-                )
-            else:
-                t_start = float(np.interp(s_start, arc_arr, time_at_node_s))
-                t_end = float(np.interp(s_end, arc_arr, time_at_node_s))
-                autox_lap_time_s = t_end - t_start
+        time_at_node_s = np.asarray(sol.value(cumulative_time_expr), dtype=np.float64).reshape(-1)
+        autox_lap_time_s, autox_timing_warning = _autox_gate_lap_time(
+            track, time_at_node_s, float(autox_timing_offset_m)
+        )
 
     N = len(track["arc_lengths"])
     ds_m = (

@@ -100,8 +100,7 @@ def _generate_control_points(config: FSGTrackConfig) -> np.ndarray:
         1.0 + rng.uniform(-config.radial_variance, config.radial_variance, n)
     )
 
-    # Harmonics push some sections inward and others outward, so the curvature
-    # changes sign; without them the loop is convex and turns only one way.
+    # Harmonics make the curvature change sign; without them the loop is convex.
     for _ in range(config.num_harmonics):
         freq = rng.integers(2, 8)  # angular frequency
         amp = rng.uniform(0.2, 1.0) * config.harmonic_amplitude * config.base_radius_m

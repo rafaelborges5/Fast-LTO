@@ -533,9 +533,7 @@ def test_shipped_event_configs_inherit_the_shared_car() -> None:
         raw = yaml.safe_load(path.read_text())
         assert raw.get("extends") == "vehicle.yaml", f"{path.name} does not extend the shared car"
         assert "pipeline" in raw, f"{path.name} should carry its own pipeline settings"
-        # Only the genuinely per-event knobs stay behind. `corners` is not
-        # among them: they are the car's physical extents, so they live in
-        # vehicle.yaml and no event may redefine them.
+        # Only per-event knobs stay behind; `corners` are physical extents.
         overrides = set(raw.get("vehicle") or {})
         assert overrides <= {"v_max", "four_wheel"}, (
             f"{path.name} overrides {sorted(overrides)}; anything the events agree on "

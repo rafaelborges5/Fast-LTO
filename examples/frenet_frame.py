@@ -356,8 +356,7 @@ class TrackProcessor:
                 else np.full(self.n, normal_length_m)
             )
 
-        # Detect singularities: where min(width) / radius_of_curvature > threshold
-        # Radius of curvature R = 1 / |kappa| (for kappa != 0)
+        # Singular where the corridor half-width approaches R = 1 / |kappa|.
         abs_kappa = np.abs(self.curvatures)
         radius = np.where(abs_kappa > 1e-9, 1.0 / abs_kappa, np.inf)
         min_width = np.minimum(w_left, w_right)
@@ -453,8 +452,7 @@ def _load_track(track_csv: Optional[Path], ds_m: float):
         print(f"Reading boundaries from {track_csv}")
         boundaries = load_boundaries(track_csv)
     else:
-        # No input asked for, so make one. Keeps the example runnable in a
-        # fresh clone, where data/ holds only what ships.
+        # Keeps the example runnable in a fresh clone.
         print("No --track-csv given; generating a random FSG-style track")
         csv_path = Path(tempfile.mkdtemp()) / "frenet_example.csv"
         boundaries = generate_fsg_track(output_csv=csv_path)
@@ -508,9 +506,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     processor = TrackProcessor(track)
 
-    # Both directions of the mapping, on a point placed half a metre to the
-    # left of station 10: project it back and the offset should come out as the
-    # half metre it was built from.
+    # Round-trip a point half a metre left of station 10 back through the map.
     offset_m = 0.5
     sample_xy = track.positions[10] + offset_m * processor.normals[10]
     projected = processor.project_xy_to_frenet(sample_xy)

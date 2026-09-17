@@ -123,8 +123,7 @@ def _build_baseline(config_path: Path) -> Baseline:
         start_xy=start_xy,
     )
 
-    # Asked of the mode rather than recomputed, so the objective this sweep
-    # optimises is the one the pipeline optimises.
+    # Asked of the mode, so this sweep optimises the pipeline's objective.
     time_weights = get_mode("skidpad").time_weights(track, pc)
     assert time_weights is not None  # skidpad always weights its objective
 
@@ -194,8 +193,7 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
             boundary_margin=margin,
             mode="skidpad",
             time_weights=base.time_weights,
-            # The rest of the solver arguments the mode owns, so a new skidpad
-            # knob reaches this sweep without an edit here.
+            # Owned by the mode, so a new knob reaches this sweep unedited.
             **mode.solver_kwargs(pc),
         )
         prof = sol.get("profiling", {})
@@ -209,8 +207,7 @@ def _solve_one(job: Dict[str, Any]) -> Dict[str, Any]:
         result["exported"] = False
         if status == "Solve_Succeeded":
             try:
-                # Same prescribed segments the pipeline stitches on, asked of
-                # the mode rather than reimplemented.
+                # Asked of the mode rather than reimplemented here.
                 for plan in mode.splices(pc, base.track, sol):
                     sol = _splice_segment(
                         sol, plan.segment, plan.speed, side=plan.side, timed=plan.timed

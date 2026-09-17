@@ -125,9 +125,8 @@ def test_leadin_kappa_matches_path_geometry(tmp_path):
     # The lead-in must not export as straight.
     assert np.all(np.abs(kappa[:K]) > 1e-6)
 
-    # It is a circular arc of curvature k0, so the three-point curvature of
-    # the exported path must equal k0 there. Menger index i is path point i+1,
-    # so compare inside the lead-in, away from the junction at index K.
+    # A circular arc of curvature k0, so the exported path's three-point
+    # curvature must equal k0 inside the lead-in. Menger index i is point i+1.
     kappa_geo = _menger_curvature(x, y)
     interior = slice(1, K - 1)
     assert np.allclose(kappa[interior], k0, atol=1e-3)

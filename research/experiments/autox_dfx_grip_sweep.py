@@ -283,8 +283,7 @@ def run(
 
     print(f"Baseline config: {config_path}, track_id={track_id}")
     base_rc = RunConfig.from_yaml(config_path)
-    # The pipeline settings live on `.pipeline`; assigning to the RunConfig
-    # itself would create an attribute nobody reads.
+    # The pipeline settings live on `.pipeline`, not on the RunConfig.
     base_rc.pipeline.track_id = track_id
     if smooth_centerline is not None:
         print(

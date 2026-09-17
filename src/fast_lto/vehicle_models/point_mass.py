@@ -27,8 +27,7 @@ class PointMassModel(VehicleModel):
     def get_default_params(self) -> dict:
         return {
             "m": 170.0,
-            # Unused by the point-mass dynamics, but declared so the three
-            # models never describe different cars.
+            # Unused here, but declared so all three describe the same car.
             "lf": 0.842,
             "lr": 0.689,
             "mu": 1.4,
