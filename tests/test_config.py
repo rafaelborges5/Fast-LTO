@@ -489,6 +489,33 @@ def test_a_cycle_is_reported_not_recursed(tmp_path: Path) -> None:
         RunConfig.from_yaml(tmp_path / "a.yaml")
 
 
+def test_the_car_defines_its_corners_once() -> None:
+    """Body geometry is the car's, not the event's.
+
+    Autox used to set a front corner 79 mm shorter than the other two events.
+    A car does not change shape between disciplines, so that was drift between
+    three hand-copied files -- the thing the shared config exists to stop.
+    """
+    import yaml
+
+    shared = yaml.safe_load((CONFIGS_DIR / "vehicle.yaml").read_text())["vehicle"]
+    assert "corners" in shared, "the car must define its own corners"
+
+    for path in _shipped_configs():
+        if path.name == "vehicle.yaml":
+            continue
+        event = yaml.safe_load(path.read_text()).get("vehicle") or {}
+        assert "corners" not in event, f"{path.name} redefines the car's corners"
+
+    # Every event therefore resolves to the same body geometry.
+    resolved = {
+        tuple(tuple(c) for c in RunConfig.from_yaml(p).vehicle.corners or ())
+        for p in _shipped_configs()
+        if p.name != "vehicle.yaml"
+    }
+    assert len(resolved) == 1, f"events disagree on the car's corners: {resolved}"
+
+
 def test_shipped_event_configs_inherit_the_shared_car() -> None:
     """Every event config extends vehicle.yaml and overrides only what it tunes.
 
@@ -507,9 +534,11 @@ def test_shipped_event_configs_inherit_the_shared_car() -> None:
         raw = yaml.safe_load(path.read_text())
         assert raw.get("extends") == "vehicle.yaml", f"{path.name} does not extend the shared car"
         assert "pipeline" in raw, f"{path.name} should carry its own pipeline settings"
-        # Only the genuinely per-event knobs stay behind.
+        # Only the genuinely per-event knobs stay behind. `corners` is not
+        # among them: they are the car's physical extents, so they live in
+        # vehicle.yaml and no event may redefine them.
         overrides = set(raw.get("vehicle") or {})
-        assert overrides <= {"v_max", "corners", "four_wheel"}, (
+        assert overrides <= {"v_max", "four_wheel"}, (
             f"{path.name} overrides {sorted(overrides)}; anything the events agree on "
             "belongs in vehicle.yaml"
         )
