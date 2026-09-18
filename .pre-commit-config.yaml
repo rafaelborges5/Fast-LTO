@@ -41,7 +41,10 @@ repos:
     hooks:
       - id: pytest-fast
         name: pytest (excluding slow solves)
-        entry: pytest -q -m "not slow"
+        # PYTEST_DISABLE_PLUGIN_AUTOLOAD keeps ambient plugins (a sourced ROS
+        # install, for one) from breaking collection; MPLBACKEND keeps the
+        # figure tests headless.
+        entry: env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 MPLBACKEND=Agg pytest -q -m "not slow"
         language: system
         pass_filenames: false
         types: [python]
