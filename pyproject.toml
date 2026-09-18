@@ -32,7 +32,10 @@ dependencies = [
     "scipy>=1.14.0",
     "matplotlib>=3.9.0",
     "pyyaml>=6.0.0",
-    "casadi>=3.6.0",
+    # Capped: 3.8 ships type stubs whose MX does not match the
+    # Sequence[ca.MX] annotations the model interface declares. Lifting this
+    # means reworking those signatures; 3.8 is numerically fine (goldens pass).
+    "casadi>=3.6.0,<3.8",
 ]
 
 [project.urls]
@@ -51,7 +54,9 @@ dev = [
     "black>=24.0.0",
     "isort>=5.13.0",
     "mypy>=1.11.0",
-    "ruff>=0.6.0",
+    # Capped: 0.16 turns on many more rules by default, so an uncapped floor
+    # means "whatever rules shipped this week" rather than a fixed contract.
+    "ruff>=0.6.0,<0.15",
     "pre-commit>=3.7.0",
     "pytest>=7.4.0",
     "pytest-cov>=5.0.0",
@@ -106,5 +111,3 @@ warn_unused_configs = true
 ignore_missing_imports = true
 # Everywhere, with no per-module allowlist.
 disallow_untyped_defs = true
-
-

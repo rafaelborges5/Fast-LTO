@@ -1,12 +1,12 @@
 repos:
   - repo: https://github.com/psf/black
-    rev: 24.8.0
+    rev: 26.5.1
     hooks:
       - id: black
         language_version: python3
 
   - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
+    rev: 9.0.1
     hooks:
       - id: isort
 
@@ -17,7 +17,7 @@ repos:
         args: ["--fix"]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace
@@ -32,7 +32,9 @@ repos:
         # Only the package: research/ is analysis code, reviewed separately.
         files: ^src/fast_lto/
         additional_dependencies:
-          - numpy>=2.0.0
+          # numpy 2.5 needs Python >= 3.12 and writes PEP 695 stubs that mypy
+          # rejects while targeting 3.10. Match what a 3.10 install resolves.
+          - numpy>=2.0.0,<2.5
           - types-PyYAML>=6.0.0
 
   # The fast subset, so a commit stays quick. CI runs the full sweep including
@@ -48,5 +50,3 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
-
-
