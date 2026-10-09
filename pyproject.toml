@@ -49,6 +49,9 @@ fast-lto = "fast_lto.cli:main"
 where = ["src"]
 include = ["fast_lto*"]
 
+[tool.setuptools.package-data]
+"fast_lto.optimization" = ["fatrop_glue.c"]
+
 [project.optional-dependencies]
 dev = [
     "black>=24.0.0",

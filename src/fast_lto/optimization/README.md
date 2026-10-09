@@ -1,6 +1,6 @@
 # optimization
 
-The optimal control problem solved by IPOPT.
+The optimal control problem, and the solvers that run it.
 
 ## The formulation
 
@@ -35,6 +35,57 @@ symbolic `ca.solve`.
 Solver settings: MUMPS with QAMD ordering and its own scaling off (about 30%
 less time in the linear solves), and OpenBLAS limited to one thread, set in
 `fast_lto/__init__.py` unless `OPENBLAS_NUM_THREADS` is already defined.
+
+## Solvers and derivatives
+
+Two settings choose how the OCP is solved. Neither changes the problem.
+
+| `solver` | `derivatives` | What runs |
+| --- | --- | --- |
+| `ipopt` | `symbolic` | The Opti problem above; CasADi differentiates the whole NLP. The default. |
+| `ipopt` | `compiled` | The same problem stage by stage, with per-stage derivatives compiled to C. |
+| `fatrop` | `compiled` | The same stage-wise problem in FATROP, through its native C interface. |
+
+Measured on a four-wheel lap at `ds = 0.5` m, single-threaded, library cached:
+
+| | `ipopt` / `symbolic` | `ipopt` / `compiled` | `fatrop` / `compiled` |
+| --- | --- | --- | --- |
+| autox, 723 nodes | 8.2 s | 2.5 s | 0.9 s |
+| trackdrive, 800 nodes | 9.0 s | 2.2 s | 1.1 s |
+
+**Stage-wise problem.** `stage_problem.py` restates `build_ocp` stage by stage:
+stage `k` owns `x_k` and `u_k`, and everything else it needs — curvatures,
+widths, time weight, launch state — is a per-stage parameter vector. Stages
+with the same maths share a type (first, ordinary, brake zone, terminal window,
+last). A vehicle model needs nothing new for this.
+
+**Compiled derivatives.** Each stage type's values, Jacobian and Lagrangian
+Hessian are generated as C and compiled once (`codegen.py`). The library is
+cached under `$FAST_LTO_CACHE` (default `~/.cache/fast_lto`) by a hash of its
+source, so changing the model, its parameters, `ds` or the event builds a new
+one, and nothing is invalidated by hand. Tracks do not enter the library, so one
+build serves every track with the same settings. The first solve of a new setup
+pays the compile, a few seconds to about twenty; `fast-lto --prebuild` does it
+without solving.
+
+**IPOPT.** The stage derivatives are mapped over the stages and permuted into
+the NLP Jacobian and Hessian, which IPOPT takes in place of its own
+(`stage_ipopt.py`).
+
+**FATROP.** A structure-exploiting interior-point method whose linear algebra
+is a Riccati recursion over the stages, so its cost grows linearly with the
+number of nodes. CasADi's FATROP plugin cannot take custom derivatives, so
+`stage_fatrop.py` generates each stage type in FATROP's own layout and compiles
+it with a small adapter (`fatrop_glue.c`) against FATROP's C interface. FATROP
+only couples neighbouring stages; the trackdrive wrap `x_{N-1} = x_0` is
+carried as a copy of `x_0` through every stage.
+
+FATROP is a different algorithm on a nonconvex problem. On some tracks it lands
+on a better local optimum than IPOPT; it has never been worse in testing.
+
+**Limits.** The compiled paths need a C compiler (`$CC`, else `cc`, `gcc` or
+`clang`) and normalised states. The input-rate penalty `reg_u` couples
+neighbouring stages and is rejected; every event config sets it to 0.
 
 ## Smoothness
 
