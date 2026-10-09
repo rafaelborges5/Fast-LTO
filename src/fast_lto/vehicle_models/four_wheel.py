@@ -265,33 +265,30 @@ class FourWheelModel(VehicleModel):
         c_fl = h1 * sd * f_fl
         c_fr = h1 * sd * f_fr
 
-        A = ca.MX(4, 4)
-        # Row 1 (FL)
-        A[0, 0] = 1 + f_fl * (h1 * sd - h2 * cd)
-        A[0, 1] = f_fr * (h1 * sd - h2 * cd)
-        # Row 2 (FR)
-        A[1, 0] = f_fl * (h1 * sd + h2 * cd)
-        A[1, 1] = 1 + f_fr * (h1 * sd + h2 * cd)
-        # Row 3 (RR)
-        A[2, 0] = -c_fl
-        A[2, 1] = -c_fr
-        A[2, 2] = 1 + h2 * f_rr
-        A[2, 3] = h2 * f_rl
-        # Row 4 (RL)
-        A[3, 0] = -c_fl
-        A[3, 1] = -c_fr
-        A[3, 2] = -h2 * f_rr
-        A[3, 3] = 1 - h2 * f_rl
+        # A is block lower-triangular: solve the front 2x2, then the rear.
+        a11 = 1 + f_fl * (h1 * sd - h2 * cd)
+        a12 = f_fr * (h1 * sd - h2 * cd)
+        a21 = f_fl * (h1 * sd + h2 * cd)
+        a22 = 1 + f_fr * (h1 * sd + h2 * cd)
+        det_front = a11 * a22 - a12 * a21
+        Fz_fl = (a22 * b1 - a12 * b2) / det_front
+        Fz_fr = (a11 * b2 - a21 * b1) / det_front
 
-        b_vec = ca.vertcat(b1, b2, b3, b4)
-        Fz_vec = ca.solve(A, b_vec)
+        coupling = c_fl * Fz_fl + c_fr * Fz_fr
+        a33 = 1 + h2 * f_rr
+        a34 = h2 * f_rl
+        a43 = -h2 * f_rr
+        a44 = 1 - h2 * f_rl
+        det_rear = a33 * a44 - a34 * a43
+        Fz_rr = (a44 * (b3 + coupling) - a34 * (b4 + coupling)) / det_rear
+        Fz_rl = (a33 * (b4 + coupling) - a43 * (b3 + coupling)) / det_rear
 
         eps_fz = float(p.get("smoothmax_eps", 1e-3))
-        Fz_min = ca.MX(10.0)
-        Fz_fl_s = smoothmax(Fz_vec[0], Fz_min, eps_fz)
-        Fz_fr_s = smoothmax(Fz_vec[1], Fz_min, eps_fz)
-        Fz_rr_s = smoothmax(Fz_vec[2], Fz_min, eps_fz)
-        Fz_rl_s = smoothmax(Fz_vec[3], Fz_min, eps_fz)
+        Fz_min = 10.0
+        Fz_fl_s = smoothmax(Fz_fl, Fz_min, eps_fz)
+        Fz_fr_s = smoothmax(Fz_fr, Fz_min, eps_fz)
+        Fz_rr_s = smoothmax(Fz_rr, Fz_min, eps_fz)
+        Fz_rl_s = smoothmax(Fz_rl, Fz_min, eps_fz)
 
         return Fz_fl_s, Fz_fr_s, Fz_rr_s, Fz_rl_s
 
