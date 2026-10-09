@@ -644,6 +644,8 @@ def build_ocp(
             "ipopt.sb": "yes",
             "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
             "ipopt.max_cpu_time": 600.0,  # fail fast rather than hang
+            "ipopt.mumps_pivot_order": 6,  # QAMD
+            "ipopt.mumps_scaling": 0,
         },
         {},
     )
