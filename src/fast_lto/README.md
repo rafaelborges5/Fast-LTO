@@ -94,9 +94,10 @@ smoothness tricks, warm starts, and terminal regions:
 
 ### Solve (CasADi + IPOPT)
 
-CasADi builds the NLP and IPOPT solves it. A full four-wheel lap at
-`ds = 0.5` m takes on the order of ten seconds when the centreline guess is
-feasible. On tight corridors a warm start — a previous solution, or a margin
+CasADi builds the NLP and IPOPT solves it, or FATROP with `solver: fatrop`. A
+full four-wheel lap at `ds = 0.5` m takes on the order of ten seconds by
+default, and about one with `derivatives: compiled` and FATROP, when the
+centreline guess is feasible. On tight corridors a warm start — a previous solution, or a margin
 ladder — is what makes it converge, and the solve can take a minute or two.
 The written artifact is a solution JSON with states, inputs, geometry, and the
 run config that produced them.

@@ -88,6 +88,14 @@ fast-lto --config configs/trackdrive.yaml --track-id fscz_2025 \
 # Re-solve from an existing discretised track
 fast-lto --config configs/trackdrive.yaml --track-id fscz_2025 \
   --start-from ocp --integrator rk4
+
+# Fast solve: FATROP with derivatives compiled to C (needs a C compiler)
+fast-lto --config configs/autox.yaml --track-id fsg_autox_2026 \
+  --solver fatrop --derivatives compiled
+
+# Compile those derivatives ahead of time, without solving
+fast-lto --config configs/autox.yaml --track-id fsg_autox_2026 \
+  --solver fatrop --derivatives compiled --prebuild
 ```
 
 ## Inputs and outputs

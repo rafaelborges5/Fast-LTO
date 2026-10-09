@@ -53,10 +53,20 @@ Of the pipeline settings, four change the answer materially:
 
 | | |
 | --- | --- |
-| `model_name` | `point_mass` solves in seconds and is how you check a setup; `four_wheel` is the real answer and takes minutes |
+| `model_name` | `point_mass` solves in seconds and is how you check a setup; `four_wheel` is the real answer |
 | `ds_m` | node spacing. 0.5 m is the working value; coarser is faster and less honest about actuator rates |
 | `boundary_margin` | metres kept clear of each boundary. The single biggest lever on lap time, and on whether the solve starts feasible at all |
 | `reg_u` / `reg_u_l2` | input-rate and input penalties. Too low and the inputs chatter; too high and the car drives conservatively for no physical reason |
+
+Two more change how fast the answer comes, not the answer:
+
+| | |
+| --- | --- |
+| `solver` | `ipopt` (default) or `fatrop` |
+| `derivatives` | `symbolic` (default) or `compiled`: per-stage derivatives in C. `fatrop` needs `compiled` |
+
+`solver: fatrop` with `derivatives: compiled` is the fastest by a wide margin;
+see `src/fast_lto/optimization/README.md`.
 
 Each event block holds that event's own settings —
 `src/fast_lto/README.md` covers what they do.
