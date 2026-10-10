@@ -62,11 +62,11 @@ last). A vehicle model needs nothing new for this.
 **Compiled derivatives.** Each stage type's values, Jacobian and Lagrangian
 Hessian are generated as C and compiled once (`codegen.py`). The library is
 cached under `$FAST_LTO_CACHE` (default `~/.cache/fast_lto`) by a hash of its
-source, so changing the model, its parameters, `ds` or the event builds a new
-one, and nothing is invalidated by hand. Tracks do not enter the library, so one
-build serves every track with the same settings. The first solve of a new setup
-pays the compile, a few seconds to about twenty; `fast-lto --prebuild` does it
-without solving.
+source, so changing the model, its parameters, `reg_u_l2` or the event builds
+a new one, and nothing is invalidated by hand. Track data and `ds` are runtime
+inputs, so one build serves every track with the same settings. The first
+solve of a new setup pays the compile, a few seconds to about twenty;
+`fast-lto --prebuild` does it without solving.
 
 **IPOPT.** The stage derivatives are mapped over the stages and permuted into
 the NLP Jacobian and Hessian, which IPOPT takes in place of its own
