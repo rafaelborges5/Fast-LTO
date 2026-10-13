@@ -37,7 +37,12 @@ from typing import (
 import numpy as np
 
 from fast_lto.modes import AutoxConfig, EventMode, SkidpadConfig, get_mode
-from fast_lto.optimization.global_ocp import load_track_with_widths, solve_ocp_and_save
+from fast_lto.optimization.global_ocp import (
+    DERIVATIVES,
+    SOLVERS,
+    load_track_with_widths,
+    solve_ocp_and_save,
+)
 from fast_lto.optimization.integrators import EulerIntegrator, RK4Integrator, SpaceIntegrator
 from fast_lto.paths import default_data_root
 from fast_lto.splines.discretized_track import DiscretizedTrack
@@ -116,6 +121,11 @@ class PipelineConfig:
     show_plots: bool = True
     normalize_states_and_inputs: bool = True
     solver_verbose: bool = False
+    #: ``ipopt`` or ``fatrop``. FATROP needs ``derivatives: compiled``.
+    solver: Literal["ipopt", "fatrop"] = "ipopt"
+    #: ``symbolic``: CasADi differentiates the whole NLP. ``compiled``: the
+    #: derivatives are built per stage and compiled to C (needs a C compiler).
+    derivatives: Literal["symbolic", "compiled"] = "symbolic"
 
     #: ``off`` / ``auto`` / ``ladder``; see package README.
     warm_start: WarmStartPolicy = "auto"
@@ -130,6 +140,18 @@ class PipelineConfig:
         if self.mode not in ("autox", "trackdrive", "skidpad"):
             raise ValueError(
                 f"Unknown mode: {self.mode!r}. Must be 'autox', 'trackdrive' or 'skidpad'."
+            )
+
+        if self.solver not in SOLVERS or self.derivatives not in DERIVATIVES:
+            raise ValueError(
+                f"Unknown solver/derivatives: {self.solver!r}/{self.derivatives!r}. "
+                f"Must be one of {list(SOLVERS)} / {list(DERIVATIVES)}."
+            )
+        if self.solver == "fatrop" and self.derivatives != "compiled":
+            raise ValueError("solver: fatrop needs derivatives: compiled.")
+        if self.derivatives == "compiled" and np.any(np.asarray(self.reg_u, dtype=float) != 0.0):
+            raise ValueError(
+                "derivatives: compiled does not support the input-rate penalty; set reg_u: 0."
             )
 
         if self.warm_start not in WARM_START_POLICIES:
@@ -520,6 +542,8 @@ def _solve_once(
         mode=config.mode,
         time_weights=time_weights,
         initial_guess=initial_guess,
+        solver=config.solver,
+        derivatives=config.derivatives,
         **mode.solver_kwargs(config),
     )
 
@@ -705,6 +729,35 @@ def _print_mode_summary(
     """Print the mode's problem-setup summary lines."""
     for line in get_mode(config.mode).summary(config, track_data, time_weights):
         print(line)
+
+
+def step_prebuild_solver(config: PipelineConfig) -> Path:
+    """Compile the per-stage derivatives this config solves with, without solving.
+
+    Needs the discretised track (run up to the bounds step first). The library
+    is cached and reused for every track with the same model, ``ds`` and event.
+    """
+    from fast_lto.optimization.global_ocp import prepare_stage_solver
+
+    if config.derivatives != "compiled":
+        raise ValueError("Nothing to prebuild: set derivatives: compiled.")
+    mode = get_mode(config.mode)
+    track_data = mode.prepare_track(load_track_with_widths(config.track_with_widths_path), config)
+    problem = {k: v for k, v in mode.solver_kwargs(config).items() if k != "autox_timing_offset_m"}
+    path = prepare_stage_solver(
+        track_data,
+        _make_model(config.model_name, vehicle_config=config.vehicle_config),
+        _make_integrator(config.integrator_name),
+        config.solver,
+        initial_speed=config.launch_speed,
+        mode=config.mode,
+        boundary_margin=config.boundary_margin,
+        time_weights=mode.time_weights(track_data, config),
+        reg_u_l2=config.reg_u_l2,
+        **problem,
+    )
+    print(f"  Compiled {config.solver} stage functions: {path}")
+    return path
 
 
 def step_solve_ocp(

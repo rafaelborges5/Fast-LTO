@@ -4,7 +4,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Callable, Dict, NamedTuple, Sequence, Tuple
+from typing import Any, Callable, Dict, NamedTuple, Sequence, Tuple
 
 import casadi as ca
 import numpy as np
@@ -97,6 +97,26 @@ def _safe_debug_value(opti: ca.Opti, expr: ca.MX) -> np.ndarray | float | None:
     if arr.size == 1:
         return float(arr.reshape(-1)[0])
     return arr
+
+
+#: ``solver`` / ``derivatives`` choices for ``solve_ocp_and_save``.
+SOLVERS = ("ipopt", "fatrop")
+DERIVATIVES = ("symbolic", "compiled")
+
+
+class _SolveResult(NamedTuple):
+    """What every solver path hands back to ``solve_ocp_and_save``."""
+
+    X: np.ndarray
+    U: np.ndarray
+    obj_val: float
+    lap_time_s: float
+    timed_time_s: float
+    pure_timed_s: float
+    time_at_node_s: np.ndarray
+    iter_count: int | None
+    return_status: str | None
+    solve_time_s: float
 
 
 class BuiltOcp(NamedTuple):
@@ -314,7 +334,7 @@ def _constraint_eval_points(
     x: ca.MX,
     u: ca.MX,
     kappa: ca.MX,
-    ds: float,
+    ds: float | ca.MX,
     kappa_half: ca.MX | None = None,
     kappa_next: ca.MX | None = None,
 ) -> list[tuple[ca.MX, ca.MX]]:
@@ -337,18 +357,18 @@ def _build_stage_function(
     f_space: Callable,
     eval_at_point: Callable,
     integrator: SpaceIntegrator,
-    ds: float,
     use_normalization: bool,
 ) -> ca.Function:
-    """One interval as an SX function ``(x, u, kappa, kappa_half, kappa_next, w_left, w_right)``.
+    """One interval as an SX function of ``(x, u, kappa, kappa_half, kappa_next, w_left, w_right, ds)``.
 
     Returns ``(x_next, g, dt)`` with ``g <= 0`` holding the model and corridor
-    inequalities at node ``i``.
+    inequalities at node ``i``. ``ds`` is an input, not a constant, so compiled
+    code does not depend on the exact spacing of one track.
     """
     x = ca.MX.sym("x", model.nx_reduced)
     u = ca.MX.sym("u", model.nu)
-    kappa, kappa_half, kappa_next, w_left, w_right = (
-        ca.MX.sym(name) for name in ("kappa", "kappa_half", "kappa_next", "w_left", "w_right")
+    kappa, kappa_half, kappa_next, w_left, w_right, ds = (
+        ca.MX.sym(name) for name in ("kappa", "kappa_half", "kappa_next", "w_left", "w_right", "ds")
     )
     s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
 
@@ -392,8 +412,20 @@ def _build_stage_function(
         eps=s_dot_floor,
         smooth_eps=s_dot_smooth_eps,
     )
-    inputs = [x, u, kappa, kappa_half, kappa_next, w_left, w_right]
+    inputs = [x, u, kappa, kappa_half, kappa_next, w_left, w_right, ds]
     return ca.Function("stage", inputs, [x_next, ca.vertcat(*g), dt]).expand()
+
+
+def _ipopt_options(solver_verbose: bool) -> Dict:
+    return {
+        "ipopt.print_level": 5 if solver_verbose else 0,
+        "print_time": 1 if solver_verbose else 0,
+        "ipopt.sb": "yes",
+        "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
+        "ipopt.max_cpu_time": 600.0,  # fail fast rather than hang
+        "ipopt.mumps_pivot_order": 6,  # QAMD
+        "ipopt.mumps_scaling": 0,
+    }
 
 
 def build_ocp(
@@ -500,7 +532,7 @@ def build_ocp(
         psi_shift = x_shift[1]
 
     # One mapped call per vehicle model; brake-zone nodes get their own.
-    stage = _build_stage_function(model, f_space, eval_at_point, integrator, ds, use_normalization)
+    stage = _build_stage_function(model, f_space, eval_at_point, integrator, use_normalization)
     stage_groups: list[tuple[np.ndarray, ca.Function]] = [(np.ones(N - 1, dtype=bool), stage)]
     if brake_zone is not None:
         brake_stage = _build_stage_function(
@@ -508,7 +540,6 @@ def build_ocp(
             brake_zone.f_space,
             brake_zone.eval_at_point,
             integrator,
-            ds,
             use_normalization,
         )
         in_brake_zone = brake_zone.mask[: N - 1]
@@ -528,6 +559,7 @@ def build_ocp(
             kappa_param[nxt].T,
             w_left_param[idx].T,
             w_right_param[idx].T,
+            ca.DM.ones(1, len(idx)) * ds,
         )
         opti.subject_to(X[nxt, :].T == x_next)
         opti.subject_to(ca.vec(g) <= 0)
@@ -636,19 +668,7 @@ def build_ocp(
         for j in range(nu):
             opti.subject_to(opti.bounded(lbu[j], U[:, j], ubu[j]))
 
-    opti.solver(
-        "ipopt",
-        {
-            "ipopt.print_level": 5 if solver_verbose else 0,
-            "print_time": 1 if solver_verbose else 0,
-            "ipopt.sb": "yes",
-            "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
-            "ipopt.max_cpu_time": 600.0,  # fail fast rather than hang
-            "ipopt.mumps_pivot_order": 6,  # QAMD
-            "ipopt.mumps_scaling": 0,
-        },
-        {},
-    )
+    opti.solver("ipopt", _ipopt_options(solver_verbose), {})
 
     return BuiltOcp(
         opti,
@@ -669,61 +689,19 @@ def build_ocp(
     )
 
 
-def solve_ocp_and_save(
+def _solve_symbolic(
     track: Dict,
     model: VehicleModel,
+    integrator: SpaceIntegrator,
     solution_path: Path,
-    integrator: SpaceIntegrator | None = None,
-    initial_speed: float = 5.0,
-    reg_du: float | Sequence[float] | np.ndarray | None = None,
-    reg_u_l2: float | Sequence[float] | np.ndarray | None = None,
-    run_config: Dict | None = None,
-    use_normalization: bool = True,
-    solver_verbose: bool = False,
-    boundary_margin: float = 0.0,
-    mode: str = "trackdrive",
-    time_weights: np.ndarray | None = None,
-    terminal_speed: float | None = None,
-    enforce_terminal_constraints: bool = True,
-    autox_timing_offset_m: float | None = None,
-    initial_guess: Dict[str, np.ndarray] | None = None,
-    terminal_straight_m: float | None = None,
-    terminal_state_constraint: bool = False,
-    terminal_window_nodes: int = 2,
-    D_safe_braking: float | None = None,
-) -> Dict:
-    """
-    Build and solve OCP, then save solution to JSON.
-
-    Parameters
-    ----------
-    track : dict
-        Track data with widths (from load_track_with_widths).
-    model : VehicleModel
-        Vehicle model instance.
-    solution_path : Path
-        Path to save solution JSON.
-    integrator : SpaceIntegrator, optional
-        Spatial integrator. Defaults to EulerIntegrator().
-    initial_speed : float
-        Initial speed guess (m/s). Default: 5.0.
-    reg_du : float or array-like, optional
-        Input rate-regularization weight(s). If one scalar is given
-        make isotropic matrix.
-    initial_guess : dict, optional
-        ``{"X": (N, nx), "U": (N, nu)}`` in the same units the solver uses
-        (normalised when ``use_normalization``). Replaces the default
-        centreline / constant-speed guess, which is what makes margin
-        continuation possible on corridors too tight to start from d = 0.
-
-    Returns
-    -------
-    dict
-        Solution dictionary (same as saved JSON).
-    """
-    if integrator is None:
-        integrator = EulerIntegrator()
-
+    x0_phys: np.ndarray,
+    initial_guess: Dict[str, np.ndarray] | None,
+    reg_du: float | Sequence[float] | np.ndarray | None,
+    use_normalization: bool,
+    solver_verbose: bool,
+    problem: Dict,
+) -> "_SolveResult":
+    """IPOPT with CasADi's own derivatives of the Opti problem from ``build_ocp``."""
     (
         opti,
         X,
@@ -739,25 +717,13 @@ def solve_ocp_and_save(
         model,
         integrator=integrator,
         reg_du=reg_du,
-        reg_u_l2=reg_u_l2,
         use_normalization=use_normalization,
         solver_verbose=solver_verbose,
-        boundary_margin=boundary_margin,
-        mode=mode,
-        time_weights=time_weights,
-        terminal_speed=terminal_speed,
-        enforce_terminal_constraints=enforce_terminal_constraints,
-        terminal_straight_m=terminal_straight_m,
-        terminal_state_constraint=terminal_state_constraint,
-        terminal_window_nodes=terminal_window_nodes,
-        D_safe_braking=D_safe_braking,
+        **problem,
     )
 
     reduced_names = model.reduced_state_names()
-    N = len(track["arc_lengths"])
-    x0_phys = np.zeros(model.nx_reduced)
     v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
-    x0_phys[v_idx] = initial_speed
 
     if use_normalization:
         x0_norm = model.reduced_state_phys_to_norm(x0_phys)
@@ -773,7 +739,7 @@ def solve_ocp_and_save(
     else:
         opti.set_initial(X, 0)
         opti.set_initial(U, 0)
-        opti.set_initial(X[:, v_idx], initial_speed)
+        opti.set_initial(X[:, v_idx], x0_phys[v_idx])
 
     if initial_guess is not None:
         if "X" in initial_guess:
@@ -853,23 +819,268 @@ def solve_ocp_and_save(
     solve_time_s = time.perf_counter() - start_time
 
     stats = opti.stats()
-    iter_count = stats.get("iter_count")
-    return_status = stats.get("return_status")
+    return _SolveResult(
+        X=np.array(sol.value(X)),
+        U=np.array(sol.value(U)),
+        obj_val=float(sol.value(obj)),
+        lap_time_s=float(sol.value(total_time_expr)),
+        timed_time_s=float(sol.value(timed_time_expr)),
+        pure_timed_s=(
+            float(sol.value(pure_timed_expr)) if problem["time_weights"] is not None else 0.0
+        ),
+        time_at_node_s=np.asarray(sol.value(cumulative_time_expr), dtype=np.float64).reshape(-1),
+        iter_count=stats.get("iter_count"),
+        return_status=stats.get("return_status"),
+        solve_time_s=solve_time_s,
+    )
 
-    X_sol = np.array(sol.value(X))
-    U_sol = np.array(sol.value(U))
-    obj_val = float(sol.value(obj))
-    lap_time_s = float(sol.value(total_time_expr))
-    timed_time_s = float(sol.value(timed_time_expr))
-    pure_timed_s = float(sol.value(pure_timed_expr)) if time_weights is not None else 0.0
+
+def _solve_stagewise(
+    track: Dict,
+    model: VehicleModel,
+    integrator: SpaceIntegrator,
+    solution_path: Path,
+    x0_phys: np.ndarray,
+    initial_guess: Dict[str, np.ndarray] | None,
+    reg_du: float | Sequence[float] | np.ndarray | None,
+    use_normalization: bool,
+    solver_verbose: bool,
+    solver: str,
+    derivatives: str,
+    problem: Dict,
+) -> "_SolveResult":
+    """The same OCP, stage by stage, with derivatives compiled per stage."""
+    from fast_lto.optimization import stage_fatrop, stage_ipopt
+    from fast_lto.optimization.stage_problem import build_stage_problem
+
+    if derivatives != "compiled":
+        raise ValueError(f"solver={solver!r} needs derivatives='compiled'.")
+    if not use_normalization:
+        raise ValueError("Stage-wise solvers require normalised states and inputs.")
+    if np.any(_per_input_weights(reg_du, model.nu, "reg_du", default=1e-4) != 0.0):
+        raise ValueError(
+            "The input-rate penalty (reg_u) couples neighbouring stages, which the "
+            "stage-wise solvers do not support. Set reg_u: 0, or use "
+            "solver='ipopt' with derivatives='symbolic'."
+        )
+
+    x0 = np.asarray(model.reduced_state_phys_to_norm(x0_phys)).reshape(-1)
+    stages = build_stage_problem(track, model, integrator, x0=x0, **problem)
+    N, nx, nu = stages.N, stages.nx, stages.nu
+    names = model.reduced_state_names()
+    v_idx = names.index("v") if "v" in names else names.index("v_long")
+    X0: np.ndarray = np.zeros((N, nx))
+    X0[:, v_idx] = x0[v_idx]
+    U0: np.ndarray = np.zeros((N, nu))
+    if initial_guess is not None:
+        X0 = np.asarray(initial_guess.get("X", X0), dtype=float)
+        U0 = np.asarray(initial_guess.get("U", U0), dtype=float)
+
+    if solver == "fatrop":
+        out = stage_fatrop.solve(stages, X0, U0, {"max_iter": 3000}, verbose=solver_verbose)
+    else:
+        out = stage_ipopt.solve(stages, X0, U0, _ipopt_options(solver_verbose))
+
+    if not out.success:
+        debug_path = solution_path.with_name(f"{solution_path.stem}_debug_failure.json")
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_path.write_text(
+            json.dumps(
+                {
+                    "solver": solver,
+                    "return_status": out.return_status,
+                    "iter_count": out.iter_count,
+                    "solve_time_s": out.solve_time_s,
+                    "state_names": names,
+                    "input_names": model.get_input_names(),
+                    "X_debug": out.X.tolist(),
+                    "U_debug": out.U.tolist(),
+                },
+                indent=2,
+            )
+        )
+        print(f"OCP solve failed ({solver}): {out.return_status}", file=sys.stderr, flush=True)
+        print(f"  Debug snapshot saved to: {debug_path}", file=sys.stderr, flush=True)
+        raise RuntimeError(f"{solver} failed: {out.return_status}")
+
+    dt = stages.evaluate_dt(out.X, out.U)
+    reg = _per_input_weights(problem["reg_u_l2"], nu, "reg_u_l2", default=0.0)
+    time_weights = problem["time_weights"]
+    total = float(dt.sum())
+    if time_weights is not None:
+        tw = np.asarray(time_weights, dtype=float)[: N - 1]
+        timed = float(tw @ dt)
+        pure = float(dt[tw >= 1.0 - 1e-9].sum())
+    else:
+        timed, pure = total, 0.0
+    return _SolveResult(
+        X=out.X,
+        U=out.U,
+        obj_val=timed + float(np.sum(reg * np.sum(out.U**2, axis=0))),
+        lap_time_s=total,
+        timed_time_s=timed,
+        pure_timed_s=pure,
+        time_at_node_s=np.concatenate([[0.0], np.cumsum(dt)]),
+        iter_count=out.iter_count,
+        return_status=out.return_status,
+        solve_time_s=out.solve_time_s,
+    )
+
+
+def prepare_stage_solver(
+    track: Dict,
+    model: VehicleModel,
+    integrator: SpaceIntegrator,
+    solver: str,
+    initial_speed: float = 5.0,
+    **problem: Any,
+) -> Path:
+    """Compile the per-stage derivatives ``solve_ocp_and_save`` would use, without solving.
+
+    The library depends on the model, its parameters, ``ds`` and the event, not
+    on the track, so one build serves every track with the same settings.
+    """
+    from fast_lto.optimization import stage_fatrop, stage_ipopt
+    from fast_lto.optimization.stage_problem import build_stage_problem
+
+    x0_phys = np.zeros(model.nx_reduced)
+    names = model.reduced_state_names()
+    x0_phys[names.index("v") if "v" in names else names.index("v_long")] = initial_speed
+    x0 = np.asarray(model.reduced_state_phys_to_norm(x0_phys)).reshape(-1)
+    stages = build_stage_problem(track, model, integrator, x0=x0, **problem)
+    if solver == "fatrop":
+        return stage_fatrop.prepare(stages)[1].path
+    return stage_ipopt.prepare(stages).path
+
+
+def solve_ocp_and_save(
+    track: Dict,
+    model: VehicleModel,
+    solution_path: Path,
+    integrator: SpaceIntegrator | None = None,
+    initial_speed: float = 5.0,
+    reg_du: float | Sequence[float] | np.ndarray | None = None,
+    reg_u_l2: float | Sequence[float] | np.ndarray | None = None,
+    run_config: Dict | None = None,
+    use_normalization: bool = True,
+    solver_verbose: bool = False,
+    boundary_margin: float = 0.0,
+    mode: str = "trackdrive",
+    time_weights: np.ndarray | None = None,
+    terminal_speed: float | None = None,
+    enforce_terminal_constraints: bool = True,
+    autox_timing_offset_m: float | None = None,
+    initial_guess: Dict[str, np.ndarray] | None = None,
+    terminal_straight_m: float | None = None,
+    terminal_state_constraint: bool = False,
+    terminal_window_nodes: int = 2,
+    D_safe_braking: float | None = None,
+    solver: str = "ipopt",
+    derivatives: str = "symbolic",
+) -> Dict:
+    """
+    Build and solve OCP, then save solution to JSON.
+
+    Parameters
+    ----------
+    track : dict
+        Track data with widths (from load_track_with_widths).
+    model : VehicleModel
+        Vehicle model instance.
+    solution_path : Path
+        Path to save solution JSON.
+    integrator : SpaceIntegrator, optional
+        Spatial integrator. Defaults to EulerIntegrator().
+    initial_speed : float
+        Initial speed guess (m/s). Default: 5.0.
+    reg_du : float or array-like, optional
+        Input rate-regularization weight(s). If one scalar is given
+        make isotropic matrix.
+    initial_guess : dict, optional
+        ``{"X": (N, nx), "U": (N, nu)}`` in the same units the solver uses
+        (normalised when ``use_normalization``). Replaces the default
+        centreline / constant-speed guess, which is what makes margin
+        continuation possible on corridors too tight to start from d = 0.
+    solver, derivatives : str
+        ``"ipopt"`` / ``"symbolic"`` solves the Opti problem from
+        ``build_ocp``. ``derivatives="compiled"`` solves the same problem stage
+        by stage with per-stage derivatives compiled to C, with IPOPT or
+        FATROP (FATROP needs ``"compiled"``).
+
+    Returns
+    -------
+    dict
+        Solution dictionary (same as saved JSON).
+    """
+    if integrator is None:
+        integrator = EulerIntegrator()
+    if solver not in SOLVERS:
+        raise ValueError(f"Unknown solver: {solver!r}. Must be one of {list(SOLVERS)}.")
+    if derivatives not in DERIVATIVES:
+        raise ValueError(
+            f"Unknown derivatives: {derivatives!r}. Must be one of {list(DERIVATIVES)}."
+        )
+
+    reduced_names = model.reduced_state_names()
+    v_idx = reduced_names.index("v") if "v" in reduced_names else reduced_names.index("v_long")
+    x0_phys = np.zeros(model.nx_reduced)
+    x0_phys[v_idx] = initial_speed
+    problem = dict(
+        reg_u_l2=reg_u_l2,
+        boundary_margin=boundary_margin,
+        mode=mode,
+        time_weights=time_weights,
+        terminal_speed=terminal_speed,
+        enforce_terminal_constraints=enforce_terminal_constraints,
+        terminal_straight_m=terminal_straight_m,
+        terminal_state_constraint=terminal_state_constraint,
+        terminal_window_nodes=terminal_window_nodes,
+        D_safe_braking=D_safe_braking,
+    )
+    if solver == "ipopt" and derivatives == "symbolic":
+        result = _solve_symbolic(
+            track,
+            model,
+            integrator,
+            solution_path,
+            x0_phys,
+            initial_guess,
+            reg_du,
+            use_normalization,
+            solver_verbose,
+            problem,
+        )
+    else:
+        result = _solve_stagewise(
+            track,
+            model,
+            integrator,
+            solution_path,
+            x0_phys,
+            initial_guess,
+            reg_du,
+            use_normalization,
+            solver_verbose,
+            solver,
+            derivatives,
+            problem,
+        )
+
+    X_sol, U_sol = result.X, result.U
+    obj_val = result.obj_val
+    lap_time_s = result.lap_time_s
+    timed_time_s = result.timed_time_s
+    pure_timed_s = result.pure_timed_s if time_weights is not None else 0.0
+    iter_count = result.iter_count
+    return_status = result.return_status
+    solve_time_s = result.solve_time_s
     reg_term = obj_val - timed_time_s
 
     autox_lap_time_s: float | None = None
     autox_timing_warning: str | None = None
     if autox_timing_offset_m is not None:
-        time_at_node_s = np.asarray(sol.value(cumulative_time_expr), dtype=np.float64).reshape(-1)
         autox_lap_time_s, autox_timing_warning = _autox_gate_lap_time(
-            track, time_at_node_s, float(autox_timing_offset_m)
+            track, result.time_at_node_s, float(autox_timing_offset_m)
         )
 
     N = len(track["arc_lengths"])
@@ -879,7 +1090,7 @@ def solve_ocp_and_save(
         else float(track.get("ds_m", 0.0))
     )
     time_per_point_ms = solve_time_s / N * 1e3 if N > 0 else None
-    time_per_iter_ms = solve_time_s / iter_count * 1e3 if iter_count not in (None, 0) else None
+    time_per_iter_ms = solve_time_s / iter_count * 1e3 if iter_count else None
 
     print(f"Solved full-lap OCP.  Objective value: {obj_val:.2f}")
     print(f"  Full-maneuver time: {lap_time_s:.2f} s")
@@ -903,7 +1114,7 @@ def solve_ocp_and_save(
         f"Solve stats: N={N}, ds={ds_m:.3f} m, "
         f"time={solve_time_s:.3f} s, "
         f"iters={iter_count if iter_count is not None else 'N/A'}, "
-        f"status={return_status}"
+        f"status={return_status}, solver={solver}/{derivatives}"
     )
     if use_normalization:
         x_scale, x_shift = model.get_reduced_state_scaling()
@@ -951,6 +1162,8 @@ def solve_ocp_and_save(
         "profiling": {
             "N": N,
             "ds_m": ds_m,
+            "solver": solver,
+            "derivatives": derivatives,
             "solve_time_s": solve_time_s,
             "iter_count": iter_count,
             "return_status": return_status,

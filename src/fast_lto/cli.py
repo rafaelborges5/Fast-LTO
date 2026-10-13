@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fast_lto.modes import MODE_NAMES
-from fast_lto.pipeline import TRACK_TYPES, run_pipeline
+from fast_lto.optimization.global_ocp import DERIVATIVES, SOLVERS
+from fast_lto.pipeline import STEP_ORDER, TRACK_TYPES, run_pipeline, step_prebuild_solver
 
 if TYPE_CHECKING:
     from fast_lto.config import RunConfig
@@ -33,6 +34,8 @@ _VALUE_OVERRIDES = {
     "boundary_margin": "boundary_margin",
     "warm_start_seed": "warm_start_seed",
     "reg_u_l2": "reg_u_l2",
+    "solver": "solver",
+    "derivatives": "derivatives",
     "savgol_bounds": "use_savgol_bounds",
 }
 
@@ -272,6 +275,26 @@ Examples:
         help="Spatial integrator. Default: euler",
     )
     parser.add_argument(
+        "--solver",
+        type=str,
+        choices=list(SOLVERS),
+        default=None,
+        help="NLP solver. fatrop needs --derivatives compiled. Default: ipopt",
+    )
+    parser.add_argument(
+        "--derivatives",
+        type=str,
+        choices=list(DERIVATIVES),
+        default=None,
+        help="symbolic: CasADi differentiates the NLP. compiled: per-stage, in C. "
+        "Default: symbolic",
+    )
+    parser.add_argument(
+        "--prebuild",
+        action="store_true",
+        help="Compile the per-stage derivatives for this config and exit (no solve).",
+    )
+    parser.add_argument(
         "--reg-u",
         type=float,
         default=None,
@@ -400,6 +423,13 @@ def main() -> None:
     if args.end_at:
         print(f"  End at: {args.end_at}")
     print()
+
+    if args.prebuild:
+        # Only the discretised track is needed; skip steps that already ran.
+        if STEP_ORDER.index(args.start_from) <= STEP_ORDER.index("bounds"):
+            run_pipeline(config=config, start_from=args.start_from, end_at="bounds")
+        step_prebuild_solver(config)
+        return
 
     results = run_pipeline(
         config=config,
