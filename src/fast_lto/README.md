@@ -94,11 +94,12 @@ smoothness tricks, warm starts, and terminal regions:
 
 ### Solve (CasADi + IPOPT)
 
-CasADi builds the NLP and IPOPT solves it. A warm start — a previous solution,
-or a margin ladder when the centreline guess is infeasible — usually brings a
-full four-wheel lap down from several minutes cold to under one. The written
-artifact is a solution JSON with states, inputs, geometry, and the run config
-that produced them.
+CasADi builds the NLP and IPOPT solves it. A full four-wheel lap at
+`ds = 0.5` m takes on the order of ten seconds when the centreline guess is
+feasible. On tight corridors a warm start — a previous solution, or a margin
+ladder — is what makes it converge, and the solve can take a minute or two.
+The written artifact is a solution JSON with states, inputs, geometry, and the
+run config that produced them.
 
 ![IPOPT objective and lap-time convergence](../../docs/pipeline_ocp_convergence.png)
 

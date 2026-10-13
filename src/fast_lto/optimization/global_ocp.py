@@ -332,6 +332,70 @@ def _constraint_eval_points(
     return points
 
 
+def _build_stage_function(
+    model: VehicleModel,
+    f_space: Callable,
+    eval_at_point: Callable,
+    integrator: SpaceIntegrator,
+    ds: float,
+    use_normalization: bool,
+) -> ca.Function:
+    """One interval as an SX function ``(x, u, kappa, kappa_half, kappa_next, w_left, w_right)``.
+
+    Returns ``(x_next, g, dt)`` with ``g <= 0`` holding the model and corridor
+    inequalities at node ``i``.
+    """
+    x = ca.MX.sym("x", model.nx_reduced)
+    u = ca.MX.sym("u", model.nu)
+    kappa, kappa_half, kappa_next, w_left, w_right = (
+        ca.MX.sym(name) for name in ("kappa", "kappa_half", "kappa_next", "w_left", "w_right")
+    )
+    s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
+
+    x_next = integrator.step(f_space, x, u, kappa, ds, kappa_half=kappa_half, kappa_next=kappa_next)
+
+    g: list[ca.MX] = []
+    for x_c, kappa_c in _constraint_eval_points(
+        integrator, f_space, x, u, kappa, ds, kappa_half=kappa_half, kappa_next=kappa_next
+    ):
+        if use_normalization:
+            g += model.get_constraints_normalized(x_c, u, kappa_c)
+        else:
+            full_state, _ = eval_at_point(x_c, u, kappa_c)
+            g += model.get_constraints(full_state, u, kappa_c)
+
+    if use_normalization:
+        x_scale, x_shift = model.get_reduced_state_scaling()
+        if x_scale is None or x_shift is None:
+            raise RuntimeError("Normalization scales not defined.")
+        d_phys = x[0] * x_scale[0] + x_shift[0]
+        psi_phys = x[1] * x_scale[1] + x_shift[1]
+        lb_d = (-w_right - x_shift[0]) / x_scale[0]
+        ub_d = (w_left - x_shift[0]) / x_scale[0]
+    else:
+        d_phys, psi_phys = x[0], x[1]
+        lb_d, ub_d = -w_right, w_left
+    if model.get_corner_offsets():
+        g += model.get_corner_constraints(d_phys, psi_phys, kappa, w_left, w_right)
+    else:
+        g += [lb_d - x[0], x[0] - ub_d]
+
+    dt = integrator.time_step(
+        f_space,
+        eval_at_point,
+        x,
+        u,
+        kappa,
+        ds,
+        kappa_half=kappa_half,
+        kappa_next=kappa_next,
+        eps=s_dot_floor,
+        smooth_eps=s_dot_smooth_eps,
+    )
+    inputs = [x, u, kappa, kappa_half, kappa_next, w_left, w_right]
+    return ca.Function("stage", inputs, [x_next, ca.vertcat(*g), dt]).expand()
+
+
 def build_ocp(
     track: Dict,
     model: VehicleModel,
@@ -415,7 +479,6 @@ def build_ocp(
         f_space, eval_at_point = build_space_dynamics_normalized(model)
     else:
         f_space, eval_at_point = build_space_dynamics(model)
-    s_dot_floor, s_dot_smooth_eps = _s_dot_guard_params(model)
 
     brake_zone: _BrakeZone | None = None
     if mode == "autox" and D_safe_braking is not None:
@@ -425,12 +488,6 @@ def build_ocp(
         if brake_zone is not None and brake_zone.mask[i]:
             return brake_zone.model, brake_zone.f_space, brake_zone.eval_at_point
         return model, f_space, eval_at_point
-
-    total_time = 0
-    timed_time = 0
-    pure_timed_time = 0
-    # Per node, so a gate-to-gate time can be measured after the solve.
-    cumulative_time = [total_time]
 
     use_corner_constraints = len(model.get_corner_offsets()) > 0
     if use_normalization:
@@ -442,86 +499,48 @@ def build_ocp(
         psi_scale = x_scale[1]
         psi_shift = x_shift[1]
 
-    for i in range(N - 1):
-        x_i = X[i, :].T
-        u_i = U[i, :].T
-        kappa_i = kappa_param[i]
-        kappa_half_i = kappa_half_param[i]
-        kappa_next_i = kappa_param[i + 1]
-        model_i, f_space_i, eval_at_point_i = _node_model(i)
-
-        x_next = integrator.step(
-            f_space_i,
-            x_i,
-            u_i,
-            kappa_i,
-            ds,
-            kappa_half=kappa_half_i,
-            kappa_next=kappa_next_i,
-        )
-        opti.subject_to(X[i + 1, :].T == x_next)
-
-        for x_c, kappa_c in _constraint_eval_points(
+    # One mapped call per vehicle model; brake-zone nodes get their own.
+    stage = _build_stage_function(model, f_space, eval_at_point, integrator, ds, use_normalization)
+    stage_groups: list[tuple[np.ndarray, ca.Function]] = [(np.ones(N - 1, dtype=bool), stage)]
+    if brake_zone is not None:
+        brake_stage = _build_stage_function(
+            brake_zone.model,
+            brake_zone.f_space,
+            brake_zone.eval_at_point,
             integrator,
-            f_space_i,
-            x_i,
-            u_i,
-            kappa_i,
             ds,
-            kappa_half=kappa_half_i,
-            kappa_next=kappa_next_i,
-        ):
-            if use_normalization:
-                g_list = model_i.get_constraints_normalized(x_c, u_i, kappa_c)
-            else:
-                full_state, _ = eval_at_point_i(x_c, u_i, kappa_c)
-                g_list = model_i.get_constraints(full_state, u_i, kappa_c)
-            for g in g_list:
-                opti.subject_to(g <= 0)
-
-        if use_corner_constraints:
-            if use_normalization:
-                d_phys_i = x_i[0] * d_scale + d_shift
-                psi_phys_i = x_i[1] * psi_scale + psi_shift
-            else:
-                d_phys_i = x_i[0]
-                psi_phys_i = x_i[1]
-            for g in model.get_corner_constraints(
-                d_phys_i,
-                psi_phys_i,
-                kappa_i,
-                w_left_param[i],
-                w_right_param[i],
-            ):
-                opti.subject_to(g <= 0)
-        elif use_normalization:
-            ub_d_norm = (w_left_param[i] - d_shift) / d_scale
-            lb_d_norm = (-w_right_param[i] - d_shift) / d_scale
-            opti.subject_to(lb_d_norm <= x_i[0])
-            opti.subject_to(x_i[0] <= ub_d_norm)
-        else:
-            opti.subject_to(-w_right_param[i] <= x_i[0])
-            opti.subject_to(x_i[0] <= w_left_param[i])
-
-        dt_i = integrator.time_step(
-            f_space_i,
-            eval_at_point_i,
-            x_i,
-            u_i,
-            kappa_i,
-            ds,
-            kappa_half=kappa_half_i,
-            kappa_next=kappa_next_i,
-            eps=s_dot_floor,
-            smooth_eps=s_dot_smooth_eps,
+            use_normalization,
         )
-        total_time += dt_i
-        cumulative_time.append(total_time)
-        if time_weights is not None:
-            w_i = float(time_weights[i])
-            timed_time += w_i * dt_i
-            if w_i >= 1.0 - 1e-9:
-                pure_timed_time += dt_i
+        in_brake_zone = brake_zone.mask[: N - 1]
+        stage_groups = [(~in_brake_zone, stage), (in_brake_zone, brake_stage)]
+
+    dt = ca.MX(N - 1, 1)
+    for nodes, stage_fn in stage_groups:
+        idx = np.flatnonzero(nodes).tolist()
+        if not idx:
+            continue
+        nxt = [i + 1 for i in idx]
+        x_next, g, dt_nodes = stage_fn.map(len(idx))(
+            X[idx, :].T,
+            U[idx, :].T,
+            kappa_param[idx].T,
+            kappa_half_param[idx].T,
+            kappa_param[nxt].T,
+            w_left_param[idx].T,
+            w_right_param[idx].T,
+        )
+        opti.subject_to(X[nxt, :].T == x_next)
+        opti.subject_to(ca.vec(g) <= 0)
+        dt[idx] = dt_nodes.T
+
+    total_time = ca.sum1(dt)
+    # Per node, so a gate-to-gate time can be measured after the solve.
+    cumulative_time = ca.vertcat(0, ca.cumsum(dt))
+    timed_time = 0
+    pure_timed_time = 0
+    if time_weights is not None:
+        timed_time = ca.dot(ca.DM(time_weights), dt)
+        pure_timed_time = ca.dot(ca.DM((time_weights >= 1.0 - 1e-9).astype(float)), dt)
 
     if use_corner_constraints:
         x_last = X[N - 1, :].T
@@ -625,6 +644,8 @@ def build_ocp(
             "ipopt.sb": "yes",
             "ipopt.nlp_scaling_method": "none",  # IPOPT internal scaling deactivated
             "ipopt.max_cpu_time": 600.0,  # fail fast rather than hang
+            "ipopt.mumps_pivot_order": 6,  # QAMD
+            "ipopt.mumps_scaling": 0,
         },
         {},
     )
@@ -644,7 +665,7 @@ def build_ocp(
         total_time,
         objective_time,
         pure_timed_time,
-        ca.vertcat(*cumulative_time),
+        cumulative_time,
     )
 
 

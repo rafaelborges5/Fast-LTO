@@ -37,7 +37,9 @@ Optionally:
   optional friction ellipse.
 - **`four_wheel`** — per-wheel Pacejka, aero, load transfer, torque vectoring;
   wheel forces and steering are states; inputs are their rates (`dFxmax`,
-  `ddeltamax`). Originally developed by
+  `ddeltamax`). Quasi-static loads come from a 4x4 linear system that is
+  block lower-triangular, so it is solved in closed form (front pair, then
+  rear pair). Originally developed by
   [Tanmay Ganguli](https://github.com/TanmayGanguli09). This is the model AMZ
   used for most of the 2026 season; `point_mass` and `dynamic_bicycle` were
   mostly development aids.

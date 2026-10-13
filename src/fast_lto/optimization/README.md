@@ -22,6 +22,20 @@ encoded by the grid) and the input `U` at every node.
 States and inputs are mapped to roughly `[-1, 1]` from their physical bounds;
 IPOPT's own scaling is off. Bounds must be finite.
 
+## Building the NLP
+
+One interval — integrator step, model and corridor constraints, and `dt` — is
+written once as a CasADi function and expanded to SX. `build_ocp` applies it
+to all nodes in a single `map` call, with a second map for brake-zone nodes.
+The NLP graph therefore holds one call per vehicle model instead of `N` copies
+of it, which keeps the build under a second and makes derivatives cheap to
+evaluate. Model code must stay expandable: no MX-only operations such as a
+symbolic `ca.solve`.
+
+Solver settings: MUMPS with QAMD ordering and its own scaling off (about 30%
+less time in the linear solves), and OpenBLAS limited to one thread, set in
+`fast_lto/__init__.py` unless `OPENBLAS_NUM_THREADS` is already defined.
+
 ## Smoothness
 
 Hard `max` operations that appear in the physics — flooring `ṡ` in a
@@ -36,7 +50,7 @@ would map both sides onto the same one).
 
 ## The terminal region
 
-- **Final-node constraints.** The node loop applies model constraints for
+- **Final-node constraints.** The stage function applies model constraints for
   `i < N-1` only. With `terminal_speed`, those constraints are reapplied at
   `X[N-1]` (needed when friction limits depend on persistent state, e.g.
   four-wheel tyre forces). Trackdrive omits the repeat: the closed-loop
