@@ -53,6 +53,12 @@ Measured on a four-wheel lap at `ds = 0.5` m, single-threaded, library cached:
 | autox, 723 nodes | 8.2 s | 2.5 s | 0.9 s |
 | trackdrive, 800 nodes | 9.0 s | 2.2 s | 1.1 s |
 
+Before these changes the same trackdrive lap took 124 s, most of it spent
+building the NLP and deriving its Jacobian and Hessian. Each step moved the
+bottleneck, ending in linear algebra:
+
+![Solve time by optimisation step, fsg_legal_0](../../../docs/solve_time_by_step.png)
+
 **Stage-wise problem.** `stage_problem.py` restates `build_ocp` stage by stage:
 stage `k` owns `x_k` and `u_k`, and everything else it needs — curvatures,
 widths, time weight, launch state — is a per-stage parameter vector. Stages

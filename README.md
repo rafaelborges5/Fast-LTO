@@ -5,8 +5,8 @@
 A minimum-time (lap-time optimal) trajectory planner for Formula Student
 Driverless, developed for AMZ Racing in the 2025–2026 season. The four-wheel
 vehicle model was formulated by
-[Tanmay Ganguli](https://github.com/TanmayGanguli09). Fast-LTO is offline: it
-was used in
+[Tanmay Ganguli](https://github.com/TanmayGanguli09). Fast-LTO was run
+offline: it was used in
 [testing](https://www.instagram.com/p/Db3sxF-NIvX/), and in the second lap
 of autocross at
 [FSG 2026](https://www.youtube.com/watch?v=5PzdREZ0Ams&t=13914s), and later for
@@ -26,8 +26,11 @@ proxy for the true objective, which is minimum time.
 
 We invested in a planner that solves that objective directly for disciplines
 where a global map exists and computational efficiency is not critical — that
-is, skidpad and the second lap of autocross. With some simplifications,
-minimum-time planning can also be pushed close to real time.
+is, skidpad and the second lap of autocross. With the stage-wise FATROP solver
+and compiled derivatives, a full four-wheel lap now solves in about a second
+on a laptop. That is fast enough to plan on the car once the map is complete,
+which opens trackdrive from the second lap onwards, though not to run at
+control rate.
 
 On the same vehicle model we use in our MPC, the minimum-time reference
 outperformed the decoupled one, especially when the controller was still
